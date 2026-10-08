@@ -1,0 +1,94 @@
+# Pico Reader
+
+[简体中文](README.zh-CN.md) · [日本語](README.ja-JP.md) · [Third-party notices](THIRD_PARTY_NOTICES.md)
+
+An independent, open-source reading firmware for the **MindReset Read Pico (RDP-G01-W)** ESP32-S3 e-paper board. It is based on [MindReset's official demo firmware](https://github.com/MindReset/read_pico_firmware), but is **not an official MindReset release**.
+
+The current interface has Home, Bookshelf, Files, and Settings. It reads EPUB and TXT books from a TF card, remembers reading progress, and supports Wi-Fi, hotspot, or USB file transfer. The online flasher installs the same firmware image as the local `flash/` bundle.
+
+## Current release: rc88
+
+This release improves startup recovery and cover-cache memory use, restores reading after deep sleep, adds custom middle-hold actions and protects the Tools entry. Tickets use the system font; home and reader titles reuse their respective active fonts at native sizes. USB, TF and OTA share one build and short device notes. rc87 is withdrawn; original rc85/rc86 releases remain selectable. See the [changelog](docs/CHANGELOG.md).
+
+## Main refresh and reader controls
+
+Settings → Display → Main refresh mode offers ordinary, fast and water, defaulting to ordinary. Ordinary/water retain grays; fast uses monochrome covers and fine checkerboard acrylic. Four main screens retain navigation icons/labels and locally move the selection marker. Navigation feedback preserves its gray background in all modes.
+
+Swipe down from the top edge to open the WiFi, Bluetooth, refresh and lock controls; swipe up, tap outside or press Back to close. WiFi connects the last saved network or disconnects it, unless a transfer is busy. Reader key controls offer custom actions and two presets. The default is Previous / Tools / Next; the second is Home / Full screen / Tools. A middle hold defaults to refresh and can also be mapped to Home or other actions. At least one of the three short presses or the middle hold must open Tools; startup and backup restoration repair a missing entry to middle-short Tools. Center double taps always toggle full screen, independently of mappings. Single taps use left/right halves or upper 1/3 / lower 2/3. New books open full screen; a page turn dismisses Tools and returns to full screen. These choices persist across reboot and configuration restore.
+
+The firmware checkpoints the book, position and full-screen state before lock, consuming deep-wake resume only once. Interrupted opening routes to an operable recovery page with the book name, Home and confirmed deletion, without automatic retries. Tickets always use the system face and restore the reader face on light wake. Quick controls retain grayscale borders in all main modes. Fast mode retains only BW covers; ordinary/water retain only gray covers and free obsolete formats on a policy change. Home resume titles reuse the active system face at 40px; reader book/chapter titles reuse the reader face at 32/48px. Outlines rasterize directly without additional built-in fonts or simultaneously loading system and reader faces; unavailable faces retain the safe built-in missing-glyph fallback. These changes are included in rc88.
+
+## Keyboard
+
+Rename, profile name, status signature, shelf search and WiFi password fields share one keyboard. T9 inputs Chinese Pinyin only; QWERTY supports Chinese/English and case switching. Digits are entered from the numeric panel only. Continuous Pinyin uses 488 offline common phrases, pageable homophones and continuations; select a candidate before saving. Tap text or caret arrows to insert and delete in the middle. Holding backspace for half a second repeats deletion, removing pending Pinyin before text at the caret; release or move away to stop. Ordinary input/deletion refreshes changed regions only. After six candidate-strip changes, a 700 ms touch-free pause triggers one local grayscale settle; typing, held deletion and layout switches defer or cancel it. Keys darken/inset on press and restore on release. T9 More cycles through readings; homophones remain available across batches. The embedded black face covers all 6,763 GB2312 Han characters without a TF font package. WiFi passwords use ASCII QWERTY, digits and symbols. Both AP and STA web transfer pages can save or clear the persistent status signature (up to 95 UTF-8 bytes). These features are included in the rc86 release.
+
+## Online installation
+
+Select the latest release or the original **rc86 / rc85** build above the connection button. The publication time and TF-image download follow the selection. Ordinary installation keeps the preserve-data default for all versions.
+
+Visit the [HTTPS web flasher](https://wegooo-cell.github.io/read-pico-reader/). Use a desktop Chrome or Edge browser with a USB data cable. Select the Read Pico serial device and follow the prompts. **Check the board model before flashing.** Ordinary installation preserves the device's settings and reading records, as well as TF-card contents. It does not include books or sample reading history.
+
+If automatic entry to download mode fails on a device already running this firmware, open **Settings → Upgrade & restore → BOOT flashing** on the device, wait for the computer to detect its serial port again, then retry the web flasher.
+
+The release manifest is [`flash/manifest.json`](flash/manifest.json); it flashes the bootloader, partition table, application, and the OTA data partition. Existing NVS settings and the internal book partition are preserved. The site is published from an explicit allowlist in [`.github/workflows/pages.yml`](.github/workflows/pages.yml), so local books, backups, and extra font packages are not uploaded. See the [release changelog](docs/CHANGELOG.md).
+
+## Online updates
+
+Open **Settings → Upgrade & restore → System update → Check for updates** after connecting Wi-Fi. From rc84 onward, the update offer displays short release notes with Later and Start update buttons. Older versions can read the notes on the web flasher before updating to rc84.
+
+## Local TF-card updates
+
+Local updates require one complete computer installation of an OTA base build so the bootloader and dual-slot partition table are present. That migration keeps the existing settings, reading records, internal-storage addresses, and TF-card contents. Later, copy the application image to the TF-card root as `Pico-update.bin`, then open **Settings → Upgrade & restore → System update → TF-card update**.
+
+Pico checks the image project, version, size, and headers before writing the inactive firmware slot. It selects the new slot only after full image validation. If the new image resets before its first hardware and UI startup check succeeds, the bootloader returns to the previous slot. Keep power connected and the TF card inserted during installation. An application-only update cannot replace the initial OTA base installation and cannot change the bootloader or partition table.
+
+## Build from source
+
+Use ESP-IDF **v6.1** for ESP32-S3:
+
+```sh
+idf.py set-target esp32s3
+idf.py build
+```
+
+The board-specific flash and PSRAM timing is in `sdkconfig.defaults`. `sdkconfig.ci` is for compile checks only. Follow the [MindReset hardware documentation](https://dot.mindreset.tech/docs/read_0) for the board. A prebuilt firmware image is provided for the RDP-G01-W only.
+
+## Books and fonts
+
+On first mount, the firmware creates `books`, `fonts`, and `pictures` folders on the TF card if absent. No books are preloaded. The firmware embeds a subset of **Noto Sans SC Medium** for the system UI and distributes no additional font package. Users may place their own compatible fonts in `fonts` for reading. The embedded subset remains under the [SIL Open Font License](main/assets/OFL-Noto.txt).
+
+The “Covers and spines” bookshelf mode is labeled **experimental, not a formal release**. Other shelf styles remain available.
+
+TXT/EPUB books opened from any TF-card directory appear on the shelf after progress is saved, including on cached returns without a rescan. Bookshelf management → Remove from shelf hides selected books while keeping their files, progress, and favorites. Reading a removed book puts it back. Removal state persists and is included in configuration backups.
+
+TXT books and EPUB books without a valid embedded cover receive a deterministic grayscale cover shared by the shelf, home, and ticket lock screen. A valid EPUB cover takes priority. Generated covers are cached under `.readpico/covers` on the TF card and rebuilt when the file or title changes.
+
+In Reading settings → Typography, first-line indent can be set to 0, 1, 2, or 3 characters (2 by default). Body text is centered by whole-character columns to balance the side margins, and common Chinese punctuation is kept away from prohibited line starts and ends.
+
+Horizontal swipes turn reading pages in either tap-area mode. With vertical tap areas selected, vertical swipes also turn pages. Continuous punctuation groups stay together at line boundaries. Small JPG/PNG illustrations may share a page with surrounding text; large illustrations and image-only chapters keep their own pages.
+
+**Settings → Reading & device → Automatic lock** offers 1, 5, or 10 minutes of inactivity, or Off (default). Touch and button input restart the timer. Transfers and upgrades pause it. Automatic locking saves the current reading state and uses the existing light-sleep/deep-sleep lock behavior. This choice is included in settings backups.
+
+TF-card JPG/PNG files can be up to **50 MiB**, with source dimensions up to 8,192 pixels per side. They are read as streams rather than loaded entirely into memory; decoded output stays within one screen. Progressive JPEG uses the existing reduced-resolution DC decoder, and interlaced PNG remains unsupported. These TF-file limits do not change the EPUB image-resource limit below.
+
+To back up personal settings, open **Settings → Save & restore → Save to TF card**. The device writes `Pico-settings.backup` to the TF-card root. Put that file back at the root and choose **Restore from TF card** to recover fonts, typography, display and lock settings, profile and status signature, saved Wi-Fi name and password, book progress, reading time, bookmarks, favorites, custom book names, and shelf removals. Book, font, avatar, and wallpaper files remain on the TF card. The backup contains the Wi-Fi password in plaintext, so keep the TF card private. Missing external fonts and images fall back to built-in options. Older backups remain readable and leave the current network configuration unchanged.
+
+EPUB metadata is allocated for the actual book size. ZIP entries and chapters each have an 8,192-item limit; covers, images, and navigation also consume ZIP entries. A book may exceed 32 MB overall, while each XHTML resource remains limited to 4 MB and each decompressed image to 8 MB; available device memory and standard ZIP limits also apply.
+
+EPUB body chapters begin on a new page, keeping the title with the opening text when it fits. This also applies to recognized chapter headings within one XHTML resource. TOC links, introductory information and copyright metadata are excluded from body chapter detection; ordinary subheadings continue on the current page. Detection uses authored navigation, standalone numbered headings and body structure; books without reliable markers may still need individual compatibility fixes.
+
+## Licenses and credit
+
+The fork retains the upstream **Apache-2.0** license and notices. The UI icon set comes from **Lucide** under its **ISC** notice. The modified epdiy driver uses **LGPL-3.0-or-later**, and pypinyin dictionary data uses **MIT**. See [Third-party notices](THIRD_PARTY_NOTICES.md) and component directories for the exact scope; a component license does not change the license of the entire firmware.
+
+Please report firmware bugs in this repository, not in the MindReset upstream issue tracker. Hardware purchasing and repair remain matters for the [official support channels](https://dot.mindreset.tech/docs/contact).
+
+## Local rc76 transfer build
+
+File management groups its launchers as WiFi/hotspot, USB and WeRead transfer. WeRead uses saved internet WiFi for QR login, shelf sync and completed EPUB downloads into the SD books directory, with optional inline illustrations. The UI cancels and joins ongoing work before leaving, locking or losing SD media. Cloud progress is never uploaded. CrossMux and FreeInk SDK MIT notices accompany the native port. This is a local validation build; real account login/download and the reported hotspot reset still require device verification.
+
+### 微读书架多选下载
+
+在微信书架点「多选」，可跨页选择书籍或「全选本页」，再点「下载 N 本」进入批量下载页。每次只下载一本；取消、离页或锁屏会停止队列，已完成书籍保留。封面始终下载，正文插图可选；封面获取失败会提示重试。文件名使用微信书架的书名，仅替换文件系统禁用字符；每批最多选择 1024 本。单本详情返回微信书架，微信书架返回文件管理。
+
+Shake-to-turn is off by default and enabled in reader Font Settings. A horizontal left/right impulse turns to the previous/next page. Slow tilts, other axes, touch and rebounds are filtered; wait through an 800 ms cooldown and rest before the next gesture. Direction and sensitivity still need device validation. The global refresh test option is removed and ignored in older configurations.

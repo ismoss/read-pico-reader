@@ -1,0 +1,112 @@
+set(main_requires
+    read_pico
+    read_pico_transfer
+    pico_weread
+    read_pico_search
+    espressif__qrcode
+    espressif__esp_jpeg
+    # 渐进式 JPEG；基线仍走 esp_jpeg。/ Progressive JPEG; baseline stays on esp_jpeg.
+    jpegdec
+    espressif__libpng
+    espressif__zlib
+    espressif__esp_tinyusb
+    # BLE HID 主机（蓝牙翻页器）。本仓库开了 MINIMAL_BUILD，组件不进依赖图的话连它的
+    # Kconfig 都不会加载，sdkconfig.defaults 里的 CONFIG_BT_* 会被判为未知符号而丢弃。
+    # BLE HID host (Bluetooth page-turner). This tree sets MINIMAL_BUILD, so a component
+    # outside the dependency graph does not even load its Kconfig and the CONFIG_BT_*
+    # entries in sdkconfig.defaults are dropped as unknown symbols.
+    bt
+    # 蓝牙翻页器本体。/ The page-turner itself.
+    ble_page_turner
+    continuous_du
+    e0470_epaper_waveform
+    e0470_page_turn
+    read_pico_pmu
+    fatfs
+    wear_levelling
+    bootloader_support
+    spi_flash
+    heap
+    nvs_flash
+    esp_hw_support
+    esp_rom
+    esp_driver_gpio
+    esp_driver_usb_serial_jtag
+    esp_app_format
+    app_update
+    esp_http_client
+    mbedtls
+    espressif__cjson
+)
+idf_component_register(
+    SRCS
+        "app_main.c"
+        "boot_state.c"
+        "apps/app_boot_recovery.c"
+        "ota_update.c"
+        "ota_online.c"
+        "ota_release.c"
+        "display.c"
+        "display_main_waveform.c"
+        "sleep.c"
+        "settings.c"
+        "app/app_loop.c"
+        "app/app_registry.c"
+        "ui/ui_kit.c"
+        "ui/ui_text_edit.c"
+        "ui/ui_text_input.c"
+        "ui/ui_ime.c"
+        "ui/ui_keyboard.c"
+        "ui/ui_gesture.c"
+        "ui/ui_power_dialog.c"
+        "ui/ui_quick_menu.c"
+        "ui/ui_quick_menu_input.c"
+        "ui/ui_click_feedback.c"
+        "ui/ui_wifi_qr.c"
+        "ui/datamatrix.c"
+        "ui/ui_menu.c"
+        "ui/ui_nav.c"
+        "ui/ui_image_dither.c"
+        "ui/ui_wallpaper.c"
+        "apps/app_book.c"
+        "apps/book_toc.c"
+        "apps/app_dashboard.c"
+        "apps/app_files.c"
+        "apps/file_tree.c"
+        "apps/app_device_settings.c"
+        "apps/app_image.c"
+        "apps/app_transfer.c"
+        "apps/app_weread.c"
+        "apps/usb_storage.c"
+        "book/book_store.c"
+        "book/book_progress.c"
+        "book/book_history_backup.c"
+        "book/book_title.c"
+        "book/book_ticket.c"
+        "book/book_source.c"
+        "book/book_index_cache.c"
+        "book/book_txt.c"
+        "book/book_epub.c"
+        "book/book_cover.c"
+        "book/book_image_header.c"
+        "book/book_cover_auto.c"
+        "book/zip_reader.c"
+        "book/html_text.c"
+        "book/book_layout.c"
+        "book/gbk.c"
+        "font/ttf_font.c"
+        "font/app_font_context.c"
+        "font/ui_font.c"
+        "font/ui_hanzi.c"
+        "factory/pmu_selftest.c"
+        "factory/vcom_setup.c"
+    REQUIRES ${main_requires}
+    INCLUDE_DIRS "." "app" "apps" "font" "ui" "factory" "book"
+    EMBED_FILES
+        "assets/lock_4bpp.bin"
+        "assets/loading_4bpp.bin"
+        "assets/builtin.ttf"
+        "assets/ui-hanzi.bin"
+        "assets/reading.md"
+        "assets/display-test.png"
+)
