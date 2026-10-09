@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "version": "0.3.3-rc89",
+  "project": "Read_Pico",
+  "board": "RDP-G01-W",
+  "layout": "pico-dual-4m-v1",
+  "minimum_base_version": "0.3.3-rc72",
+  "url": "https://wegooo-cell.github.io/read-pico-reader/Pico-update-0.3.3-rc89.bin",
+  "size": 3926304,
+  "sha256": "c5f5c19f5e5874d5908ae3bad64bd709790fa2197c84bd150623e0fcee78abbb",
+  "notes": "1. 移除微信读书登录、书架同步与书籍下载\n2. 文件管理独立显示 WiFi、热点、USB 传输\n3. 优化联网升级显示与内存使用，进度条仅追加更新"
+}
