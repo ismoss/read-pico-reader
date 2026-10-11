@@ -41,9 +41,22 @@ void book_layout_set_reading_line(unsigned style);
 void book_layout_set_reading_line_offset(int offset_px);
 /// 关闭插图时，排版跳过图片块，不为其保留页或正文空位。/ When false, omit image blocks without reserving pages or body space.
 void book_layout_set_images_visible(bool visible);
+/// 竖排：正文自上而下成列、列序自右向左，标点按竖排禁则处理，拉丁与括号转 90°，插图独占一页。
+/// 关闭时是原来的横排，排版与绘制一字未变；重排前调用。
+/// Vertical setting: body runs down in columns ordered right to left, punctuation follows the
+/// vertical kinsoku rules, Latin and brackets turn 90°, and an illustration takes a page of its
+/// own. Off is the original horizontal setting, unchanged; call it before a re-layout.
+void book_layout_set_vertical(bool vertical);
+bool book_layout_vertical(void);
 /// EPUB 章节首页预留标题区并跳过已经在题头显示的前置标题块；每章重排前调用。
 /// Reserve a first-page chapter heading and skip heading blocks already shown there; call before each chapter layout.
 void book_layout_set_chapter_lead(size_t skip_bytes, unsigned height_px);
+/// 竖排首页从右边缘起预留的题头列宽（像素）；题头由调用方按同一宽度竖向绘制。
+/// 横排忽略它。每章重排前与 chapter_lead 一起调用。
+/// Column width reserved from the right of the first vertical page for a vertical chapter
+/// heading, in pixels; the caller draws the heading into that same width. Horizontal setting
+/// ignores it. Call it with chapter_lead before each chapter layout.
+void book_layout_set_chapter_lead_width(unsigned width_px);
 /// 返回该页的 EPUB 图片序号；文字页为 -1。/ Return an EPUB image index for this page, or -1 for text.
 /// 查询插图原始像素尺寸；返回 false 表示取不到，排版会退回整页显示。
 /// / Query an image's pixel dimensions; false means unavailable and layout falls back to a

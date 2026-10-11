@@ -25,6 +25,9 @@ static int fitted_target;
 static int test_cjk_advance;
 static int test_opener_bearing;
 static int image_probe_count;
+static int rotated_draws;
+static int last_rotated_x, last_rotated_y;
+static int vertical_draws, first_vertical_x, last_vertical_x, first_vertical_y, last_vertical_y;
 // PR9 尺寸由调用方提供；测试用图片表模拟真实解码回调。/ PR9 asks its caller for dimensions; simulate the decoded image table.
 static bool fixture_image(void *ctx, int image, int *width, int *height) {
     const html_text_t *chapter = ctx;
@@ -100,6 +103,51 @@ void ttf_draw_text_px_fitted(uint8_t* fb, int x, int y, int px, const char* text
                              int tracking_px, int target_width, uint8_t fg, uint8_t bg) {
     fitted_target = target_width;
     ttf_draw_text_px_spaced(fb, x, y, px, text, tracking_px, fg, bg);
+}
+// 竖排的旋转绘制：宿主替身只记录调用与落点，用来验证拉丁文走了旋转路径。
+// Rotated drawing for vertical setting: the host stand-in only records the call and where it
+// landed, enough to check that Latin takes the rotated path.
+int ttf_draw_text_px_rotated(uint8_t* fb, int x, int y, int px, const char* text,
+                             uint8_t fg, uint8_t bg) {
+    (void)fb; (void)fg; (void)bg;
+    ++rotated_draws;
+    last_rotated_x = x;
+    last_rotated_y = y;
+    if (!drawn[0]) { first_draw_px = px; first_draw_x = x; first_draw_y = y; }
+    last_draw_px = px;
+    last_draw_x = x;
+    last_draw_y = y;
+    assert(strlen(drawn) + strlen(text) < sizeof(drawn));
+    strcat(drawn, text);
+    return ttf_text_width_px(px, text);
+}
+// 竖排整列绘制：排版把一整列交给字体引擎，替身只记录起点与内容。
+// Whole-column vertical drawing: layout hands a column to the font engine, so the stand-in only
+// records where it started and what it carried.
+int ttf_draw_text_px_vertical(uint8_t* fb, int x, int y, int px, const char* text,
+                              int tracking_px, uint8_t fg, uint8_t bg) {
+    (void)fb; (void)fg; (void)bg;
+    ++vertical_draws;
+    if (vertical_draws == 1) { first_vertical_x = x; first_vertical_y = y; }
+    last_vertical_x = x;
+    last_vertical_y = y;
+    last_tracking_px = tracking_px;
+    if (!drawn[0]) { first_draw_px = px; first_draw_x = x; first_draw_y = y; }
+    last_draw_px = px;
+    last_draw_x = x;
+    last_draw_y = y;
+    assert(strlen(drawn) + strlen(text) < sizeof(drawn));
+    strcat(drawn, text);
+    return ttf_text_width_px(px, text);
+}
+int ttf_vertical_text_height_px(int px, const char* text, int tracking_px) {
+    int total = ttf_text_width_px(px, text);
+    if (tracking_px > 0) {
+        int glyphs = 0;
+        for (const char* c = text; *c; ++c) if (((unsigned char)*c & 0xc0) != 0x80) ++glyphs;
+        if (glyphs > 1) total += tracking_px * (glyphs - 1);
+    }
+    return total;
 }
 int main(void) {
     EpdRect r = {0, 0, 20, 30};
@@ -654,6 +702,135 @@ int main(void) {
     assert(book_layout_build_blocks(composed.utf8,composed.len,composed.blocks,composed.count,many_box,10));
     drawn[0]=0;book_layout_draw_page(&fb,0,many_box,10);assert(!strcmp(drawn,"甲乙"));
     html_text_free(&composed);
+    // 竖排：列自上而下、列序自右向左；句号抬到字格右上角、拉丁转 90°；插图独占一页。
+    // Vertical setting: columns run downward ordered right to left; the period lifts to the
+    // top-right of its cell, Latin turns 90°, and an illustration owns its page.
+    book_layout_set_first_line_indent(0);
+    book_layout_set_first_line_indent_adjust(0);
+    book_layout_set_spacing(150, 50);
+    book_layout_set_typography(0);
+    book_layout_set_reading_line(0);
+    book_layout_set_images_visible(true);
+    book_layout_set_chapter_lead(0, 0);
+    const char *vertical_text = "甲乙丙丁戊己庚辛";
+    EpdRect column_box = {0, 0, 100, 40};
+    book_layout_set_vertical(true);
+    assert(book_layout_build(vertical_text, strlen(vertical_text), column_box, 10));
+    assert(book_layout_page_count() == 1);
+    drawn[0] = 0;
+    vertical_draws = 0;
+    book_layout_draw_page(&fb, 0, column_box, 10);
+    // 列高 40、字高 10 → 每列 4 字；列距 15 → 右起第一列字身框 x=87，第二列退到 72。
+    // 一整列交给字体引擎一次，正立/抬角/旋转由引擎按竖排规则决定。
+    // A 40 px column holds four 10 px glyphs; at a 15 px pitch the first em box sits at x=87 and
+    // the second column steps back to 72. Each column goes to the font engine in one call, which
+    // decides per glyph whether it stands upright, lifts into the corner or turns 90°.
+    assert(!strcmp(drawn, "甲乙丙丁戊己庚辛"));
+    assert(vertical_draws == 2);
+    assert(first_vertical_x == 87 && last_vertical_x == 72);
+    assert(first_vertical_y == 0 && last_vertical_y == 0);
+    const char *mark = "甲。";
+    assert(book_layout_build(mark, strlen(mark), column_box, 10));
+    drawn[0] = 0;
+    vertical_draws = 0;
+    book_layout_draw_page(&fb, 0, column_box, 10);
+    assert(!strcmp(drawn, "甲。") && vertical_draws == 1);
+    const char *latin = "AB";
+    assert(book_layout_build(latin, strlen(latin), column_box, 10));
+    drawn[0] = 0;
+    vertical_draws = 0;
+    rotated_draws = 0;
+    book_layout_draw_page(&fb, 0, column_box, 10);
+    // 拉丁整串走同一列调用，引擎内部逐字转 90°；排版这一层不再逐字分派。
+    // The Latin run takes the same single column call and the engine turns each glyph 90°
+    // inside it; layout no longer dispatches glyph by glyph.
+    assert(!strcmp(drawn, "AB") && vertical_draws == 1 && !rotated_draws);
+    assert(first_vertical_x == 87);
+    // 段首缩进在竖排里是列顶留白。
+    // The paragraph indent is blank space at the top of the column.
+    book_layout_set_first_line_indent(1);
+    assert(book_layout_build("甲乙", strlen("甲乙"), column_box, 10));
+    drawn[0] = 0;
+    vertical_draws = 0;
+    book_layout_draw_page(&fb, 0, column_box, 10);
+    assert(first_vertical_x == 87 && first_vertical_y == 10);
+    book_layout_set_first_line_indent(0);
+    // 竖排题头在首页右起预留列宽，正文列跟着让开同样的宽度。
+    // A vertical heading reserves column width at the right of the first page, and body columns
+    // step aside by the same width.
+    book_layout_set_chapter_lead_width(30);
+    assert(book_layout_build(vertical_text, strlen(vertical_text), column_box, 10));
+    drawn[0] = 0;
+    vertical_draws = 0;
+    book_layout_draw_page(&fb, 0, column_box, 10);
+    assert(first_vertical_x == 57);
+    assert(!strcmp(drawn, "甲乙丙丁戊己庚辛"));
+    book_layout_set_chapter_lead_width(0);
+    // 一列一页：8 字、每列 2 字 → 4 页，页首偏移按列推进。
+    // One column per page: eight glyphs at two per column make four pages, advancing by column.
+    EpdRect one_column = {0, 0, 15, 20};
+    assert(book_layout_build(vertical_text, strlen(vertical_text), one_column, 10));
+    assert(book_layout_page_count() == 4);
+    assert(book_layout_page_start_offset(1) == 6 && book_layout_page_start_offset(3) == 18);
+    // 插图独占一页，正文从下一页的右边缘重新开始。
+    // An illustration owns its page and the body restarts at the right edge of the next one.
+    const char *vertical_image = "IMG\n甲乙";
+    blk_t vertical_blocks[] = {
+        {.offset = 0, .len = 3, .image = 0},
+        {.offset = 4, .len = 6, .image = -1},
+    };
+    book_layout_set_image_dims(probe_image, &image_probe_count);
+    image_probe_count = 0;
+    assert(book_layout_build_blocks(vertical_image, strlen(vertical_image), vertical_blocks, 2,
+                                    column_box, 10));
+    assert(book_layout_page_count() == 2 && book_layout_page_image(0) == 0);
+    assert(book_layout_page_image_count(0) == 1 && book_layout_page_start_offset(1) == 4);
+    book_layout_set_image_dims(fixture_image, &composed);
+    // 禁则：右标点不得停在列底，也不得独自落到下一列首，整列回退一个字带它走。
+    // Kinsoku: a closing mark may not sit at the bottom of a column or start the next one alone,
+    // so the column rolls back a glyph and takes it along.
+    const char *kinsoku = "甲乙。丙";
+    EpdRect narrow_column = {0, 0, 15, 25};
+    assert(book_layout_build(kinsoku, strlen(kinsoku), narrow_column, 10));
+    assert(book_layout_page_count() == 3);
+    assert(book_layout_page_start_offset(1) == 3 && book_layout_page_start_offset(2) == 9);
+    drawn[0] = 0;
+    for (size_t p = 0; p < book_layout_page_count(); ++p)
+        book_layout_draw_page(&fb, p, narrow_column, 10);
+    assert(!strcmp(drawn, "甲乙。丙"));
+    // 拉丁串整串走同一列调用，逐字沿列推进。
+    // A Latin run takes one column call and advances glyph by glyph down it.
+    const char *latin_run = "ABC";
+    assert(book_layout_build(latin_run, strlen(latin_run), column_box, 10));
+    drawn[0] = 0;
+    vertical_draws = 0;
+    book_layout_draw_page(&fb, 0, column_box, 10);
+    assert(vertical_draws == 1 && !strcmp(drawn, "ABC"));
+    // 章节首页题头在竖排里是列顶留白，正文从它下面开始。
+    // The chapter heading is blank space at the top of the first column; the body starts below.
+    book_layout_set_chapter_lead(0, 20);
+    assert(book_layout_build("甲乙", strlen("甲乙"), column_box, 10));
+    drawn[0] = 0;
+    vertical_draws = 0;
+    book_layout_draw_page(&fb, 0, column_box, 10);
+    assert(first_vertical_y == 20);
+    // 首页有题头时插图让到第二页，不压在题头上。
+    // With a heading on the first page the illustration moves to the second one, clear of it.
+    book_layout_set_image_dims(probe_image, &image_probe_count);
+    image_probe_count = 0;
+    assert(book_layout_build_blocks(vertical_image, strlen(vertical_image), vertical_blocks, 2,
+                                    column_box, 10));
+    assert(book_layout_page_count() == 3 && book_layout_page_image(0) == -1);
+    assert(book_layout_page_image(1) == 0 && book_layout_page_start_offset(2) == 4);
+    book_layout_set_chapter_lead(0, 0);
+    book_layout_set_image_dims(fixture_image, &composed);
+    // 关掉竖排回到横排：同一段文字从左边缘排起。
+    // Turning it off returns to horizontal setting, where the same text starts at the left edge.
+    book_layout_set_vertical(false);
+    assert(book_layout_build(vertical_text, strlen(vertical_text), column_box, 10));
+    drawn[0] = 0;
+    book_layout_draw_page(&fb, 0, column_box, 10);
+    assert(first_draw_x == 0);
     book_layout_free();
     puts("book_layout_host_test: PASS");
 }

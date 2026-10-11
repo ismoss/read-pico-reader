@@ -3,6 +3,11 @@
 按版本简述对用户可见的变化；使用方法见 [README](../README.zh-CN.md)。
 User-visible changes by release; see [README](../README.md) for usage.
 
+## 未发布 / Unreleased
+
+- 阅读设置新增「竖排（从右到左）」开关，默认关闭，面向中国台湾与日本的竖排书：正文自上而下成列、列序自右向左，章节题头也竖排（右列编号、左列章名，正文列按同一宽度让开），段首缩进变成列顶留白，。、，等标点抬到字格右上角，拉丁字母、数字、括号与破折号顺时针转 90°，句读禁则按列首列尾处理；「边距」滑杆改为控制上下两端，轻点、横向滑动与晃动翻页的方向一起镜像（左半边、左滑、左晃都是下一页），插图独占一页。关掉开关回到原来的横排，排版与绘制一字未变。
+  The reading settings gain a “vertical (right to left)” switch, off by default, for the vertical books of Taiwan and Japan: body text runs down in columns ordered right to left, chapter headings are vertical too (the number column on the right, the title on the left, with body columns stepping aside by the same width), the paragraph indent becomes space at the top of a column, the period and comma lift into the cell's top-right corner, Latin letters, digits, brackets and dashes turn 90° clockwise, and the kinsoku rules apply to the top and bottom of a column. The margin slider now drives the top and bottom edges, taps, horizontal swipes and shakes all mirror (the left half, a left swipe and a left flick all advance), and an illustration takes a page of its own. Turning it off restores the original horizontal setting, unchanged.
+
 ## 0.3.3-rc91 / 2026-10-12
 
 - 合入 PR #24、#25，支持 EPUB 内嵌 TTF/OpenType 字体，修复开书与关闭书内字体的栈溢出，减少大型章节索引和多字体缓存占用。

@@ -315,7 +315,11 @@ static void book_layout_set_first_line_indent_adjust(int px){(void)px;}
 static void book_layout_set_reading_line(int style){(void)style;}
 static void book_layout_set_reading_line_offset(int offset){(void)offset;}
 static void book_layout_set_images_visible(bool visible){test_images_visible=visible;}
+static bool test_book_vertical;
+static bool app_settings_book_vertical(void){return test_book_vertical;}
+static void app_settings_set_book_vertical(bool on){test_book_vertical=on;}
 static void book_layout_set_image_bleed_width(int screen_width){(void)screen_width;}
+static void book_layout_set_vertical(bool vertical){test_book_vertical=vertical;}
 static bool app_settings_book_shake(void){return false;}
 static void read_pico_sd_start_probe(void){}
 typedef struct {bool present,mounted;} read_pico_sd_info_t;
@@ -399,20 +403,30 @@ int main(void) {
         assert(reader_swipe_direction(UI_GESTURE_TAP,vertical)==0);
         assert(reader_swipe_direction(UI_GESTURE_CANCEL,vertical)==0);
     }
+    // 竖排从右到左：横向滑动的下一页在右边，上下滑动不受影响。
+    // Right-to-left vertical text: the next page sits on the right, so horizontal swipes mirror.
+    test_book_vertical=true;
+    assert(reader_swipe_direction(UI_GESTURE_SWIPE_L,false)==-1);
+    assert(reader_swipe_direction(UI_GESTURE_SWIPE_R,false)==1);
+    assert(reader_swipe_direction(UI_GESTURE_SWIPE_U,true)==1);
+    test_book_vertical=false;
     // 普通/沉浸正文采用半屏或1/3+2/3，中间双击独立处理。
     // Normal/immersive tap regions use halves or 1/3+2/3 with independent center double taps.
     const EpdRect bodies[]={{36,180,612,900},{24,24,636,1182}};
     for (unsigned i=0;i<2;++i) {
         EpdRect body=bodies[i];
         for (int y=body.y;y<body.y+body.height;++y)
-            assert(book_reader_tap_direction(body,342,y,true)==(y<body.y+body.height/3?-1:1));
-        assert(book_reader_tap_direction(body,body.x,body.y,false)==-1);
-        assert(book_reader_tap_direction(body,body.x+body.width/2,body.y,false)==1);
+            assert(book_reader_tap_direction(body,342,y,true,false)==(y<body.y+body.height/3?-1:1));
+        assert(book_reader_tap_direction(body,body.x,body.y,false,false)==-1);
+        assert(book_reader_tap_direction(body,body.x+body.width/2,body.y,false,false)==1);
+        // rtl 翻转左右分区：右半边是上一页，左半边是下一页。
+        assert(book_reader_tap_direction(body,body.x,body.y,false,true)==1);
+        assert(book_reader_tap_direction(body,body.x+body.width-1,body.y,false,true)==-1);
         book_reader_tap_t tap={0};
-        assert(!book_reader_tap_feed(&tap,body,342,600,false,1000));
-        assert(book_reader_tap_feed(&tap,body,340,600,true,1250)==BOOK_READER_TAP_FULLSCREEN);
+        assert(!book_reader_tap_feed(&tap,body,342,600,false,false,1000));
+        assert(book_reader_tap_feed(&tap,body,340,600,true,false,1250)==BOOK_READER_TAP_FULLSCREEN);
         assert(!book_reader_tap_tick(&tap,2000,false));
-        assert(!book_reader_tap_feed(&tap,body,342,600,true,3000));
+        assert(!book_reader_tap_feed(&tap,body,342,600,true,false,3000));
         assert(book_reader_tap_tick(&tap,3341,false)==1);
         assert(!book_reader_tap_tick(&tap,4000,false));
     }
