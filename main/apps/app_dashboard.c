@@ -4,6 +4,8 @@
  *
  * 用户修订：快刷只保留 1 位封面，转码后立即释放灰阶；切换模式或对比度清理旧格式。
  * User revision: fast Home retains only a 1-bit cover, releases gray after conversion, and drops stale formats on mode/contrast changes.
+ * 用户修订：首页点阵结果独立落卡，命中时直接读取5500字节；普通/水波纹复用灰阶缓存，始终预留内存。
+ * User revision: persist Home monochrome separately and directly read its 5500 bytes on hits; ordinary/water reuse gray caches with a memory reserve.
  * 中文：首页显示继续阅读与近七天阅读时长；封面跨页面缓存。
  * English: Home shows the current read and seven days of reading time; covers survive tab changes.
  * 用户修订：缓存原位换位，只用一个条目的栈空间；保留复用速度，避免启动时复制七条占用半个主任务栈。
@@ -65,6 +67,7 @@ static home_cover_cache_t s_cover_cache[7];
 #define HOME_FAST_COVER_W 172
 #define HOME_FAST_COVER_H 250
 #define HOME_FAST_COVER_STRIDE ((HOME_FAST_COVER_W + 7) / 8)
+#define HOME_COVER_RESERVE (512u * 1024u)
 static int s_cover_next;
 static bool s_scan_pending;
 static bool s_books_cache_valid;
@@ -241,24 +244,49 @@ static void restore_cover_cache(void) {
 
 static bool load_cover(home_book_t *item, int slot) {
     if (!pico_boot_asset_allowed(item->path)) return false;
-    uint8_t *pixels = heap_caps_malloc(BOOK_COVER_W * BOOK_COVER_H, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    bool ok = pixels && book_cover_load_gray(item->path, item->title, item->author,
-                                              pixels, true, NULL);
-    if (!ok) { free(pixels); return false; }
     struct stat st;
-    if (stat(item->path, &st) || !S_ISREG(st.st_mode)) { free(pixels); return false; }
+    if (stat(item->path, &st) || !S_ISREG(st.st_mode)) return false;
     const bool fast = app_settings_main_fast_refresh();
+    const size_t bytes = fast ? HOME_FAST_COVER_STRIDE * HOME_FAST_COVER_H : BOOK_COVER_W * BOOK_COVER_H;
+    if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) < bytes + HOME_COVER_RESERVE) return false;
+    uint8_t *pixels = NULL;
     if (fast) {
         uint8_t *bits = heap_caps_calloc(HOME_FAST_COVER_STRIDE * HOME_FAST_COVER_H, 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-        if (!bits) { free(pixels); return false; }
-        book_crop_t crop = book_cover_crop(BOOK_COVER_W, BOOK_COVER_H, HOME_FAST_COVER_W, HOME_FAST_COVER_H);
-        for (int y = 0; y < HOME_FAST_COVER_H; ++y) for (int x = 0; x < HOME_FAST_COVER_W; ++x) {
-            unsigned sx = crop.x + (uint64_t)(unsigned)x * crop.width / HOME_FAST_COVER_W;
-            unsigned sy = crop.y + (uint64_t)(unsigned)y * crop.height / HOME_FAST_COVER_H;
-            uint8_t gray = ui_contrast_gray(pixels[sy * BOOK_COVER_W + sx]);
-            if (ui_image_dither_bw(gray, 36 + x, 292 + y)) bits[y * HOME_FAST_COVER_STRIDE + x / 8] |= 1u << (x & 7);
+        if (!bits) return false;
+        book_fast_cover_key_t key = {HOME_FAST_COVER_W, HOME_FAST_COVER_H, HOME_FAST_COVER_STRIDE,
+                                    app_settings_system_contrast(), 0};
+        bool white_edge;
+        if (!book_cover_fast_cache_read(item->path, item->title, item->author, key, bits, &white_edge)) {
+            if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) < BOOK_COVER_W * BOOK_COVER_H + HOME_COVER_RESERVE) {
+                free(bits); return false;
+            }
+            pixels = heap_caps_malloc(BOOK_COVER_W * BOOK_COVER_H, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+            if (!pixels || !book_cover_load_gray(item->path, item->title, item->author, pixels, true, NULL)) {
+                free(bits); free(pixels); return false;
+            }
+            // 损坏的磁盘像素可能已写入部分缓冲，转换前清零，避免旧黑点混入。
+            // A corrupt disk read may partially fill the raster; reset it before conversion.
+            memset(bits, 0, bytes);
+            book_crop_t crop = book_cover_crop(BOOK_COVER_W, BOOK_COVER_H, HOME_FAST_COVER_W, HOME_FAST_COVER_H);
+            for (int y = 0; y < HOME_FAST_COVER_H; ++y) for (int x = 0; x < HOME_FAST_COVER_W; ++x) {
+                unsigned sx = crop.x + (uint64_t)(unsigned)x * crop.width / HOME_FAST_COVER_W;
+                unsigned sy = crop.y + (uint64_t)(unsigned)y * crop.height / HOME_FAST_COVER_H;
+                uint8_t gray = ui_contrast_gray(pixels[sy * BOOK_COVER_W + sx]);
+                if (ui_image_dither_bw(gray, 36 + x, 292 + y)) bits[y * HOME_FAST_COVER_STRIDE + x / 8] |= 1u << (x & 7);
+            }
+            free(pixels);
+            struct stat current;
+            if (stat(item->path, &current) || current.st_size != st.st_size || current.st_mtime != st.st_mtime) {
+                free(bits); return false;
+            }
+            book_cover_fast_cache_write(item->path, item->title, item->author, key, bits, false);
         }
-        free(pixels); pixels = bits;
+        pixels = bits;
+    } else {
+        pixels = heap_caps_malloc(BOOK_COVER_W * BOOK_COVER_H, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (!pixels || !book_cover_load_gray(item->path, item->title, item->author, pixels, true, NULL)) {
+            free(pixels); return false;
+        }
     }
     home_cover_cache_t *cached = &s_cover_cache[slot];
     free(cached->pixels);
@@ -271,7 +299,7 @@ static bool load_cover(home_book_t *item, int slot) {
     cached->fast = fast;
     item->cover = pixels;
     item->cover_fast = fast;
-    return ok;
+    return true;
 }
 
 static void fit(char *title, int px, int width) {

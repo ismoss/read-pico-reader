@@ -49,7 +49,8 @@ enum EpdDrawError {EPD_DRAW_SUCCESS,EPD_DRAW_ERROR};
 #define APP_PAGE_REFRESH_MODE MODE_GL16
 #define SHELF_BOOK_LIFT_PX 16
 #define portMAX_DELAY 0
-static const int E0470_WAVEFORM=0,E0470_FULL_WAVEFORM=1,E0470_FOLLOW_WAVEFORM=2,E0470_TEXTTURN_WAVEFORM=3;
+static const int E0470_WAVEFORM=0,E0470_FULL_WAVEFORM=1,E0470_FOLLOW_WAVEFORM=2,E0470_TEXTTURN_WAVEFORM=3,E0470_SOFT_TEXTTURN_WAVEFORM=4;
+static const int* display_reader_text_waveform(void){return &E0470_SOFT_TEXTTURN_WAVEFORM;}
 static const char *TAG="test";
 static int s_view,s_presented_view,s_reader_panel,s_pressed_control,s_reader_slider;
 static bool s_shelf_page_pending,s_shelf_feedback_pending,s_reader_cleanup,s_reader_image_refresh_pending,s_toolbar,s_clear_confirm;
@@ -194,7 +195,7 @@ int main(void){
  s_view=s_presented_view=READING;s_text="text";s_reader_panel=READER_PANEL_NONE;
  s_area=reader_area();s_mode=MODE_GL16;s_reader_turn_pending=s_reader_footer_pending=true;
  trace_count=0;assert(present(&ctx,APP_REDRAW_AREA));
- assert(trace_count==2&&trace_route[0]==DIFF&&trace_mode[0]==MODE_GL16&&trace_wave[0]==E0470_TEXTTURN_WAVEFORM);
+ assert(trace_count==2&&trace_route[0]==DIFF&&trace_mode[0]==MODE_GL16&&trace_wave[0]==E0470_SOFT_TEXTTURN_WAVEFORM);
  assert(trace_area[0].y==reader_area().y&&trace_area[0].height==reader_area().height);
  assert(trace_route[1]==AREA&&trace_mode[1]==MODE_DU&&trace_wave[1]==E0470_FOLLOW_WAVEFORM);
  assert(trace_area[1].y==progress_rect().y&&!s_reader_turn_pending);
@@ -215,7 +216,7 @@ int main(void){
  s_reader_panel=99;trace_count=0;
  assert(present(&ctx,APP_REDRAW_AREA)&&trace_count==1&&route==AREA&&pushed_mode==MODE_GL16&&trace_wave[0]==E0470_WAVEFORM);
  s_reader_panel=READER_PANEL_NONE;s_reader_fullscreen=true;s_reader_turn_pending=true;trace_count=0;
- assert(present(&ctx,APP_REDRAW_AREA)&&trace_count==2&&trace_route[0]==DIFF&&trace_route[1]==DIFF&&trace_wave[0]==E0470_TEXTTURN_WAVEFORM&&trace_wave[1]==E0470_WAVEFORM);
+ assert(present(&ctx,APP_REDRAW_AREA)&&trace_count==2&&trace_route[0]==DIFF&&trace_route[1]==DIFF&&trace_wave[0]==E0470_SOFT_TEXTTURN_WAVEFORM&&trace_wave[1]==E0470_WAVEFORM);
  // 快水波仅接管实际动画输出；成功、失败及全屏都恢复主页节拍，优先级分支不改节拍。
  // Fast ripple scopes pacing to actual animation output; success, failure and full screen restore main pacing, while priority branches never change it.
  for(int full=0;full<2;++full)for(int error=0;error<2;++error){
@@ -264,7 +265,7 @@ int main(void){
    if (!full) {assert(redraw==APP_REDRAW_PAGE&&!s_reader_turn_pending);trace_count=0;present(&ctx,redraw);assert(trace_route[0]==(to==2&&!hidden?WHOLE:READER));continue;}
    assert(redraw==APP_REDRAW_AREA&&s_reader_turn_pending==eligible);
    trace_count=0;present(&ctx,redraw);
-   if(eligible)assert(trace_route[0]==DIFF&&trace_wave[0]==E0470_TEXTTURN_WAVEFORM);
+   if(eligible)assert(trace_route[0]==DIFF&&trace_wave[0]==E0470_SOFT_TEXTTURN_WAVEFORM);
    else if(to==2)assert(trace_mode[0]==MODE_GC16&&trace_wave[0]==E0470_FULL_WAVEFORM);
    else assert(trace_wave[0]==E0470_WAVEFORM&&trace_route[0]==(full?DIFF:AREA));
    assert(!s_reader_turn_pending&&s_reader_text_frame==(hidden||to==0));
@@ -278,7 +279,7 @@ int main(void){
    app_redraw_t redraw=turn_page(&ctx,dir);
    assert(s_chapter==(unsigned)new&&s_reader_turn_pending==(from==0&&to==0));
    trace_count=0;present(&ctx,redraw);
-   assert(trace_wave[0]!=(int)E0470_TEXTTURN_WAVEFORM||(from==0&&to==0));
+   assert((trace_wave[0]!=E0470_TEXTTURN_WAVEFORM&&trace_wave[0]!=E0470_SOFT_TEXTTURN_WAVEFORM)||(from==0&&to==0));
  }
  // 失败推屏、面板及离开阅读会失效旧基准；下一次正常绘制后恢复。
  // Failed presents, panels and leaving reading invalidate history; a successful body restores it.

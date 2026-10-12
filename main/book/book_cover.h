@@ -43,3 +43,11 @@ bool book_jpeg_frame(const uint8_t *data, size_t size, uint8_t *sof, unsigned *w
 bool book_cover_load_list_gray(const char *path, const char *title, const char *author,
                                uint8_t out[BOOK_COVER_W * BOOK_COVER_H], bool allow_decode,
                                bool *pending, unsigned *width, unsigned *height);
+
+/// 快刷已处理的点阵封面；按书源身份、尺寸、对比度与抖动相位失效，像素带校验。
+/// Finished fast-cover pixels: invalidate by source, geometry, contrast and dither phase; validate payload.
+typedef struct { unsigned width, height, stride, contrast, phase; } book_fast_cover_key_t;
+bool book_cover_fast_cache_read(const char *path, const char *title, const char *author,
+                                book_fast_cover_key_t key, uint8_t *out, bool *white_edge);
+void book_cover_fast_cache_write(const char *path, const char *title, const char *author,
+                                 book_fast_cover_key_t key, const uint8_t *out, bool white_edge);

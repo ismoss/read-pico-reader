@@ -76,11 +76,20 @@ void ui_nav_draw(uint8_t *fb, int active) {
     }
 }
 
-void ui_nav_status(uint8_t *fb) {
+static time_t status_time(void) {
     time_t now = time(NULL);
     const pmu_snapshot_t *pmu = read_pico_pmu_get();
     if (now < 1704067200 && pmu && pmu->time_synced && pmu->unix_sec >= 1704067200)
         now = pmu->unix_sec;
+    return now;
+}
+int64_t ui_nav_clock_minute(void) {
+    time_t now = status_time();
+    return now >= 1704067200 ? (int64_t)now / 60 : -1;
+}
+void ui_nav_status(uint8_t *fb) {
+    time_t now = status_time();
+    const pmu_snapshot_t *pmu = read_pico_pmu_get();
     char clock[12] = "--:--";
     if (now > 1704067200) {
         time_t china = now + 8 * 3600;

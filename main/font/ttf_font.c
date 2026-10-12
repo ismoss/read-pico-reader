@@ -8,11 +8,14 @@
  * Variable TTF: sector I/O from the card; glyf/gvar map into PSRAM when
  * they fit. Glyphs are cached by codepoint, size and weight. The built-in
  * font is a Noto Sans SC Medium subset.
+ * User revision: five reader stroke levels apply to static/variable/embedded faces,
+ * preserving advances and proportions; normal is unchanged, with one bounded glyph scratch buffer.
  * 用户修订：标题复用当前字体的轮廓与缓存；覆盖检查只读现有 cmap，不切字体或另加载字库。
  * User revision: titles reuse the active outlines/cache; coverage checks read the existing cmap without switching or loading another face.
  */
 
 #include "ttf_font.h"
+#include "ttf_stroke_filter.h"
 
 #include <dirent.h>
 #include <fcntl.h>
@@ -101,6 +104,7 @@ typedef struct glyph_entry {
     uint32_t codepoint;
     uint8_t size;
     uint16_t weight;
+    int8_t stroke;
     int16_t width;
     int16_t height;
     int16_t left;
@@ -824,6 +828,8 @@ static bool enqueue_composite_children(
 }
 
 /* ---- gvar 变体 / gvar variation ---- */
+static int s_stroke_adjust;
+
 static int clamp_weight(int wght) {
     if (wght < wght_min) return wght_min;
     if (wght > wght_max) return wght_max;
@@ -1834,7 +1840,7 @@ static glyph_entry_t* cache_lookup(uint32_t codepoint, int size) {
     unsigned bucket = cache_bucket(codepoint, size);
     for (glyph_entry_t* entry = cache_buckets[bucket]; entry != NULL; entry = entry->hash_next) {
         if (entry->codepoint == codepoint && entry->size == (uint8_t)size
-            && entry->weight == (uint16_t)current_weight) {
+            && entry->weight == (uint16_t)current_weight && entry->stroke == s_stroke_adjust) {
             lru_touch(entry);
             return entry;
         }
@@ -1855,6 +1861,7 @@ static glyph_entry_t* rasterize_glyph(uint32_t codepoint, int pixel_height) {
     if (width < 0) width = 0;
     if (height < 0) height = 0;
 
+    if (width > 1024 || height > 1024 || (size_t)width * height > TTF_CACHE_LIMIT / 2) return NULL;
     size_t bitmap_bytes = (size_t)width * (size_t)height;
     cache_reserve(bitmap_bytes + sizeof(glyph_entry_t));
 
@@ -1876,6 +1883,21 @@ static glyph_entry_t* rasterize_glyph(uint32_t codepoint, int pixel_height) {
         );
     }
 
+    if (bitmap_bytes && s_stroke_adjust) {
+        size_t adjusted_bytes = (size_t)(width + 2) * (height + 2);
+        uint8_t *adjusted = heap_caps_malloc(adjusted_bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (!adjusted) {
+            heap_caps_free(entry->bitmap);
+            heap_caps_free(entry);
+            return NULL;
+        }
+        ttf_stroke_filter(adjusted, entry->bitmap, width, height, pixel_height, s_stroke_adjust);
+        heap_caps_free(entry->bitmap);
+        entry->bitmap = adjusted;
+        width += 2; height += 2; x0 -= 1; y0 -= 1;
+        bitmap_bytes = adjusted_bytes;
+        cache_reserve(bitmap_bytes + sizeof(*entry));
+    }
     int advance = 0;
     int lsb = 0;
     stbtt_GetGlyphHMetrics(&font_info, gid, &advance, &lsb);
@@ -1883,6 +1905,7 @@ static glyph_entry_t* rasterize_glyph(uint32_t codepoint, int pixel_height) {
     entry->codepoint = codepoint;
     entry->size = (uint8_t)pixel_height;
     entry->weight = (uint16_t)current_weight;
+    entry->stroke = (int8_t)s_stroke_adjust;
     entry->width = (int16_t)width;
     entry->height = (int16_t)height;
     entry->left = (int16_t)x0;
@@ -2067,6 +2090,17 @@ void ttf_set_weight(int wght) {
         s_slots[i].f_weight = w;
     }
 }
+
+// Coverage adjustment also works for static TTF/CFF faces and embedded font slots.
+// No extra face or full-page buffer is loaded; the shared glyph cache remains bounded.
+void ttf_set_stroke_adjust(int level) {
+    if (level < -2) level = -2;
+    if (level > 2) level = 2;
+    if (s_stroke_adjust == level) return;
+    s_stroke_adjust = level;
+    cache_clear_all();
+}
+int ttf_get_stroke_adjust(void) { return s_stroke_adjust; }
 
 int ttf_get_weight(void) {
     return s_slots[TTF_FONT_SLOT_SYSTEM].f_weight;
@@ -2529,6 +2563,9 @@ int ttf_text_left_bearing_px(int pixel_height, const char* text) {
 
 // 线性抗锯齿的中间灰在这块屏上偏亮。按 TTF_COVER_GAMMA 抬覆盖率，半透明边缘更深。
 static uint8_t s_cover[256];
+static bool s_antialias = true;
+void ttf_set_antialias(bool enabled) { s_antialias = enabled; }
+bool ttf_get_antialias(void) { return s_antialias; }
 
 /* ---- 绘制 / Draw ---- */
 static void ttf_cover_lut_init(void) {
@@ -2545,6 +2582,7 @@ static void ttf_cover_lut_init(void) {
 }
 
 static uint8_t mix_ink(uint8_t alpha, uint8_t fg, uint8_t bg) {
+    if (!s_antialias) return alpha >= 128 ? fg : bg;
     return (uint8_t)(bg + s_cover[alpha] * ((int)fg - (int)bg) / 255);
 }
 

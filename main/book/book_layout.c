@@ -579,7 +579,7 @@ static bool take_line(size_t off, size_t* next, bool* paragraph_end, int* px, bo
     if (end < s_len && (s_text[end] == '\r' || s_text[end] == '\n')) {
         *next = end + 1;
         if (s_text[end] == '\r' && *next < s_len && s_text[*next] == '\n') (*next)++;
-        *paragraph_end = true;
+        *paragraph_end = !block || !block->line_break_after;
     }
     return *next > off;
 }

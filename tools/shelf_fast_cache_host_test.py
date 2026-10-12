@@ -50,7 +50,7 @@ enum {SHELF,MANAGE};
 static int s_view=SHELF,rows=9,contrast=100,phase_shift,style=2;
 static bool fast=true,alloc_fail;
 static size_t free_psram=4*1024*1024,allocated_bytes;
-static unsigned allocations,s_cover_pending_mask;
+static unsigned allocations,s_cover_pending_mask,s_cover_decode_mask,s_cover_warm_mask,s_cover_dirty_mask,s_cover_present_mask;
 static struct {int index;uint8_t *gray,*fast_bits;unsigned width,height;uint8_t fast_contrast,fast_phase;bool fast_white_edge;} s_covers[BOOK_ROWS];
 static int app_settings_shelf_style(void){return style;}
 static int shelf_rows(void){return rows;}

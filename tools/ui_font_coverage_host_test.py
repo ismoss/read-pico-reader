@@ -89,7 +89,7 @@ labels += re.findall(r'"([^"\n]*)"', settings[first:last])
 # Shared keys must always use system glyphs; backspace is drawn with lines.
 keyboard=(root/'main/ui/ui_keyboard.c').read_text()
 labels += [ast.literal_eval(literal) for literal in re.findall(r'"(?:\\.|[^"\\])*"', keyboard)]
-labels += ["缩进微调", "%+d px · 复位", "−"]
+labels += ["抗锯齿", "左上一页 · 中工具栏 · 右下一页", "左回首页 · 中全屏 · 右工具栏", "缩进微调", "%+d px · 复位", "−"]
 missing = {}
 for label in labels:
     absent = "".join(dict.fromkeys(ch for ch in label if ch != "⌫" and ord(ch) >= 32 and not has_glyph(ord(ch))))

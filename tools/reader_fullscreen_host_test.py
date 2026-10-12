@@ -40,6 +40,7 @@ static bool s_save_failed;
 static char s_message[128];
 static unsigned layout_span=100,reflows,paints,saves,failed_reflows;
 static uint8_t full_pages;
+static const char *app_settings_book_background_path(void){return "";}
 static void copy_text(char *to,size_t cap,const char *from){snprintf(to,cap,"%s",from);}
 static void lock_draw(void){assert(!draw_locked);draw_locked=true;}
 static void unlock_draw(void){assert(draw_locked);draw_locked=false;}
@@ -62,7 +63,8 @@ static void set_reader_view(int view){s_view=view;}
 static void skip_hidden_image_pages(app_ctx_t *ctx,int dir){(void)ctx;(void)dir;}
 static uint8_t app_settings_reader_full_pages(void){return full_pages;}
 static int app_settings_reader_turn_effect(void){return 1;}
-static int book_layout_page_image_count(size_t page){(void)page;return 0;}
+static int test_images;
+static int book_layout_page_image_count(size_t page){(void)page;return test_images;}
 static app_redraw_t paint_reading(app_ctx_t *ctx,int mode){(void)ctx;assert(mode==MODE_GL16);++paints;return APP_REDRAW_AREA;}
 '''
 unit += r"""
@@ -111,6 +113,11 @@ int main(void){
   assert(r==((!full||tools)?APP_REDRAW_PAGE:APP_REDRAW_AREA));
   assert(s_water_turn_pending==!!(full&&!tools));
  }
+ // Mixed/image targets and leaving an image never run the text ripple waveform.
+ reset(true,false,2,0);test_images=2;assert(turn_page(&ctx,1)==APP_REDRAW_AREA&&!s_water_turn_pending&&!s_reader_turn_pending);
+ reset(true,false,2,0);test_images=0;s_reader_text_frame=false;
+ assert(turn_page(&ctx,1)==APP_REDRAW_AREA&&!s_water_turn_pending&&!s_reader_turn_pending);
+ test_images=0;
  reset(false,true,0,0);assert(turn_page(&ctx,-1)==APP_REDRAW_PAGE);
  assert(s_reader_fullscreen&&!s_toolbar&&s_page==0&&!paints&&!s_stats_pending_turns);
  reset(false,true,8,1);assert(turn_page(&ctx,1)==APP_REDRAW_PAGE);

@@ -166,3 +166,6 @@ void app_lock_ignore_for(int64_t ms);
 #ifdef __cplusplus
 }
 #endif
+
+/// Yield a long main-page load when another bottom tab is pressed. No display or lifecycle calls.
+bool app_poll_main_navigation(app_ctx_t *ctx);

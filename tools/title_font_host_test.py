@@ -81,9 +81,10 @@ int ui_font_text_width_px(int px,const char *s){(void)px;(void)s;assert(0);retur
 void ui_font_measure_line_px(int px,const char *s,int *above,int *below){(void)px;(void)s;(void)above;(void)below;assert(0);}
 void ui_font_draw_title_px(uint8_t *fb,int x,int y,int px,const char *s,enum EpdFontFlags a){(void)fb;(void)x;(void)y;(void)px;(void)s;(void)a;assert(0);}
 static uint8_t pixels[400*200];
-void epd_draw_pixel(int x,int y,uint8_t c,uint8_t *fb){assert(x>=0&&x<400&&y>=0&&y<200);assert(c==0);fb[y*400+x]=1;++painted;}
+static bool record_coverage;
+void epd_draw_pixel(int x,int y,uint8_t c,uint8_t *fb){assert(x>=0&&x<400&&y>=0&&y<200);if(record_coverage)fb[y*400+x]=c>>4;else{assert(c==0);fb[y*400+x]=1;}++painted;}
 int main(int argc,char **argv){
- assert(argc==3);const char *text="字体设置";unsigned widths[2];
+ assert(argc==3&&ttf_get_antialias());const char *text="字体设置";unsigned widths[2];
  for(int face=0;face<2;++face){
   assert(ttf_font_open(argv[face+1])==ESP_OK&&ttf_font_ready()&&!ttf_font_is_builtin());
   assert(ttf_font_has_text(text)&&!ttf_font_has_text("\xf4\x8f\xbf\xbf"));
@@ -104,12 +105,50 @@ int main(int argc,char **argv){
    for(unsigned n=0;n<15;++n)ui_text_title_vc(pixels,200,80,px,title,text,EPD_DRAW_ALIGN_CENTER);
    assert(live==warm&&opens==initial_opens&&active_fd==1&&!strcmp(ttf_font_path(),argv[face+1]));
   }
+  // Static imported faces must respond too, without changing advances or native normal strokes.
+  int native_width=ttf_text_width_px(48,text),axis=ttf_get_weight();
+  uint8_t native_mask[300*100],weighted[300*100];
+  memset(native_mask,0,sizeof(native_mask));
+  assert(ttf_text_mask_px(native_mask,300,100,20,70,48,text));
+  size_t last_coverage=0;
+  for(int level=-2;level<=2;++level){
+   ttf_set_stroke_adjust(level);assert(ttf_get_stroke_adjust()==level&&ttf_get_weight()==axis);
+   memset(weighted,0,sizeof(weighted));assert(ttf_text_mask_px(weighted,300,100,20,70,48,text));
+   size_t coverage=0;for(unsigned n=0;n<sizeof(weighted);++n)coverage+=weighted[n];
+   assert(coverage>last_coverage);last_coverage=coverage;
+   assert(ttf_text_width_px(48,text)==native_width&&active_fd==1);
+   if(!level)assert(!memcmp(native_mask,weighted,sizeof(weighted)));
+   size_t warm=live;memset(weighted,0,sizeof(weighted));
+   assert(ttf_text_mask_px(weighted,300,100,20,70,48,text)&&live==warm);
+  }
+  // 真实TTF普通、带字距、两端对齐绘制：关闭AA只改变覆盖率，字号/字宽/字库/缓存不变。
+  record_coverage=true;
+  for(int level=-2;level<=2;++level){
+   ttf_set_stroke_adjust(level);ttf_set_antialias(true);
+   memset(pixels,15,sizeof(pixels));ttf_draw_text_px(pixels,20,80,48,text,EPD_DRAW_ALIGN_LEFT,0,15);
+   uint8_t smooth[sizeof(pixels)];memcpy(smooth,pixels,sizeof(smooth));size_t warm=live;
+   unsigned mid=0;for(unsigned n=0;n<sizeof(pixels);++n)if(pixels[n]>0&&pixels[n]<15)++mid;
+   assert(mid);
+   ttf_set_antialias(false);assert(!ttf_get_antialias());
+   for(int style=0;style<3;++style){
+    memset(pixels,15,sizeof(pixels));
+    if(!style)ttf_draw_text_px(pixels,20,80,48,text,EPD_DRAW_ALIGN_LEFT,0,15);
+    else if(style==1)ttf_draw_text_px_spaced(pixels,20,80,48,text,2,0,15);
+    else ttf_draw_text_px_fitted(pixels,20,80,48,text,0,native_width+9,0,15);
+    unsigned ink=0;for(unsigned n=0;n<sizeof(pixels);++n){assert(pixels[n]==0||pixels[n]==15);ink+=pixels[n]==0;}
+    assert(ink&&ttf_text_width_px(48,text)==native_width&&live==warm&&active_fd==1);
+   }
+   ttf_set_antialias(true);memset(pixels,15,sizeof(pixels));
+   ttf_draw_text_px(pixels,20,80,48,text,EPD_DRAW_ALIGN_LEFT,0,15);assert(!memcmp(smooth,pixels,sizeof(smooth))&&live==warm);
+  }
+  record_coverage=false;
+  ttf_set_stroke_adjust(0);assert(opens==initial_opens);
   widths[face]=ttf_text_width_px(40,text);
   assert(live-resident<128*1024&&peak<1024*1024);
  }
  assert(widths[1]>widths[0]&&max_fd==1);
  ttf_font_unload();assert(!active_fd&&!ttf_font_ready()&&!ttf_font_has_text(text));
- puts("PASS: actual imported system/reader TTF at 32/40/48px, direct raster identity, single file/face, bounded warm cache and no duplicate font load");
+ puts("PASS: actual imported system/reader TTF at 32/40/48px, direct raster identity, five stroke levels with native normal identity and fixed advances, single file/face, bounded warm cache and no duplicate font load");
 }
 '''
     (work / 'test.c').write_text(unit)

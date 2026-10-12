@@ -36,7 +36,7 @@ def package(build: Path, output: Path):
     release={'schema':1,'version':version,'project':'Read_Pico','board':'RDP-G01-W','layout':'pico-dual-4m-v1',
         'minimum_base_version':'0.3.3-rc72','url':f'https://wegooo-cell.github.io/read-pico-reader/{upgrade_name}',
         'size':len(data),'sha256':hashlib.sha256(data).hexdigest(),
-        'notes':'1. kiikoread 品牌与全新官网\n2. 资料卡简化、姓名排版优化\n3. 水波纹主页完整灰阶\n4. TF 卡兼容、缺失字体闪屏修复\n5. 拼贴及密码锁屏、列表书架、首行缩进微调\n6. 主站联网升级，保留 GitHub 更新途径'}
+        'notes':'1. 书架整页封面与TF缓存提速\n2. 阅读字重、抗锯齿与大字号适配\n3. 底部上滑工具栏，中键长按默认首页\n4. 水波纹、锁屏缓存与反馈优化\n5. EPUB内嵌字体、排版及重启修复\n6. WiFi遗忘、时间、卡容量与睡眠优化'}
     (output/'manifest.json').write_text(json.dumps(manifest,ensure_ascii=False,indent=2)+'\n')
     (output/'update.json').write_text(json.dumps(release,ensure_ascii=False,indent=2)+'\n')
     check(output)

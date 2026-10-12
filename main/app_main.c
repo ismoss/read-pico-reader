@@ -110,6 +110,7 @@ void app_main(void) {
     if (hw.pmu_ready) restore_time_from_pmu();
     const bool vcom_ok = resolve_vcom_at_boot();
     pmu_selftest_bind(hw.sensor);
+    app_sleep_bind(hw.touch, hw.sensor);
 
     if (!images_match_panel()) return;
 
