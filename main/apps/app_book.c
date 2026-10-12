@@ -2133,14 +2133,17 @@ static void draw_layout_settings(uint8_t* fb) {
 // 用户确认半屏双列布局；绘制与点击共用同一矩形，间隙不穿透。/ Approved two-column half sheet; paint and hit testing share rectangles with inert gaps.
 static EpdRect reading_setting_rect(int index) {
     int extra=reader_ui_extra(56), footer=reader_ui_extra(36);
-    if (index == 6) return (EpdRect){36,1038-footer,612,84+footer};
-    if (index < 0 || index >= 6) return (EpdRect){0, 0, 0, 0};
+    if (index < 0 || index >= 8) return (EpdRect){0, 0, 0, 0};
     int row=index/2;
-    return (EpdRect){36+(index%2)*314,702+row*112-(3-row)*extra-footer,298,98+extra};
+    // 四行双列：竖排占第四行右格，与「关闭书内图片」并排；行距收到 104，
+    // 四行底部才仍然留在「完成」之上。
+    // Four two-column rows: the vertical switch takes the fourth row's right cell beside "hide
+    // in-book images", and a 104 pitch keeps every row clear of Done.
+    return (EpdRect){36+(index%2)*314,702+row*104-(3-row)*extra-footer,298,98+extra};
 }
 static int reading_settings_top(void) { return 580-reader_ui_extra(204); }
 static EpdRect reading_toggle_rect(int index) {
-    return reading_setting_rect(index == 0 ? 3 : index == 1 ? 5 : 6);
+    return reading_setting_rect(index == 0 ? 3 : index == 1 ? 5 : index == 2 ? 6 : 7);
 }
 static void draw_reading_switch(uint8_t *fb, EpdRect track, bool on) {
     ui_fill_round_rect(fb, track, 19, on ? 0x38 : 0xc4);
@@ -2165,9 +2168,11 @@ static void draw_reading_toggle(uint8_t *fb, int index, const char *title,
     ui_fill_round_rect(fb, row, 20, UI_GRAY_WHITE);
     ui_draw_control_frame(fb, row, 20, 0x68);
     if (index == 2) {
-        ui_text_box(fb,(EpdRect){row.x+22,row.y+6,476,row.height/2-12},25,title,EPD_DRAW_ALIGN_LEFT,false);
-        ui_text_box(fb,(EpdRect){row.x+22,row.y+row.height/2,476,row.height/2-8},20,detail,EPD_DRAW_ALIGN_LEFT,false);
-        draw_reading_switch(fb,(EpdRect){555,row.y+row.height/2-19,69,39},on);
+        // 半宽格放两行：标题与说明各降一号字，开关仍留在右端。
+        // A half-width cell carries two lines: title and detail step down a size, the switch stays right.
+        ui_text_box(fb,(EpdRect){row.x+20,row.y+10,row.width-40,row.height/2-16},21,title,EPD_DRAW_ALIGN_LEFT,false);
+        ui_text_box(fb,(EpdRect){row.x+20,row.y+row.height/2,row.width-40,row.height/2-10},17,detail,EPD_DRAW_ALIGN_LEFT,false);
+        draw_reading_switch(fb,(EpdRect){row.x+row.width-90,row.y+3*row.height/4-19,69,39},on);
     } else {
         ui_text_box(fb,(EpdRect){row.x+21,row.y+6,row.width-42,row.height/2-12},23,title,EPD_DRAW_ALIGN_LEFT,false);
         ui_text_box(fb,(EpdRect){row.x+21,row.y+row.height/2,166,row.height/2-8},26,on?"开启":"关闭",EPD_DRAW_ALIGN_LEFT,false);
@@ -2187,6 +2192,7 @@ static void draw_reading_settings(uint8_t* fb) {
     draw_reading_card(fb, 4, "按键控制", "自定义三键", false);
     draw_reading_toggle(fb, 1, "全屏沉浸", NULL, app_settings_reader_immersive());
     draw_reading_toggle(fb, 2, "关闭书内图片", "跳过正文插图，保留原书文件", app_settings_reader_hide_images());
+    draw_reading_toggle(fb, 3, "竖排（从右到左）", NULL, app_settings_book_vertical());
     ui_fill_round_rect(fb, (EpdRect){36, 1141, 612, 58}, 20, UI_GRAY_BLACK);
     reader_panel_text_vc(fb, 342, 1170, 26, "完成", EPD_DRAW_ALIGN_CENTER, true);
 }
@@ -4366,7 +4372,7 @@ static app_redraw_t reading_settings_action(app_ctx_t *ctx, uint16_t x, uint16_t
     } else if (ui_rect_hit(reading_setting_rect(4), x, y)) {
         s_reader_panel = READER_PANEL_KEY_SETTINGS;
     } else {
-        for (int i = 0; i < 3; ++i)
+        for (int i = 0; i < 4; ++i)
             if (ui_rect_hit(reading_toggle_rect(i), x, y)) return apply_reader_option(ctx, i);
         return APP_REDRAW_NONE;
     }
