@@ -277,6 +277,12 @@ static char s_book_title[128];
 static char s_chapter_heading_title[128], s_chapter_heading_label[32];
 static size_t s_chapter_lead_skip;
 static unsigned s_chapter_lead_height;
+// 横排题头该占的行高，与当前模式无关地记着：首块是插图时它是 0，
+// 切回横排要用它，而不是拿竖排留下的 0 去算。
+// The row height a horizontal heading should take, remembered independently of the current mode:
+// it is zero when the chapter opens with an illustration, and switching back must use it rather
+// than the zero a vertical heading left behind.
+static unsigned s_chapter_lead_row_height;
 // 竖排首页为题头预留的列宽；横排为 0。/ Columns reserved for a vertical heading; 0 horizontally.
 static unsigned s_chapter_lead_width;
 static char s_font_path[192];
@@ -2612,9 +2618,16 @@ static void draw_vertical_heading(uint8_t *fb, EpdRect body) {
 // values. Switching mode or full screen or changing the type size must all come through here;
 // otherwise the layout reserves for the old mode while the heading draws in the new one and lands
 // on top of the body.
-static void apply_chapter_lead(const char *title, const char *label, size_t skip) {
+// 题头几何按当前模式重算：竖排留右侧列宽、横排留顶部行高。
+// height 由调用方按原有规矩算好（首块是插图、或没有可用标题时为 0），这里不再自己推导——
+// 无条件按 214 算会把不该出现的题头带出来，正文里那份标题就与它并排成了两个标题。
+// Heading geometry for the current mode: columns to the right vertically, rows at the top
+// horizontally. `height` arrives already decided by the caller (zero when the first block is an
+// illustration or no title is usable); deriving it here unconditionally brought a heading onto
+// sheets that should have none, leaving it side by side with the body's own copy.
+static void apply_chapter_lead(const char *title, const char *label, size_t skip, unsigned height) {
     s_chapter_lead_skip = skip;
-    if (book_kind() != BOOK_KIND_EPUB || title == NULL || title[0] == 0) {
+    if (book_kind() != BOOK_KIND_EPUB || title == NULL || title[0] == 0 || !height) {
         s_chapter_lead_height = s_chapter_lead_width = 0;
         book_layout_set_chapter_lead(0, 0);
         book_layout_set_chapter_lead_width(0);
@@ -2629,7 +2642,7 @@ static void apply_chapter_lead(const char *title, const char *label, size_t skip
         book_layout_set_chapter_lead_width(s_chapter_lead_width);
     } else {
         s_chapter_lead_width = 0;
-        s_chapter_lead_height = body_rect().height > 214 ? 214 : 0;
+        s_chapter_lead_height = height;
         book_layout_set_chapter_lead(skip, s_chapter_lead_height);
         book_layout_set_chapter_lead_width(0);
     }
@@ -2641,7 +2654,8 @@ static void apply_chapter_lead(const char *title, const char *label, size_t skip
 // Every body re-layout needs this line, otherwise a mode or size change reserves room for the
 // previous heading and the heading lands on the body.
 static void refresh_chapter_lead(void) {
-    apply_chapter_lead(s_chapter_heading_title, s_chapter_heading_label, s_chapter_lead_skip);
+    apply_chapter_lead(s_chapter_heading_title, s_chapter_heading_label, s_chapter_lead_skip,
+                       s_chapter_lead_row_height);
 }
 
 // PR9 未知尺寸整页图没有混排槽；在调用侧适配原有位图缓存。/ PR9's unknown-size page has no inline slot; adapt the bitmap cache here.
@@ -3300,6 +3314,7 @@ static bool load_chapter_at(app_ctx_t* ctx, size_t chapter, size_t offset,
     }
     char heading[128] = {0}, label[32] = {0}, toc_title[128] = {0};
     size_t lead_skip = 0;
+    unsigned lead_height = 0;
     if (book_kind() == BOOK_KIND_EPUB && loaded.len) {
         // 已识别的正文编号题头优先；没有时沿用书内导航或备用标题。
         // Prefer a recognized numbered body heading, then authored navigation or a fallback title.
@@ -3336,7 +3351,17 @@ static bool load_chapter_at(app_ctx_t* ctx, size_t chapter, size_t offset,
             ++skip_blocks;
         }
         if (skip_blocks) lead_skip = skip_blocks < loaded.count ? loaded.blocks[skip_blocks].offset : loaded.len;
-        if (skip_blocks < loaded.count && loaded.blocks[skip_blocks].image >= 0) lead_skip = 0;
+        // 首块是插图时不预留题头：那页整页留给插图，标题在它后面才排。
+        // 这个条件一直是题头该不该出现的判据，横排竖排都一样。
+        // An illustration at the head of the chapter reserves nothing: it owns that page and the
+        // heading follows. This condition has always decided whether a sheet gets a heading at all,
+        // in either setting.
+        if (skip_blocks < loaded.count && loaded.blocks[skip_blocks].image >= 0) {
+            lead_skip = 0;
+            lead_height = 0;
+        } else {
+            lead_height = body_rect().height > 214 ? 214 : 0;
+        }
     }
     size_t old_lead_skip = s_chapter_lead_skip;
     unsigned old_lead_height = s_chapter_lead_height;
@@ -3347,7 +3372,7 @@ static bool load_chapter_at(app_ctx_t* ctx, size_t chapter, size_t offset,
     // 题头几何按当前模式重算，横排留顶部行高、竖排留右侧列宽，绘制与预留不会错开。
     // Recompute the heading geometry for the current mode -- rows at the top horizontally,
     // columns at the right vertically -- so drawing and reservation cannot drift apart.
-    apply_chapter_lead(heading, label, lead_skip);
+    apply_chapter_lead(heading, label, lead_skip, lead_height);
     s_reader_dims_ctx = (reader_dims_ctx_t){chapter, loaded.images, loaded.image_count};
     book_layout_set_image_dims(reader_image_dims, &s_reader_dims_ctx);
     book_layout_set_runs(loaded.runs, loaded.run_count);
@@ -3393,6 +3418,7 @@ static bool load_chapter_at(app_ctx_t* ctx, size_t chapter, size_t offset,
     s_chapter = chapter;
     if (clear_toc) s_selected_toc = SIZE_MAX;
     s_chapter_lead_skip = lead_skip;
+    s_chapter_lead_row_height = lead_height;
     copy_text(s_chapter_heading_title, sizeof(s_chapter_heading_title), heading);
     copy_text(s_chapter_heading_label, sizeof(s_chapter_heading_label), label);
     s_page = last_page ? book_layout_page_count() - 1 :
@@ -4185,7 +4211,8 @@ static app_redraw_t apply_reader_option(app_ctx_t* ctx, int kind) {
     // 模式变了，题头预留也跟着换轴：竖排留右侧列宽、横排留顶部行高。
     // The mode changed, so the heading's reservation changes axis too: columns to the right
     // vertically, rows at the top horizontally.
-    apply_chapter_lead(s_chapter_heading_title, s_chapter_heading_label, s_chapter_lead_skip);
+    apply_chapter_lead(s_chapter_heading_title, s_chapter_heading_label, s_chapter_lead_skip,
+                       s_chapter_lead_row_height);
     bool ok = book_layout_build_blocks(s_text, s_text_len, s_blocks, s_block_count, body_rect(), s_px);
     if (ok) s_page = book_layout_page_for_offset(off);
     else {
@@ -4197,7 +4224,8 @@ static app_redraw_t apply_reader_option(app_ctx_t* ctx, int kind) {
             app_settings_set_book_vertical(previous);
             book_layout_set_vertical(previous);
         }
-        apply_chapter_lead(s_chapter_heading_title, s_chapter_heading_label, s_chapter_lead_skip);
+        apply_chapter_lead(s_chapter_heading_title, s_chapter_heading_label, s_chapter_lead_skip,
+                       s_chapter_lead_row_height);
         (void)book_layout_build_blocks(s_text, s_text_len, s_blocks, s_block_count, body_rect(), s_px);
         copy_text(s_reader_notice, sizeof(s_reader_notice), "排版失败，请重试");
         s_reader_notice_until = esp_timer_get_time() / 1000 + 1800;
