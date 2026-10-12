@@ -33,6 +33,7 @@
 
 #include "app_loop.h"
 #include "auto_lock.h"
+#include "crash_note.h"
 
 #include <string.h>
 
@@ -443,6 +444,9 @@ void app_loop_run(const app_loop_config_t* config) {
     app_present(&ctx, current, APP_REDRAW_FULL);
     pico_boot_ready();
     ESP_LOGI(TAG, "UI ready on %s", current->title);
+    // 上次崩溃的现场（异常类型与触发地址）：有的话打一遍，串口和屏幕各有一份。
+    // The previous panic scene, when there was one: logged here, and shown on the home screen.
+    crash_note_log();
 
     while (true) {
         unsigned requested_cover_policy = (unsigned)app_settings_main_refresh_mode() | ((unsigned)app_settings_system_contrast() << 8);

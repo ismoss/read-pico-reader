@@ -53,6 +53,7 @@ idf_component_register(
         "lock_screen.c"
         "settings.c"
         "app/app_loop.c"
+        "app/crash_note.c"
         "app/app_registry.c"
         "ui/ui_kit.c"
         "ui/ui_text_edit.c"
@@ -113,3 +114,10 @@ idf_component_register(
         "assets/reading.md"
         "assets/display-test.png"
 )
+
+# 包住 IDF 的 panic 处理器：崩溃现场在重启前落进 RTC，没有串口时那是唯一的现场。
+# 链接选项挂在 main 上，INTERFACE 会带到最终链接；写在 project() 之后的全局属性则太晚。
+# Wrap the IDF panic handler so the crash scene reaches RTC before a restart; without a console
+# that is the only place it survives. The option hangs off main, whose INTERFACE carries it into
+# the final link; a global property set after project() is too late for the linker to see it.
+target_link_options(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=esp_panic_handler")

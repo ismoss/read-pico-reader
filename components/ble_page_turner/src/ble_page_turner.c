@@ -29,6 +29,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "nvs.h"
+#include "read_pico_crashlog.h"
 
 #include "host/ble_gap.h"
 #include "host/ble_gatt.h"
@@ -43,6 +44,7 @@
 #include "store/config/ble_store_config.h"
 
 static const char *TAG = "ble_pt";
+
 // 网络占用先登记，再串行拆栈，防止主循环同时重建蓝牙。/ Reserve network memory before serial teardown to prevent a concurrent BLE restart.
 static atomic_flag s_lifecycle = ATOMIC_FLAG_INIT;
 static atomic_uint s_network_users;
@@ -133,6 +135,31 @@ static ble_pt_bond_t s_bonds[BLE_PT_MAX_BONDS];
 static uint8_t s_bond_count;
 static char s_conn_addr[18];
 static char s_conn_name[32];
+// 本次链路是否已经把对端记进配对表：记一次就够，见 remember_live_peer()。
+// Whether this link's peer has already been recorded; once is enough, see remember_live_peer().
+static bool s_peer_remembered;
+// 最近一次收到报告的时刻，以及按下状态的兜底超时。翻页器常常不发「松开」那条全零报告，
+// 没有这道兜底，按一下就会自己一直翻页，每秒八页地翻到内存耗尽重启。
+// When a report last arrived, and the fallback timeout for the held state. Remotes often never
+// send the all-zero release report, and without this timeout one press keeps turning pages by
+// itself, eight a second, until memory runs out and the board restarts.
+#define HELD_TIMEOUT_MS 5000
+static uint32_t s_last_rx_ms;
+// 报告路径的去抖：同一个键这么久之内只投递一次，用来挡住"按住期间帧帧都算新按下"。
+// Report-path debounce: one delivery per key within this window, which stops frames that all look
+// like a fresh press while a key is held.
+#define SAME_KEY_DEBOUNCE_MS 500
+static uint8_t s_emit_usage;
+static uint32_t s_emit_ms;
+// 一次按住最多重复多少次：约 7.7 秒，够连着翻页，又让重复无论如何都有终点。
+// How many repeats one hold may produce: about 7.7 s, enough for a run of page turns while
+// guaranteeing the repeat loop ends.
+#define REPEAT_MAX 60
+static uint8_t s_repeat_count;
+// 本次链路用的是哪种对端地址：连接时用它，记住设备时也存它。
+// Which peer address type this link used: it is needed to connect and is stored when the peer is
+// remembered.
+static uint8_t s_conn_addr_type = BLE_ADDR_PUBLIC;
 static char s_failure[128];
 // 启动策略状态：退避截止、稳定计时起点、上一次同步是否已发生过、启动失败原因。
 // Start-policy state: back-off deadline, stability timer, whether a sync has happened yet, and
@@ -150,6 +177,20 @@ static uint32_t s_reconnect_at;
 // poll() starts it once the disconnect has landed.
 static char s_pending_addr[18];
 static volatile bool s_connected, s_connecting, s_scanning;
+// 建立链路的进度标志：服务发现是否走完（成功失败都算）、加密阶段是否结束。
+// 回调写、状态机读，定义在这里是因为服务发现回调比状态机更早用到它们。
+// Bring-up progress flags: whether service discovery finished (either way) and whether the
+// security step is over. Callbacks write them and the state machine reads them; they live here
+// because the discovery callback needs them before the state machine is defined.
+static volatile bool s_discovery_done;
+static volatile bool s_enc_done;
+// 请求取消扫描的时刻：DISC_COMPLETE 迟迟不来时用它兜底清标志。
+// When the scan cancel was requested, so a missing DISC_COMPLETE can be caught by a timeout.
+static uint32_t s_scan_cancel_ms;
+// 排队连接的下一次尝试时刻：控制器忙（扫描取消未落地）时按 300ms 重试，别每轮都撞一次。
+// When a queued connect may be retried: 300 ms apart while the controller is busy with a scan
+// cancel, rather than hammering it every tick.
+static uint32_t s_pending_at;
 static atomic_bool s_running;
 // 链路是否已经建立（GAP 层）。与 s_connected 分开：后者还要求服务发现做完。重连必须以
 // 这个为准——否则发现没走完时会把一条好链路反复拆掉重建，表现就是"连上一会儿又掉"。
@@ -179,7 +220,6 @@ static uint8_t s_subscribed_count;
 static uint16_t s_hid_svc_end = 0xFFFF;
 // 发现是否已经发起过。/ Whether discovery has been kicked off for this link.
 static bool s_discovery_started;
-static bool s_protocol_mode_written;
 
 // 报告映射给出的提示：哪个字节更可能是键码。/ Report-map hint for the byte that holds the code.
 static bool s_has_keyboard_page, s_has_consumer_page;
@@ -265,7 +305,13 @@ static void bond_add(const char *addr, const char *name, uint8_t type) {
     if (!addr || !addr[0]) return;
     ble_pt_bond_t *existing = bond_find(addr);
     if (existing) {
-        if (name && name[0]) snprintf(existing->name, sizeof(existing->name), "%s", name);
+        // 名字没变就不写 NVS：这条路径每次链路可用都会被走到，而 NVS 写要几毫秒和可观的栈，
+        // 放在通知回调的上下文里做，按键一密集就会撞上 NimBLE host 任务的栈上限。
+        // Nothing is stored when the name is unchanged: this path runs on every usable link, and an
+        // NVS write costs milliseconds and a lot of stack -- done inside the notification callback
+        // it walks into the NimBLE host task's stack limit as soon as keys come fast.
+        if (!name || !name[0] || strcmp(existing->name, name) == 0) return;
+        snprintf(existing->name, sizeof(existing->name), "%s", name);
         bonds_save();
         return;
     }
@@ -305,6 +351,7 @@ uint32_t ble_pt_input_serial(void) {
     return serial;
 }
 static void key_push(const ble_pt_event_t *ev) {
+    ble_pt_crumb(BLE_PT_CRUMB_KEY_PUSH);
     portENTER_CRITICAL(&s_ring_lock);
     ++s_input_serial;
     const uint8_t next = (uint8_t)((s_keys.head + 1) % KEY_RING_LEN);
@@ -395,17 +442,28 @@ static ble_pt_key_t usage_to_special(uint8_t usage) {
 
 static void emit_usage(uint8_t usage, uint8_t mods) {
     if (!usage) return;
+    ble_pt_crumb(BLE_PT_CRUMB_EMIT);
+    // 解出来的按键也上屏：和上面的 rx 行一起，就能分清"没收到数据"和"收到了但没解出来"。
+    // A decoded key also reaches the screen: together with the rx line above it separates "no data
+    // arrived" from "data arrived but nothing was decoded".
     const ble_pt_event_t ev = {.usage = usage, .mods = mods, .special = usage_to_special(usage)};
     s_held_usage = usage;
     s_held_mods = mods;
     s_held_since = (uint32_t)(esp_timer_get_time() / 1000);
     s_last_repeat = 0;
+    s_repeat_count = 0;  // 新的一次按下重新计数 / a fresh press starts its own count
     key_push(&ev);
 }
 
 // 一帧报告 → 键事件 + 原始边沿。/ One report frame to key events plus raw edges.
 static void ingest_report(const uint8_t *data, size_t len) {
     if (!data || !len || len > FRAME_MAX) return;
+    ble_pt_crumb(BLE_PT_CRUMB_INGEST);
+    // 记下最近一次收到数据的时刻：按下状态靠它兜底超时（见 poll_locked）——
+    // 对端不发「松开」那条全零报告时，s_held_usage 否则永远不会清。
+    // Remember when data last arrived: the held state times out on it (see poll_locked), because
+    // s_held_usage otherwise never clears when the peer never sends the all-zero release report.
+    s_last_rx_ms = (uint32_t)(esp_timer_get_time() / 1000);
 
     const uint8_t code = extract_primary_code(data, len);
     const uint8_t mods = s_has_keyboard_page ? data[len == 9 ? 1 : 0] : 0;
@@ -441,7 +499,25 @@ static void ingest_report(const uint8_t *data, size_t len) {
     memcpy(s_last, data, len);
 
     if (code) {
-        if (code != s_held_usage || mods != s_held_mods) emit_usage(code, mods);
+        // 报告路径去抖：同一个键 500ms 内只投递一次。
+        // 对端的报告帧在被按住期间可能持续变化（首字节在零与码值之间来回，或者报表里带着
+        // 会变的字节），逐帧投递就成了每秒几十次翻页，一路把内存和看门狗逼到重启——
+        // 现象就是"按一下就重启"，而且串口里能看到同一个键被反复上报。
+        // 自动重复不走这里，所以按住连翻不受影响。
+        // Debounce on the report path: one delivery per key per 500 ms. A peer's frames can keep
+        // changing while the key is held (the first byte alternating between zero and the code, or
+        // a field that keeps moving), and forwarding each frame becomes dozens of turns a second
+        // until memory or the watchdog restarts the board -- the "one press and it restarts"
+        // symptom, with the same key reported over and over. Auto-repeat does not come through
+        // here, so holding to turn pages is unaffected.
+        const uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
+        const bool changed = code != s_held_usage || mods != s_held_mods;
+        const bool debounced = code == s_emit_usage && now - s_emit_ms < SAME_KEY_DEBOUNCE_MS;
+        if (changed && !debounced) {
+            s_emit_usage = code;
+            s_emit_ms = now;
+            emit_usage(code, mods);
+        }
     } else s_held_usage = 0;  // 全零报告 = 所有键都松开了 / an all-released report
 }
 
@@ -490,16 +566,31 @@ static int scan_cb(struct ble_gap_event *event, void *arg) {
 void ble_pt_scan_start(uint32_t ms) {
     if (!s_running || s_scanning || s_connected || s_connecting) return;
     s_device_count = 0;  // 重扫时清空，免得新旧混在一起 / clear on rescan so old and new do not mix
+    // 扫描参数用协议栈默认值：曾经照 CrossMux 设成 itvl=window=160（100% 占空比），
+    // 那也是可能被控制器以 HCI 0x12 拒掉的一条命令。先把连接能力拿回来。
+    // Scan parameters stay at the stack defaults: setting itvl=window=160 for a full duty cycle,
+    // as CrossMux does, is another command the controller can refuse with HCI 0x12. Restoring the
+    // ability to connect comes first.
     const struct ble_gap_disc_params params = {
         .itvl = 0, .window = 0, .filter_duplicates = 0, .passive = 0,
     };
-    if (ble_gap_disc(s_own_addr_type, (int32_t)ms, &params, scan_cb, NULL) == 0) s_scanning = true;
+    if (ble_gap_disc(s_own_addr_type, (int32_t)ms, &params, scan_cb, NULL) == 0) {
+        s_scanning = true;
+    } else {
+    }
 }
 
 void ble_pt_scan_stop(void) {
     if (!s_scanning) return;
     ble_gap_disc_cancel();
-    s_scanning = false;
+    // 这里**不**清 s_scanning：取消扫描是异步的，控制器还在扫的时候发起连接会直接被拒
+    // （BLE_HS_EBUSY），界面只弹一句"连接失败请重试"，日志里什么都没有。
+    // 扫描真正结束由 DISC_COMPLETE 落地，poll() 另有超时兜底。
+    // Do NOT clear s_scanning here: the cancel is asynchronous, and starting a connection while
+    // the controller still scans is refused outright (BLE_HS_EBUSY), which shows up as a bare
+    // "connection failed, try again" with nothing at all in the log. The real end lands with
+    // DISC_COMPLETE, with a timeout fallback in poll().
+    s_scan_cancel_ms = (uint32_t)(esp_timer_get_time() / 1000);
 }
 
 bool ble_pt_scanning(void) { return s_scanning; }
@@ -546,22 +637,45 @@ static void peer_addr_from_desc(const struct ble_gap_conn_desc *desc, char *out,
              desc->peer_id_addr.val[1], desc->peer_id_addr.val[0]);
 }
 
+// 链路一可用就记住这台设备。很多翻页器是明文 HID，从不配对，也就永远等不到加密事件，
+// 于是界面显示「已连接」却不出现在已配对列表里，用户根本找不到它、也没法回连。
+// 真正配对成功的设备走 ENC_CHANGE 那条路，地址类型同样会存下来。
+// Remember a peer as soon as its link is usable. Plenty of remotes are plaintext HID that never
+// pair, so the encryption event never arrives and the device stayed "connected" yet absent from
+// the paired list, where the user could neither find nor reconnect it. A peer that does pair is
+// recorded through ENC_CHANGE instead, with the same address type.
+static void remember_live_peer(void) {
+    // 每次链路只记一次：这个函数会被每条通知调用，而往下是 NVS 写。
+    // Once per link: this is called from every notification, and an NVS write waits below.
+    if (s_peer_remembered || !s_conn_addr[0]) return;
+    s_peer_remembered = true;
+    bond_add(s_conn_addr, s_conn_name, s_conn_addr_type);
+}
+
 // 订阅一个 HID 输入报告：在 CCCD 上写 0x0001（通知）。第一个订阅成功就算链路可用。
 // Subscribe to one HID input report by writing 0x0001 (notify) to its CCCD. The link counts as
 // usable once the first one succeeds.
+static void dsc_next(void);
+static void subscribe_next(void);
+
 static int cccd_write_cb(uint16_t conn_handle, const struct ble_gatt_error *error,
                          struct ble_gatt_attr *attr, void *arg) {
     (void)conn_handle; (void)attr; (void)arg;
     if (error && error->status != 0) {
         ESP_LOGW(TAG, "CCCD write failed: %d", error->status);
+        subscribe_next();  // 这一个不行就试下一个，别把订阅整条停住
         return 0;
     }
     s_subscribed_count++;
+    remember_live_peer();
     if (!s_connected) {
         s_connected = true;
         s_connecting = false;
         ESP_LOGI(TAG, "connected to %s", s_conn_name);
     }
+    // 上一个写完了才发下一个：见 subscribe_next 的说明。
+    // The next write goes out only after this one is done; see subscribe_next.
+    subscribe_next();
     return 0;
 }
 
@@ -573,24 +687,54 @@ static int cccd_write_cb(uint16_t conn_handle, const struct ble_gatt_error *erro
 // nested descriptor discovery and a protocol-mode write inside chr_cb, and a CCCD write inside
 // dsc_cb.
 static uint16_t s_pmode_handle;
+// Report Map(0x2A4B) 的句柄：解码提示要从它读出来。
+// Handle of the Report Map (0x2A4B), where the decoding hints come from.
+static uint16_t s_report_map_handle;
 static uint8_t s_dsc_index;
+// 订阅进度：一次只发一个 CCCD 写。/ Subscription progress: one CCCD write at a time.
+static uint8_t s_sub_index;
+static unsigned s_sub_started;
 
-// 找完所有输入报告的描述符之后才订阅。/ Subscribe only once every descriptor pass is done.
-static void subscribe_ready(void) {
-    for (uint8_t i = 0; i < s_input_chr_count; ++i) {
-        if (!s_input_chr_cccds[i]) continue;
-        const uint8_t value[2] = {0x01, 0x00};  // 通知 / notify
-        const int rc = ble_gattc_write_flat(s_conn_handle, s_input_chr_cccds[i], value,
-                                            sizeof(value), cccd_write_cb, NULL);
-    }
-    if (!s_input_chr_count) {
-        // 没有可订阅的输入报告：链路是好的，只是没有键。
-        // No subscribable input report: the link is fine, there are just no keys.
+// 订阅收尾：算上失败的那些，一个也没订上就说明链路虽好却没有可用的按键报告。
+// Wrap-up: with none subscribed at all the link is fine but has no usable key report.
+static void subscribe_finish(void) {
+    ESP_LOGI(TAG, "subscribing %u of %u input report(s)", s_sub_started,
+             (unsigned)s_input_chr_count);
+    if (!s_sub_started && !s_input_chr_count) {
         if (!s_connected) {
             s_connected = true;
             s_connecting = false;
         }
     }
+}
+
+// 一次只发一个 CCCD 写，写完了（回调到了）再发下一个。
+// 同时发几个会撞上 NimBLE 很小的 ATT procedure 池：proc alloc failed 之后它的状态不再一致，
+// 紧接着就是 spinlock 断言重启——这正是"按一下就重启"的现场。
+// One CCCD write at a time, the next going out only once this one's callback arrives. Issuing
+// several at once runs into NimBLE's small ATT procedure pool: after proc alloc fails its state is
+// no longer consistent, and the spinlock assert plus restart follow -- exactly the scene behind
+// "one press and it restarts".
+static void subscribe_next(void) {
+    while (s_sub_index < s_input_chr_count) {
+        const uint16_t cccd = s_input_chr_cccds[s_sub_index++];
+        if (!cccd) continue;
+        const uint8_t value[2] = {0x01, 0x00};  // 通知 / notify
+        if (ble_gattc_write_flat(s_conn_handle, cccd, value, sizeof(value), cccd_write_cb,
+                                 NULL) == 0) {
+            ++s_sub_started;
+            return;  // 等这条的回调再继续 / continue from this one's callback
+        }
+    }
+    subscribe_finish();
+}
+
+// 找完所有输入报告的描述符之后才开始订阅。/ Subscribing starts only once every descriptor pass is done.
+static void subscribe_ready(void) {
+    ble_pt_crumb(BLE_PT_CRUMB_SUBSCRIBE);
+    s_sub_index = 0;
+    s_sub_started = 0;
+    subscribe_next();
 }
 
 static void dsc_next(void);
@@ -615,16 +759,45 @@ static int dsc_cb(uint16_t conn_handle, const struct ble_gatt_error *error,
     }
 }
 
+// 读 Report Map 拿解码提示：照 CrossMux 的 setupHid，先读 0x2A4B 再订阅。
+// 这个回调以前根本不存在，于是 report_map_hints() 从未被调用，按键落在哪个字节上全靠猜，
+// 遥控器按下去自然没有反应。
+// Read the Report Map for decoding hints, the way CrossMux's setupHid does before subscribing.
+// The callback simply did not exist before, so report_map_hints() was never called and which byte
+// carried the key was pure guesswork -- which is why a press did nothing.
+static int report_map_cb(uint16_t conn_handle, const struct ble_gatt_error *error,
+                         struct ble_gatt_attr *attr, void *arg) {
+    (void)conn_handle; (void)arg;
+    if (error != NULL && error->status == 0 && attr != NULL && attr->om != NULL) {
+        const uint8_t *data = OS_MBUF_DATA(attr->om, const uint8_t *);
+        const uint16_t len = (uint16_t)OS_MBUF_PKTLEN(attr->om);
+        report_map_hints(data, len);
+    } else {
+    }
+    subscribe_ready();
+    return 0;
+}
+
 // 一个报告接一个报告地找它的 CCCD。/ Walk the report characteristics one at a time.
 static void dsc_next(void) {
     if (s_dsc_index >= s_input_chr_count) {
+        // 订阅之前先把 Report Map 读出来，CrossMux 的次序就是这样。
+        // The Report Map is read before subscribing, which is CrossMux's order.
+        if (s_report_map_handle) {
+            if (ble_gattc_read(s_conn_handle, s_report_map_handle, report_map_cb, NULL) == 0)
+                return;
+        }
         subscribe_ready();
         return;
     }
     const uint8_t i = s_dsc_index++;
     const int rc = ble_gattc_disc_all_dscs(s_conn_handle, s_input_chr_vals[i], s_hid_svc_end,
                                            dsc_cb, (void *)(uintptr_t)i);
-    if (rc != 0) dsc_next();  // 起不来就跳过这一个，别把整条链卡死
+    if (rc != 0) {
+        // 起不来就跳过这一个，别把整条链卡死。
+        // A pass that will not start is skipped rather than stalling the chain.
+        dsc_next();
+    }
 }
 
 static void chr_enum_done(void);
@@ -632,7 +805,7 @@ static void chr_enum_done(void);
 // 协议模式写完再去找描述符。/ Descriptor passes start once the protocol-mode write is done.
 static int pmode_cb(uint16_t conn_handle, const struct ble_gatt_error *error,
                     struct ble_gatt_attr *attr, void *arg) {
-    (void)conn_handle; (void)attr; (void)arg;
+    (void)conn_handle; (void)attr; (void)arg; (void)error;
     chr_enum_done();
     return 0;
 }
@@ -663,8 +836,24 @@ static int chr_cb(uint16_t conn_handle, const struct ble_gatt_error *error,
                 return 0;
             }
             const ble_uuid16_t report = BLE_UUID16_INIT(HID_CHR_REPORT);
-            if (ble_uuid_cmp(&chr->uuid.u, &report.u) == 0 &&
-                (chr->properties & BLE_GATT_CHR_PROP_NOTIFY) &&
+            // Report Map(0x2A4B)：记下句柄，等描述符找完再读，读到的提示决定按键算在哪个字节。
+            // Report Map (0x2A4B): keep the handle and read it after the descriptor passes; what it
+            // says decides which byte holds the key.
+            const ble_uuid16_t rmap = BLE_UUID16_INIT(HID_CHR_REPORT_MAP);
+            if (ble_uuid_cmp(&chr->uuid.u, &rmap.u) == 0 &&
+                (chr->properties & BLE_GATT_CHR_PROP_READ)) {
+                s_report_map_handle = chr->val_handle;
+                return 0;
+            }
+            // Boot Keyboard Input(0x2A22) 也要订阅：有些翻页器只暴露这一个输入特征，
+            // 只认 Report 特征时就会出现"连上了、配对也在，按键一个都进不来"。
+            // Boot Keyboard Input (0x2A22) must be subscribed too: some remotes expose only that
+            // one input characteristic, and accepting Report alone leaves the link up and paired
+            // with no key ever arriving.
+            const ble_uuid16_t boot_kbd = BLE_UUID16_INIT(HID_CHR_BOOT_KBD_INPUT);
+            const bool is_report = ble_uuid_cmp(&chr->uuid.u, &report.u) == 0;
+            const bool is_boot_kbd = ble_uuid_cmp(&chr->uuid.u, &boot_kbd.u) == 0;
+            if ((is_report || is_boot_kbd) && (chr->properties & BLE_GATT_CHR_PROP_NOTIFY) &&
                 s_input_chr_count < MAX_INPUT_CHRS) {
                 const uint8_t index = s_input_chr_count++;
                 s_input_chr_vals[index] = chr->val_handle;
@@ -690,6 +879,10 @@ static int chr_cb(uint16_t conn_handle, const struct ble_gatt_error *error,
 // never called back on this peripheral. No procedure is started from another's callback either.
 static bool s_hid_found;
 static uint16_t s_hid_svc_start = 0xFFFF;
+// 发现开始的时刻：卡住不动时用它超时重试，而不是永久等一个不会来的回调。
+// When discovery started, so a callback that never comes can be retried instead of waited on
+// forever.
+static uint32_t s_discovery_ms;
 
 static int svc_cb(uint16_t conn_handle, const struct ble_gatt_error *error,
                   const struct ble_gatt_svc *svc, void *arg) {
@@ -706,69 +899,253 @@ static int svc_cb(uint16_t conn_handle, const struct ble_gatt_error *error,
             return 0;
         }
         case BLE_HS_EDONE: {
-            if (!s_hid_found) {
-                // 链路是通的，只是对方不是 HID 设备：照样算连上，免得界面永远转圈。
-                // The link is fine, the peer just is not a HID device: mark it connected anyway so
-                // the page does not spin forever.
-                snprintf(s_failure, sizeof(s_failure), "该设备不提供 HID 服务");
-                if (!s_connected) {
-                    s_connected = true;
-                    s_connecting = false;
-                }
-                return 0;
-            }
+            // 发现到此结束（有没有 HID 都算结束）：由状态机决定是继续还是断开并写明原因。
+            // Discovery is over whether or not HID turned up; the state machine decides whether to
+            // continue or to drop the link with a reason.
+            s_discovery_done = true;
+            if (!s_hid_found) return 0;
             const int rc = ble_gattc_disc_all_chrs(conn_handle, s_hid_svc_start, s_hid_svc_end,
                                                    chr_cb, NULL);
-            return rc;
+            if (rc != 0) {
+                // 特征枚举没起来：退回"未开始"，由 poll() 的超时重跑一遍，别停在这里。
+                // The characteristic pass would not start: fall back to "not started" and let the
+                // poll timeout run it again instead of stopping here.
+                s_discovery_started = false;
+                s_discovery_ms = 0;
+            }
+            return 0;
         }
         default:
             return 0;
     }
 }
 
-static void start_discovery(void) {
-    s_discovery_started = true;
-    s_hid_found = false;
-    s_hid_svc_start = 0xFFFF;
+// 开始服务发现。返回 false 表示控制器拒绝了这次 ATT 操作（多半是加密还没完成），
+// 调用方保持"未开始"状态稍后重试——这正是"一直正在连接"的死锁来源：
+// 旧代码先置 s_discovery_started 再调用、且不看返回值，被拒之后谁也不重试。
+// Start service discovery. False means the controller refused the ATT operation (usually because
+// encryption is still in flight); the caller keeps the "not started" state and retries. That
+// refusal was the deadlock behind a page stuck on "connecting" forever: the old code set
+// s_discovery_started before the call and never looked at the result, so nothing ever retried.
+static bool start_discovery(void) {
     const int rc = ble_gattc_disc_all_svcs(s_conn_handle, svc_cb, NULL);
+    if (rc != 0) {
+        return false;
+    }
+    s_discovery_started = true;
+    s_discovery_ms = (uint32_t)(esp_timer_get_time() / 1000);
+    return true;
 }
+
+// 已用另一种对端地址类型重试过几次。地址类型猜错是"部分设备连不上"最常见的来由，
+// 而地址在字面上分不出 public 还是 random，CrossMux 的做法就是失败后换一种再试。
+// How many times the alternate peer address type has been tried. Guessing the address type wrong
+// is the most common reason "some remotes will not connect", and the two are indistinguishable by
+// eye, so CrossMux's move is to try the other one after a failure.
+static uint8_t s_addr_type_alt_tries;
+static int start_connect(const char* addr, uint8_t type);
+
+/* ---- 建立链路：照 CrossMux 的步骤 / Bring-up, CrossMux's steps ---- */
+
+// CrossMux 在专属任务里按 connect → 确认有 HID → 配对 → 订阅 的顺序推进，每一步失败就断开重来。
+// 这里用同一套顺序和同样的判定，只把"阻塞等待"换成 poll() 逐轮推进并带超时：
+// 超时或失败都断开链路、写明原因、在屏幕上留一行，绝不会再出现"永远正在连接、也没有解释"。
+// CrossMux walks connect, confirm HID, pair, subscribe in a dedicated task and drops the link on
+// any failure. This keeps that order and those verdicts, replacing the blocking waits with a
+// tick-driven advance that carries timeouts: a stall or a failure drops the link, records why and
+// leaves a line on screen, so "connecting forever with no explanation" cannot happen again.
+typedef enum {
+    STEP_IDLE = 0,
+    STEP_LINK,      // 等链路建立 / waiting for the link
+    STEP_DISCOVER,  // 服务发现，确认对端有 HID / service discovery, confirm the peer has HID
+    STEP_SECURE,    // 配对与加密；明文设备超时即放行 / pairing; a plaintext peer passes on timeout
+    STEP_SETUP,     // 协议模式、描述符、订阅 / protocol mode, descriptors, subscribe
+    STEP_READY,     // 链路可用 / the link is usable
+} step_t;
+
+static step_t s_step;
+static uint32_t s_step_at;
+static bool s_alt_type_tried;
+
+static uint32_t now_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
+
+static void step_begin(step_t step) {
+    s_step = step;
+    s_step_at = now_ms();
+}
+
+static bool step_over(uint32_t limit_ms) { return now_ms() - s_step_at >= limit_ms; }
+
+// 断开并写明原因：界面上要能读到"哪一步失败、为什么"。
+// Drop the link and record why: the screen has to say which step failed and why.
+static void step_fail(const char *why) {
+    ble_pt_crumb(BLE_PT_CRUMB_FAIL);
+    snprintf(s_failure, sizeof(s_failure), "%s", why);
+    s_step = STEP_IDLE;
+    if (s_conn_handle != BLE_HS_CONN_HANDLE_NONE) ble_gap_terminate(s_conn_handle, 0x13);
+}
+
+// 推进一键建立链路。由 poll() 每轮调用一次。
+// Advance the bring-up by one tick; poll() calls this every iteration.
+static void step_poll(void) {
+    switch (s_step) {
+        case STEP_LINK:
+            if (s_link_up) {
+                ble_pt_crumb(BLE_PT_CRUMB_LINK);
+                step_begin(STEP_DISCOVER);
+            } else if (!s_connecting || step_over(10000)) {
+                // 连接失败事件到了就立刻处理，不用干等满 10 秒；超时也走同一条路。
+                // A connect-failure event is handled the moment it lands instead of waiting out the
+                // full 10 s, and a timeout takes the same route.
+                // 换另一种地址类型再试一次，和 CrossMux 一样。
+                // Retry with the other address type, exactly as CrossMux does.
+                if (!s_alt_type_tried && s_conn_addr[0]) {
+                    s_alt_type_tried = true;
+                    const uint8_t alt = s_conn_addr_type == BLE_ADDR_PUBLIC ? BLE_ADDR_RANDOM
+                                                                           : BLE_ADDR_PUBLIC;
+                    if (start_connect(s_conn_addr, alt) == 0) {
+                        step_begin(STEP_LINK);
+                        break;
+                    }
+                }
+                step_fail("连接失败");
+            }
+            break;
+
+        case STEP_DISCOVER:
+            // 加密还在进行时 ATT 会被拒，先等一小会儿；被拒就下一轮再试（start_discovery
+            // 失败时不置"已开始"）。
+            // ATT is refused while encryption is in flight, so wait a moment and retry on refusal
+            // (start_discovery leaves the flag clear when it is refused).
+            if (!s_discovery_started && !s_discovery_done && step_over(2500)) {
+                ble_pt_crumb(BLE_PT_CRUMB_DISCOVER);
+                start_discovery();
+            }
+            if (s_discovery_done) {
+                if (!s_hid_found) step_fail("不是 HID 设备");
+                else {
+                    ble_pt_crumb(BLE_PT_CRUMB_HID);
+                    step_begin(STEP_SECURE);
+                }
+            } else if (step_over(12000)) {
+                step_fail("服务发现超时");
+            }
+            break;
+
+        case STEP_SECURE:
+            if (s_enc_done) {
+                ble_pt_crumb(BLE_PT_CRUMB_PAIR);
+                step_begin(STEP_SETUP);
+            } else if (step_over(6000)) {
+                // 明文 HID 不发加密事件：放行，但不能一直等。
+                // A plaintext HID peer never reports encryption: move on, but do not wait forever.
+                ble_pt_crumb(BLE_PT_CRUMB_PAIR);
+                step_begin(STEP_SETUP);
+            }
+            break;
+
+        case STEP_SETUP:
+            if (s_connected) {
+                ble_pt_crumb(BLE_PT_CRUMB_READY);
+                step_begin(STEP_READY);
+            } else if (step_over(8000)) {
+                step_fail("没有可订阅的输入报告");
+            }
+            break;
+
+        case STEP_IDLE:
+        case STEP_READY:
+        default:
+            break;
+    }
+}
+
+/* ---- 建立链路的记录 / Bring-up trail ---- */
+
+// 每一步留一行给崩溃日志，存在 RTC 里、跨软复位保留：崩溃后重启，屏幕上的「上次运行」区
+// 列出的就是这一串事件。这台设备没有随手可用的串口，链路建立到哪一步只能这样留下来。
+// Every step leaves a line in the crash log, kept in RTC across a soft reset: after a crash the
+// "last run" block on screen lists exactly this trail. This board has no convenient console, and
+// how far the bring-up got has nowhere else to be remembered.
+static const char *crumb_name(uint8_t id) {
+    switch (id) {
+        case BLE_PT_CRUMB_CONNECT: return "connect";
+        case BLE_PT_CRUMB_LINK: return "link up";
+        case BLE_PT_CRUMB_DISCOVER: return "discover";
+        case BLE_PT_CRUMB_HID: return "HID ok";
+        case BLE_PT_CRUMB_PAIR: return "paired";
+        case BLE_PT_CRUMB_SUBSCRIBE: return "subscribe";
+        case BLE_PT_CRUMB_READY: return "ready";
+        case BLE_PT_CRUMB_FAIL: return "FAIL";
+        case BLE_PT_CRUMB_RX: return "rx";
+        case BLE_PT_CRUMB_INGEST: return "ingest";
+        case BLE_PT_CRUMB_EMIT: return "emit";
+        case BLE_PT_CRUMB_KEY_PUSH: return "push";
+        case BLE_PT_CRUMB_POP: return "pop";
+        default: return "?";
+    }
+}
+
+void ble_pt_crumb(uint8_t id) { rp_crash_log("%s", crumb_name(id)); }
 
 static int gap_cb(struct ble_gap_event *event, void *arg) {
     (void)arg;
     switch (event->type) {
         case BLE_GAP_EVENT_DISC_COMPLETE:
             s_scanning = false;
+            s_scan_cancel_ms = 0;
             return 0;
 
         case BLE_GAP_EVENT_CONNECT:
             if (event->connect.status != 0) {
                 s_connecting = false;
+                // 换不换地址类型、要不要放弃，都交给状态机：这里只负责把结果报出去。
+                // Whether to retry another address type or give up belongs to the state machine;
+                // this only reports the outcome.
                 snprintf(s_failure, sizeof(s_failure), "连接失败 (%d)", event->connect.status);
-                ESP_LOGW(TAG, "%s", s_failure);
                 return 0;
             }
             s_conn_handle = event->connect.conn_handle;
             s_link_up = true;
             s_connecting = false;  // 链路已建立，"连接中"到此为止 / the link exists, so stop saying "connecting"
-            struct ble_gap_conn_desc cd;
-            if (ble_gap_conn_find(event->connect.conn_handle, &cd) == 0) {
-                // 协商后的参数：监督超时太短就会在干扰下频繁掉线，这是"不稳定"的另一种成因。
-                // Negotiated parameters: too short a supervision timeout drops the link under
-                // interference, which is another way "unstable" happens.
-            }
+            // 链路建立、加密、发现、订阅各打一行：带上时间戳就能看出卡在哪一步。
+            // One line each for link up, encryption, discovery and subscription: with timestamps
+            // it is obvious which step stalls.
+            // 上一个对端留下的句柄不能带进这一次：协议模式句柄写错会打到别的特征上。
+            // Handles from the previous peer must not leak into this one: a stale protocol-mode
+            // handle would write into some other characteristic.
+            s_pmode_handle = 0;
+            s_report_map_handle = 0;
+            s_peer_remembered = false;
+            s_hid_found = false;
+            s_hid_svc_start = 0xFFFF;
             s_discovery_started = false;
             s_input_chr_count = 0;
             s_subscribed_count = 0;
-            const int src_ = ble_gap_security_initiate(s_conn_handle);
-            // 这里不做 GATT 发现：加密还在进行，ATT 操作会被拒，而发现一旦发起过就不再重试，
-            // 于是整条流程死掉。照 CrossMux 的顺序（connect → 确认服务 → secure → setup），
-            // 发现放到 ENC_CHANGE；已配对的链路可能已经加密、不会再发那个事件，poll() 里有兜底。
-            // No GATT discovery here: encryption is still in flight, the ATT operations are
-            // refused, and discovery never retries once started, so the whole bring-up died here.
-            // CrossMux's order is connect, confirm the service, secure, then set up, so discovery
-            // runs on ENC_CHANGE; poll() covers the already-encrypted case.
+            for (uint8_t i = 0; i < MAX_INPUT_CHRS; ++i) s_input_chr_cccds[i] = 0;
+            // 顺序照 CrossMux：连接 → 确认服务 → 配对 → setup。这里只发起配对请求，
+            // 发现由状态机在 STEP_DISCOVER 里发起（加密未完成时 ATT 会被拒）。
+            // CrossMux's order: connect, confirm the service, pair, then set up. This only starts
+            // the pairing; the state machine runs discovery in STEP_DISCOVER, since ATT is refused
+            // while encryption is still in flight.
             s_connect_ms = (uint32_t)(esp_timer_get_time() / 1000);
+            s_enc_done = false;
+            s_discovery_done = false;
+            // 明文设备不会回这个事件，加密步骤靠状态机的超时放行。
+            // A plaintext peer never answers this, and the state machine's timeout lets it pass.
+            (void)ble_gap_security_initiate(s_conn_handle);
             return 0;
+
+        case BLE_GAP_EVENT_CONN_UPDATE_REQ: {
+            // 只把监督超时保底到 8 秒，其余参数随对端：全盘改写可能被对端拒绝而断链，
+            // 而不设保底时对端一旦换成默认的 2.56 秒，主机这边的长阻塞就会掉线。
+            // Floor the supervision timeout at 8 s and leave the rest to the peer: rewriting the
+            // whole set risks a refusal that drops the link, while no floor at all means the peer's
+            // 2.56 s default cannot survive a long block on the host.
+            struct ble_gap_upd_params* ours = event->conn_update_req.self_params;
+            if (ours != NULL && ours->supervision_timeout < 800) ours->supervision_timeout = 800;
+            return 0;
+        }
 
         case BLE_GAP_EVENT_DISCONNECT:
             ESP_LOGI(TAG, "disconnected: %d", event->disconnect.reason);
@@ -784,8 +1161,8 @@ static int gap_cb(struct ble_gap_event *event, void *arg) {
             return 0;
 
         case BLE_GAP_EVENT_ENC_CHANGE: {
+            s_enc_done = true;  // 加密这一步到此为止，成功失败都算结束 / the security step is over either way
             if (event->enc_change.status != 0) {
-                ESP_LOGW(TAG, "encryption failed: %d", event->enc_change.status);
                 return 0;
             }
             struct ble_gap_conn_desc desc;
@@ -816,13 +1193,37 @@ static int gap_cb(struct ble_gap_event *event, void *arg) {
                     s_passkey = passkey;
                     s_passkey_ready = true;
                 }
+            } else if (event->passkey.params.action == BLE_SM_IOACT_NUMCMP) {
+                // 双方各自显示一串数字让用户核对：翻页器上没有可点的确认，直接接受。
+                // Both sides show a number for the user to compare; a remote has nothing to tap,
+                // so accept it.
+                struct ble_sm_io io = {.action = BLE_SM_IOACT_NUMCMP, .numcmp_accept = 1};
+                ble_sm_inject_io(event->passkey.conn_handle, &io);
+            } else {
+                // 其余动作（要求我们输入对端显示的码）这台设备没有键盘，只能记下来。
+                // The remaining action wants a code typed in, and this device has no keypad, so
+                // record it instead.
             }
             return 0;
         }
 
         case BLE_GAP_EVENT_NOTIFY_RX: {
+            ble_pt_crumb(BLE_PT_CRUMB_RX);
             const uint8_t *body = OS_MBUF_DATA(event->notify_rx.om, const uint8_t *);
             const uint16_t len = (uint16_t)OS_MBUF_PKTLEN(event->notify_rx.om);
+            // 收到数据就上屏：按键没反应时，第一步要分清"对端根本没发"还是"发了没解出来"。
+            // A received report goes on screen: when a press does nothing, the first question is
+            // whether the peer sent anything at all or sent something undecodable.
+            if (len > 0)
+            // 每一条通知都记下原始字节：遥控器到底发了什么、是不是空报告，一眼可见。
+            // Every notification records its raw bytes, so what the remote actually sent -- and
+            // whether it sent an empty report -- is right there.
+            {
+                char hex[3 * 24 + 1] = {0};
+                const uint16_t shown = len < 24 ? len : 24;
+                for (uint16_t i = 0; i < shown; ++i)
+                    snprintf(hex + i * 3, 4, "%02x ", body[i]);
+            }
             // 收到报告本身就是"链路可用"最可靠的证据：CCCD 订阅可能因为链路未加密而写失败，
             // 但已配对设备的订阅状态由对端保留，翻页器照样会发。之前拿"订阅写成功"当判据，
             // 于是能翻页却一直显示「连接中」，「学习」也因此说你没连。
@@ -834,6 +1235,10 @@ static int gap_cb(struct ble_gap_event *event, void *arg) {
                 s_connected = true;
                 s_connecting = false;
             }
+            // 已配对设备保留着订阅，报告会先于我们的订阅到达，这条同样算链路可用。
+            // A bonded peer keeps the subscription on its side, so a report can arrive before our
+            // own subscribe; this path proves the link just as well.
+            remember_live_peer();
             ingest_report(body, len);
             return 0;
         }
@@ -843,8 +1248,47 @@ static int gap_cb(struct ble_gap_event *event, void *arg) {
     }
 }
 
+// 按给定地址类型发起连接；成功返回 0，失败返回 NimBLE 的错误码。
+// Start a connection with the given peer address type; 0 on success, else NimBLE's error code.
+static int start_connect(const char *addr, uint8_t type) {
+    unsigned v[6];
+    if (sscanf(addr, "%x:%x:%x:%x:%x:%x", &v[0], &v[1], &v[2], &v[3], &v[4], &v[5]) != 6)
+        return BLE_HS_EINVAL;
+    ble_addr_t peer = {0};
+    for (int i = 0; i < 6; ++i) peer.val[5 - i] = (uint8_t)v[i];
+    peer.type = type;
+    // 连接参数交回协议栈默认值。曾经照 CrossMux 显式指定 itvl/latency/监督超时，
+    // 结果控制器以 HCI 0x12（Invalid HCI Command Parameters，NimBLE 报 530）拒绝了整次连接：
+    // 那套值在 NimBLE-Arduino 上合法，到了这里的原生 API 与控制器组合就不是。
+    // 先要连得上，再谈 8 秒监督超时那样的加固。
+    // Connection parameters go back to the stack defaults. Specifying interval, latency and
+    // supervision timeout the CrossMux way made the controller refuse the whole attempt with HCI
+    // 0x12 (Invalid HCI Command Parameters, NimBLE reports 530): those values are valid through
+    // NimBLE-Arduino but not through this native API on this controller. Connecting comes first;
+    // hardening such as an 8 s supervision timeout can follow.
+    s_connecting = true;
+    s_rest_known = false;
+    s_has_keyboard_page = s_has_consumer_page = false;
+    s_preferred_byte = 0xFF;
+    s_held_usage = 0;
+    s_subscribed_count = 0;
+    s_conn_addr_type = type;
+    const int rc = ble_gap_connect(s_own_addr_type, &peer, 10000, NULL, gap_cb, NULL);
+    if (rc != 0) {
+        s_connecting = false;
+        // 以前这里只写 s_failure：界面弹"连接失败请重试"，串口却一个字都没有，
+        // 谁也看不出是扫描没停（EBUSY）还是参数非法。
+        // This used to write s_failure alone: the UI said "connection failed, try again" while the
+        // log stayed silent, leaving no way to tell a scan that had not stopped (EBUSY) from an
+        // invalid parameter.
+    }
+    return rc;
+}
+
 esp_err_t ble_pt_connect(const char *addr) {
-    if (!s_running || !addr || !addr[0]) return ESP_ERR_INVALID_STATE;
+    if (!s_running || !addr || !addr[0]) {
+        return ESP_ERR_INVALID_STATE;
+    }
     if (s_link_up || s_connecting) {
         // 想换一台：先记下目标、断掉现有的，等 DISCONNECT 事件到了 poll() 再连。
         // 直接在这里发起会撞上还没落地的旧链路，返回 ESP_ERR_INVALID_STATE —— 表现就是
@@ -856,33 +1300,45 @@ esp_err_t ble_pt_connect(const char *addr) {
         ble_pt_disconnect();
         return ESP_OK;
     }
+    if (s_scanning) {
+        // 扫描还没停：先请求取消再立刻连接，控制器若还在扫会回 EBUSY，那时交给 poll() 稍后重试。
+        // 不在这里排队等 DISC_COMPLETE——事件一旦丢失，连接就永远排不上队。
+        // The scan is still up: ask to cancel and connect right away. If the controller is still
+        // scanning it answers EBUSY and poll() retries shortly after. Waiting here for
+        // DISC_COMPLETE would strand the connect for good if that event never lands.
+        ble_pt_scan_stop();
+    }
 
-    ble_pt_scan_stop();
-
-    unsigned v[6];
-    if (sscanf(addr, "%x:%x:%x:%x:%x:%x", &v[0], &v[1], &v[2], &v[3], &v[4], &v[5]) != 6)
-        return ESP_ERR_INVALID_ARG;
-    ble_addr_t peer = {0};
-    for (int i = 0; i < 6; ++i) peer.val[5 - i] = (uint8_t)v[i];
-    // 已配对过的用它的地址类型重连，公开地址只是兜底。
-    // Reconnect with the address type it was bonded with; public is only a fallback.
+    // 地址类型按可信度取：先用扫描结果里看到的（每台设备都带着自己的类型），
+    // 再退到已配对记录，最后才假设公开地址。
+    // Address type by trust: the scan result first (every device carries its own type), then the
+    // bond record, and only then the public fallback.
+    const ble_pt_device_t *dev = device_find(addr);
     const ble_pt_bond_t *bond = bond_find(addr);
-    peer.type = bond ? (uint8_t)bond->addr_type : BLE_ADDR_PUBLIC;
+    const uint8_t type = dev ? dev->addr_type : bond ? (uint8_t)bond->addr_type : BLE_ADDR_PUBLIC;
 
-    s_connecting = true;
-    s_rest_known = false;
-    s_has_keyboard_page = s_has_consumer_page = false;
-    s_preferred_byte = 0xFF;
-    s_held_usage = 0;
-    s_subscribed_count = 0;
+    // 重新记一次重试计数：这是用户点的一次全新连接。
+    // Reset the retry counter: this is a fresh connect from the user.
+    s_addr_type_alt_tries = 0;
+    s_alt_type_tried = false;
     note_peer(addr, NULL);
-
-    const int rc = ble_gap_connect(s_own_addr_type, &peer, 10000, NULL, gap_cb, NULL);
+    const int rc = start_connect(addr, type);
     if (rc != 0) {
-        s_connecting = false;
+        if (rc == BLE_HS_EBUSY) {
+            // 控制器还忙着（扫描取消没落地）：记下目标，poll() 下一轮重来。
+            // The controller is still busy with the scan cancel: record the target and let poll()
+            // try again on the next tick.
+            snprintf(s_pending_addr, sizeof(s_pending_addr), "%s", addr);
+            s_pending_at = (uint32_t)(esp_timer_get_time() / 1000);
+            return ESP_OK;
+        }
         snprintf(s_failure, sizeof(s_failure), "发起连接失败 (%d)", rc);
         return ESP_FAIL;
     }
+    // 链路由状态机按 CrossMux 的顺序推进：等链路 → 确认 HID → 配对 → 订阅。
+    // The state machine walks the link the CrossMux way: wait for it, confirm HID, pair, subscribe.
+    step_begin(STEP_LINK);
+    ble_pt_crumb(BLE_PT_CRUMB_CONNECT);
     return ESP_OK;
 }
 
@@ -891,6 +1347,7 @@ void ble_pt_disconnect(void) {
     // Record who terminates: reason=534 looks like a local termination, and not knowing the
     // caller would send the next round of debugging the wrong way.
     s_reconnect_addr[0] = 0;
+    s_step = STEP_IDLE;  // 用户主动断开：建立流程就地结束 / an explicit disconnect ends the bring-up here
     if (s_conn_handle != BLE_HS_CONN_HANDLE_NONE) ble_gap_terminate(s_conn_handle, 0x13);
 }
 
@@ -965,12 +1422,21 @@ static esp_err_t start_locked(void) {
     }
 
     ble_hs_cfg.sync_cb = on_sync;
-    ble_hs_cfg.sm_io_cap = BLE_SM_IO_CAP_NO_IO;  // Just Works / Just Works
+    // 与 CrossMux 的 BleKeyboardHost 对齐：Just Works + LE Legacy 配对。
+    // 要求 Secure Connections（sc=1）时，不支持 SC 的老翻页器会直接以认证失败收场，
+    // 表现正是"配对表里有它、按键一个都进不来"。
+    // Aligned with CrossMux's BleKeyboardHost: Just Works over LE Legacy pairing. Demanding
+    // Secure Connections (sc=1) makes an older remote that lacks SC fail authentication outright,
+    // which looks exactly like "it is in the paired list and no key ever arrives".
+    ble_hs_cfg.sm_io_cap = BLE_SM_IO_CAP_DISP_YES_NO;
     ble_hs_cfg.sm_bonding = 1;
     ble_hs_cfg.sm_mitm = 0;
-    ble_hs_cfg.sm_sc = 1;
-    ble_hs_cfg.sm_our_key_dist = 0;
-    ble_hs_cfg.sm_their_key_dist = 0;
+    ble_hs_cfg.sm_sc = 0;
+    // 只分发加密密钥，与参考实现一致；多要 ID 密钥（IRK）会让部分对端在配对上挑刺。
+    // Distribute the encryption key only, as the reference does; asking for the identity key as
+    // well makes some peers fuss during pairing.
+    ble_hs_cfg.sm_our_key_dist = BLE_SM_PAIR_KEY_DIST_ENC;
+    ble_hs_cfg.sm_their_key_dist = BLE_SM_PAIR_KEY_DIST_ENC;
     // store 由 IDF 在 nimble_port_init() 内部初始化（ble_store_config_init 是内部符号，
     // 公开头里没有声明），bond 的持久化由 CONFIG_BT_NIMBLE_NVS_PERSIST 决定。
     // The store is initialised by IDF inside nimble_port_init() (ble_store_config_init is an
@@ -988,6 +1454,10 @@ static esp_err_t start_locked(void) {
     }
     s_running = true;
     ESP_LOGI(TAG, "started, %u bond(s)", (unsigned)s_bond_count);
+    // 配对策略摘要：日志里一眼就能看出这一版报的是什么能力、分发哪些密钥，
+    // 免得对着一串失败码猜固件是哪一版。
+    // Pairing policy summary: one line shows what capabilities this build advertises and which
+    // keys it distributes, so a wall of failure codes never leaves the build in doubt.
     return ESP_OK;
 }
 
@@ -1230,33 +1700,56 @@ static void poll_locked(void) {
         }
     }
 
-    // 切换目标：等现有链路断干净再连，别在 old link 还没落地时发起新的。
-    // Switching targets waits for the old link to finish closing rather than racing it.
-    // 已配对的链路连上时可能已加密，NimBLE 不再发 ENC_CHANGE；等一小会儿还没开始发现就
-    // 直接进 setup，否则页面永远停在「连接中」。
-    // A bonded link can already be encrypted and send no ENC_CHANGE; if setup has not begun
-    // shortly after connecting, run it anyway.
-    if (s_link_up && !s_discovery_started && s_connect_ms &&
-        (uint32_t)(esp_timer_get_time() / 1000) - s_connect_ms > 1500) {
-        start_discovery();
+    // 建立链路：照 CrossMux 的 connect → 确认 HID → 配对 → 订阅，一步一步带超时推进。
+    // 每一步的结论都写进屏显 trace，卡住或失败都会断开并写明原因。
+    // Bring-up follows CrossMux's connect, confirm HID, pair, subscribe with a timeout per step.
+    // Every step's verdict goes to the on-screen trace, and a stall or failure drops the link with
+    // a recorded reason.
+    step_poll();
+
+    // 取消扫描迟迟没有 DISC_COMPLETE（控制器异常）时兜底清标志，否则再也连不上：
+    // 连接会被 s_scanning 一直挡在队列里。
+    // A cancel whose DISC_COMPLETE never lands would otherwise block every connect behind
+    // s_scanning forever, so clear it on a timeout.
+    if (s_scanning && s_scan_cancel_ms &&
+        (uint32_t)(esp_timer_get_time() / 1000) - s_scan_cancel_ms > 500) {
+        s_scanning = false;
+        s_scan_cancel_ms = 0;
     }
 
-    if (s_pending_addr[0] && !s_link_up && !s_connecting) {
+    if (s_pending_addr[0] && !s_link_up && !s_connecting &&
+        (s_pending_at == 0 ||
+         (uint32_t)(esp_timer_get_time() / 1000) - s_pending_at >= 300)) {
         char addr[18];
         snprintf(addr, sizeof(addr), "%s", s_pending_addr);
         s_pending_addr[0] = 0;
+        s_pending_at = (uint32_t)(esp_timer_get_time() / 1000);
         if (ble_pt_connect(addr) == ESP_OK) ESP_LOGI(TAG, "connecting to %s", s_conn_name);
     }
 
     const uint8_t usage = s_held_usage;
     if (!usage) return;
     const uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
+    // 超时兜底要放在重复之前：报告断了就当作松开，别让自动重复没有终点。
+    // The timeout is checked before any repeat: a silent link counts as released, so auto-repeat
+    // can never run without an end.
+    if (s_last_rx_ms && now - s_last_rx_ms > HELD_TIMEOUT_MS) {
+        s_held_usage = 0;
+        s_last_repeat = 0;
+        return;
+    }
     if (!s_last_repeat) {
         if (now - s_held_since >= REPEAT_DELAY_MS) s_last_repeat = now;
         return;
     }
+    if (s_repeat_count >= REPEAT_MAX) {  // 重复有终点，失控也停得下来 / repeats end even if something runs away
+        s_held_usage = 0;
+        s_last_repeat = 0;
+        return;
+    }
     if (now - s_last_repeat >= REPEAT_PERIOD_MS) {
         s_last_repeat = now;
+        ++s_repeat_count;
         emit_usage(usage, s_held_mods);
     }
 }
@@ -1279,6 +1772,10 @@ bool ble_pt_pop_key(ble_pt_event_t *out) {
         got = true;
     }
     portEXIT_CRITICAL(&s_ring_lock);
+    // 面包屑放在临界区外：它带时间戳，没必要占着环形缓冲的锁。
+    // The crumb stays outside the critical section: it carries a timestamp and has no business
+    // holding the ring's lock.
+    if (got) ble_pt_crumb(BLE_PT_CRUMB_POP);
     return got;
 }
 

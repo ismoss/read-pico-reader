@@ -5,6 +5,9 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## 未发布 / Unreleased
 
+- 蓝牙翻页器修好一条完整链路：HID 报告映射（0x2A4B）以前读出来却没被用上，按键落在报告的哪个字节全靠猜；订阅输入报告时又一次性并发发出多个 CCCD 写，撞上协议栈很小的 ATT 处理池（proc alloc failed）之后状态不一致，直接断言重启；照抄来的那组连接参数会被控制器以 HCI 0x12 拒绝，部分设备因此根本连不上；报告在被按住期间还会被逐帧当成新按下，一按就疯狂翻页。现在按 CrossMux 的次序建立链路（连接 → 确认有 HID → 配对 → 订阅），订阅串行进行，报告路径去抖、按下状态带超时，翻页器连得上也按得动。另外新增崩溃日志：建立链路与按键的关键步骤留在 RTC 里，崩溃后重启，首页「上次运行」区直接列出崩溃前的经过，并带上异常类型与触发地址。
+  The Bluetooth page-turner now walks a whole link: the HID Report Map (0x2A4B) was read but never used, so which byte carried a key was pure guesswork; subscribing to input reports fired several CCCD writes at once, and running into the stack's small ATT procedure pool (proc alloc failed) left it inconsistent and asserted into a restart; a copied set of connection parameters was refused by the controller with HCI 0x12, so some remotes could not connect at all; and a held key looked like a fresh press on every report frame, turning pages frantically. The bring-up now follows CrossMux's order (connect, confirm HID, pair, subscribe) with serialised subscription, a debounced report path and a held-key timeout, so the remote both connects and turns pages. A crash log comes with it: bring-up and key steps are kept in RTC, and the next boot lists the run-up to the crash, along with the exception type and faulting address, in the home screen's last-run block.
+
 - 正文插图去掉左右边距，按整屏宽等比缩放并居中，页首插图贴到阅读区顶端、全屏沉浸时铺满整页；正文仍按阅读边距排版，插图页两侧的点击同样能翻页。整页位图放不下时按最大空闲块缩一档，不再整页消失。
   Body illustrations drop the side margins and scale into a panel-wide band: a page-start one reaches the top of the reading area and fills the page in immersive full screen. Text keeps its reading margins and taps on an illustration page's side strips still turn the page. A page bitmap that no longer fits the largest free block shrinks instead of vanishing.
 

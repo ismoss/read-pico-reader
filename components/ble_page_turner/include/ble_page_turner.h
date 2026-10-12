@@ -176,6 +176,31 @@ const char *ble_pt_connected_name(void);
 /// 取走一次连接失败原因（取走后清空）。/ Take a pending connect-failure reason, clearing it.
 bool ble_pt_take_failure(char *out, size_t cap);
 
+/* ---- 建立链路的记录 / Bring-up trail ---- */
+
+/// 把建立链路的一个事件写进崩溃日志（RTC，跨软复位保留）。
+/// 崩溃后重启，屏幕上的「上次运行」区列出的就是这一串事件。
+/// Record one bring-up event in the crash log (RTC, surviving a soft reset). After a crash the
+/// "last run" block on screen lists exactly this trail.
+void ble_pt_crumb(uint8_t id);
+
+/// 事件编号。/ Event ids.
+enum {
+    BLE_PT_CRUMB_CONNECT = 1,   ///< 开始连接 / a connect started
+    BLE_PT_CRUMB_LINK,          ///< 链路建立 / the link came up
+    BLE_PT_CRUMB_DISCOVER,      ///< 开始服务发现 / service discovery started
+    BLE_PT_CRUMB_HID,           ///< 确认对端有 HID / the peer turned out to have HID
+    BLE_PT_CRUMB_PAIR,          ///< 配对/加密结束 / pairing finished
+    BLE_PT_CRUMB_SUBSCRIBE,     ///< 订阅输入报告 / subscribed to an input report
+    BLE_PT_CRUMB_READY,         ///< 链路可用 / the link became usable
+    BLE_PT_CRUMB_FAIL,          ///< 某一步失败 / a step failed
+    BLE_PT_CRUMB_RX,            ///< 收到一条通知 / a notification arrived
+    BLE_PT_CRUMB_INGEST,        ///< 开始解析报告 / report parsing started
+    BLE_PT_CRUMB_EMIT,          ///< 解出一个按键 / a key was decoded
+    BLE_PT_CRUMB_KEY_PUSH,      ///< 按键进队列 / the key entered the ring
+    BLE_PT_CRUMB_POP,           ///< 主循环取走按键 / the main loop took a key
+};
+
 /// 取走一次配对码（取走后清空）。非 0 时界面应显示它。
 /// Take a pending pairing passkey, clearing it. A non-zero value should be shown.
 bool ble_pt_take_passkey(uint32_t *out);
