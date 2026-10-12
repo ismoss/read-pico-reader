@@ -3265,6 +3265,27 @@ static void prepare_inline_image(void) {
                  (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) / 1024));
     }
 }
+// 标题匹配要宽松：书内导航与正文的写法常常不同（"第一章 出发" 对 "出发"、"1. Prologue" 对
+// "序章"，竖排书尤其如此）。逐字比较失败时正文标题块不会被跳过，题头与正文就各显示一次。
+// Heading matching has to be forgiving: an authored navigation title rarely matches the body text
+// verbatim ("Chapter 1 Departure" against "Departure", a numbered English title against its
+// Japanese one), and a strict compare leaves the body heading on the page, so it shows up twice.
+static bool heading_text_matches(const char *text, const char *toc, const char *heading,
+                                 const char *label) {
+    if (text == NULL || text[0] == 0) return false;
+    const char *candidates[3] = {toc, heading, label};
+    for (int i = 0; i < 3; ++i) {
+        const char *cand = candidates[i];
+        if (cand == NULL || cand[0] == 0) continue;
+        // 互相包含即视为同一标题；短于三个字节的候选不作为依据，免得误吞正文。
+        // Either containing the other counts as the same heading; candidates shorter than three
+        // bytes are ignored so ordinary body text cannot be swallowed.
+        if (strlen(cand) < 3) continue;
+        if (strstr(text, cand) != NULL || strstr(cand, text) != NULL) return true;
+    }
+    return false;
+}
+
 static bool load_chapter_at(app_ctx_t* ctx, size_t chapter, size_t offset,
                             bool last_page, const char *anchor, size_t source_offset) {
     bool clear_toc = chapter != s_chapter || (!anchor && source_offset == SIZE_MAX);
@@ -3300,7 +3321,9 @@ static bool load_chapter_at(app_ctx_t* ctx, size_t chapter, size_t offset,
             }
         }
         size_t skip_blocks = 0;
-        while (skip_blocks < loaded.count && skip_blocks < 2 &&
+        // 最多看四个块：标题可能被拆成"第一章"、"出发"、"——副标题"这样几块。
+        // Up to four blocks: a heading can arrive split across several.
+        while (skip_blocks < loaded.count && skip_blocks < 4 &&
                loaded.blocks[skip_blocks].heading && loaded.blocks[skip_blocks].image < 0) {
             char body_heading[128] = {0};
             size_t len = loaded.blocks[skip_blocks].len;
@@ -3309,8 +3332,7 @@ static bool load_chapter_at(app_ctx_t* ctx, size_t chapter, size_t offset,
             while (len && (body_heading[len - 1] == ' ' || body_heading[len - 1] == '\t')) body_heading[--len] = 0;
             const char *trimmed = body_heading;
             while (*trimmed == ' ' || *trimmed == '\t') ++trimmed;
-            if (strcmp(trimmed, toc_title) && strcmp(trimmed, heading) &&
-                (!label[0] || strcmp(trimmed, label))) break;
+            if (!heading_text_matches(trimmed, toc_title, heading, label)) break;
             ++skip_blocks;
         }
         if (skip_blocks) lead_skip = skip_blocks < loaded.count ? loaded.blocks[skip_blocks].offset : loaded.len;
