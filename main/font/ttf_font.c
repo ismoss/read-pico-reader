@@ -2694,8 +2694,241 @@ void ttf_draw_text_px_spaced(
     }
 }
 
+// 竖排里要转 90° 的字符：拉丁字母数字、括号、横向的破折号与波浪号、弯引号与省略号。
+// 汉字、假名与全角标点保持正立，位置由 vertical_corner_cp 另行安排。
+// Characters that turn 90° in vertical setting: Latin letters and digits, brackets, horizontal
+// dashes and tildes, curly quotes and the ellipsis. Ideographs, kana and fullwidth punctuation
+// stay upright, with the latter repositioned by vertical_corner_cp.
+static bool vertical_rotated_cp(uint32_t cp) {
+    // 半角标点跟着拉丁文一起转，免得 "3.14" 里的点单独跳到字格角上。
+    // Halfwidth punctuation turns with the Latin run so a dot inside "3.14" does not jump to the
+    // cell corner on its own.
+    if (cp < 0x80) return cp > 0x20 && cp != 0x7f;
+    if ((cp >= 0x00c0 && cp <= 0x024f) || (cp >= 0x0370 && cp <= 0x04ff) ||
+        (cp >= 0x1e00 && cp <= 0x1eff) || (cp >= 0x2000 && cp <= 0x206f)) return true;
+    switch (cp) {
+        case 0x3008: case 0x3009: case 0x300a: case 0x300b:
+        case 0x300c: case 0x300d: case 0x300e: case 0x300f:
+        case 0x3010: case 0x3011: case 0x3014: case 0x3015:
+        case 0x3016: case 0x3017: case 0x3018: case 0x3019:
+        case 0x301a: case 0x301b: case 0x301d: case 0x301e: case 0x301f:
+        case 0xff08: case 0xff09: case 0xff3b: case 0xff3d: case 0xff5b: case 0xff5d:
+        case 0xff5f: case 0xff60: case 0xff62: case 0xff63: case 0xff0d: case 0xff5e:
+            return true;
+        default: return false;
+    }
+}
+
+// 竖排下移到字格右上角的标点：句号、逗号、顿号、冒号、分号。
+// Punctuation that moves to the top-right of its cell in vertical setting: the CJK period,
+// comma, enumeration comma, colon and semicolon.
+static bool vertical_corner_cp(uint32_t cp) {
+    switch (cp) {
+        case 0x3001: case 0x3002: case 0xff0c: case 0xff0e:
+            return true;
+        default: return false;
+    }
+}
+
+// 字形画在字身框左半、竖排里要按墨迹居中的正立字符：数字与全角！？：；。
+// 它们在横排里靠左，直接搬进竖排会贴着左边；这几个符号本身仍按竖排惯例保持正立。
+// Upright characters whose ink sits in the left half of the em box and must be centered for
+// vertical setting: digits and the fullwidth !?:;. They hug the left edge horizontally, so a
+// straight copy looks off; the marks themselves still stand upright, as vertical setting wants.
+static bool vertical_centered_cp(uint32_t cp) {
+    if (cp >= '0' && cp <= '9') return true;
+    return cp == 0xff01 || cp == 0xff1f || cp == 0xff1a || cp == 0xff1b;
+}
+
+// 数字串的竖排判定：1~3 位正立（各自按半角宽度上下排），4 位以上整串转 90°，
+// 年号、长编号这样才读得顺。判定按串首算，串中间沿用同一个结果。
+// How a digit run sets vertically: one to three stand upright, each taking its halfwidth advance,
+// and four or more turn 90° as a run, which reads better for years and long numbers. The run is
+// judged at its first digit and every following digit keeps that verdict.
+static bool vertical_digit_run_rotates(const char* after_current) {
+    int digits = 1;
+    for (const char* p = after_current; *p >= '0' && *p <= '9'; ++p) ++digits;
+    return digits >= 4;
+}
+
+// 弯引号没有竖排呈现形，直排书按惯例换成直角引号再取竖排形。
+// Curly quotes have no vertical presentation form, so vertical books swap them for corner
+// brackets and take that form instead.
+static uint32_t vertical_substitute_cp(uint32_t cp) {
+    switch (cp) {
+        case 0x201c: return 0x300c; // “ -> 「
+        case 0x201d: return 0x300d; // ” -> 」
+        case 0x2018: return 0x300e; // ‘ -> 『
+        case 0x2019: return 0x300f; // ’ -> 』
+        default: return cp;
+    }
+}
+
+// 字体自带的竖排呈现形（U+FE3x/FE4x）：直接用比把横排字形转 90° 更贴原版。
+// Vertical presentation forms fonts ship (U+FE3x/FE4x); using them beats turning the horizontal
+// glyph 90°.
+static uint32_t vertical_form_cp(uint32_t cp) {
+    switch (cp) {
+        case 0x3008: return 0xfe3f; case 0x3009: return 0xfe40;
+        case 0x300a: return 0xfe3d; case 0x300b: return 0xfe3e;
+        case 0x300c: return 0xfe41; case 0x300d: return 0xfe42;
+        case 0x300e: return 0xfe43; case 0x300f: return 0xfe44;
+        case 0x3010: return 0xfe3b; case 0x3011: return 0xfe3c;
+        case 0x3014: return 0xfe37; case 0x3015: return 0xfe38;
+        case 0x3016: return 0xfe39; case 0x3017: return 0xfe3a;
+        case 0xff08: return 0xfe35; case 0xff09: return 0xfe36;
+        case 0xff3b: return 0xfe47; case 0xff3d: return 0xfe48;
+        case 0xff5b: return 0xfe5b; case 0xff5d: return 0xfe5c;
+        case 0xff5f: return 0xfe17; case 0xff60: return 0xfe18;
+        default: return cp;
+    }
+}
+
+// 竖排取形三级回退：竖排呈现形 -> 换过的横排字形转 90° -> 原字形转 90°。
+// 字体缺哪一级就退到下一级，引号不会因为缺字形整段消失。
+// Three-step fallback for a vertical glyph: the vertical form, then the substituted horizontal
+// glyph turned 90°, then the original turned 90°. A face missing a level falls through instead of
+// dropping the mark.
+static const glyph_entry_t* vertical_glyph_for(uint32_t cp, int pixel_height, uint32_t* out_cp,
+                                               bool* out_rotate) {
+    uint32_t base = vertical_substitute_cp(cp);
+    uint32_t form = vertical_form_cp(base);
+    if (form != base) {
+        const glyph_entry_t* glyph = get_glyph(form, pixel_height);
+        if (glyph != NULL) { *out_cp = form; *out_rotate = false; return glyph; }
+    }
+    const glyph_entry_t* glyph = base != cp ? get_glyph(base, pixel_height) : NULL;
+    if (glyph != NULL) { *out_cp = base; *out_rotate = vertical_rotated_cp(base); return glyph; }
+    glyph = get_glyph(cp, pixel_height);
+    if (glyph != NULL) { *out_cp = cp; *out_rotate = vertical_rotated_cp(cp); }
+    return glyph;
+}
+
+// 正立落字形：pen_x 是字身框左边缘，baseline 是框内基线。
+// Blit an upright glyph: pen_x is the em box's left edge and baseline its baseline inside it.
+static void blit_upright(uint8_t* framebuffer, int pen_x, int baseline,
+                         const glyph_entry_t* glyph, uint8_t fg, uint8_t bg) {
+    if (glyph->bitmap == NULL) return;
+    for (int gy = 0; gy < glyph->height; gy++) {
+        int yy = baseline - glyph->top + gy;
+        for (int gx = 0; gx < glyph->width; gx++) {
+            uint8_t alpha = glyph->bitmap[gy * glyph->width + gx];
+            if (alpha == 0) continue;
+            epd_draw_pixel(pen_x + glyph->left + gx, yy, mix_ink(alpha, fg, bg) << 4, framebuffer);
+        }
+    }
+}
+
+// 旋转落字形：先在字身框里按横排基线落位，再把整个方框顺时针转 90°：(u, v) -> (px-1-v, u)。
+// 字的顶端因此朝右，和 OpenType 竖排对拉丁文的默认旋转一致。
+// Blit a rotated glyph: lay it on the horizontal baseline inside the em box, then turn the box
+// 90° clockwise: (u, v) -> (px-1-v, u). Glyph tops face right, matching OpenType's default
+// rotation for Latin in vertical layout.
+static void blit_rotated(uint8_t* framebuffer, int x, int y, int cell, int pixel_height,
+                         int baseline, const glyph_entry_t* glyph, uint8_t fg, uint8_t bg) {
+    if (glyph->bitmap == NULL) return;
+    for (int gy = 0; gy < glyph->height; gy++) {
+        int v = baseline - glyph->top + gy;
+        if (v < 0 || v >= pixel_height) continue;
+        int rx = pixel_height - 1 - v;
+        for (int gx = 0; gx < glyph->width; gx++) {
+            uint8_t alpha = glyph->bitmap[gy * glyph->width + gx];
+            if (alpha == 0) continue;
+            int u = glyph->left + gx;
+            if (u < 0 || u >= pixel_height) continue;
+            epd_draw_pixel(x + rx, y + cell + u, mix_ink(alpha, fg, bg) << 4, framebuffer);
+        }
+    }
+}
+
+int ttf_draw_text_px_rotated(
+    uint8_t* framebuffer, int x, int y, int pixel_height, const char* text,
+    uint8_t fg, uint8_t bg
+) {
+    if (!font_ready || framebuffer == NULL || text == NULL) return 0;
+    ttf_cover_lut_init();
+    pixel_height = clamp_px(pixel_height);
+    warm_runs(pixel_height, text);
+    const int baseline = ttf_ascender_px(pixel_height);
+    int cell = 0;
+    const char* cursor = text;
+    while (*cursor != '\0') {
+        run_apply((size_t)(cursor - text));
+        const glyph_entry_t* glyph = get_glyph(decode_utf8(&cursor), pixel_height);
+        if (glyph == NULL) continue;
+        blit_rotated(framebuffer, x, y, cell, pixel_height, baseline, glyph, fg, bg);
+        cell += glyph->advance_x;
+    }
+    return cell;
+}
+
+int ttf_draw_text_px_vertical(
+    uint8_t* framebuffer, int x, int y, int pixel_height, const char* text,
+    int tracking_px, uint8_t fg, uint8_t bg
+) {
+    if (!font_ready || framebuffer == NULL || text == NULL) return 0;
+    ttf_cover_lut_init();
+    pixel_height = clamp_px(pixel_height);
+    warm_runs(pixel_height, text);
+    const int baseline = ttf_ascender_px(pixel_height);
+    int cell = 0;
+    const char* cursor = text;
+    uint32_t previous_cp = 0;
+    bool digit_run_rotates = false;
+    while (*cursor != '\0') {
+        run_apply((size_t)(cursor - text));
+        uint32_t cp = decode_utf8(&cursor);
+        uint32_t draw_cp = cp;
+        bool rotate = false;
+        const glyph_entry_t* glyph = vertical_glyph_for(cp, pixel_height, &draw_cp, &rotate);
+        if (glyph == NULL) continue;
+        if (cp >= '0' && cp <= '9') {
+            if (!(previous_cp >= '0' && previous_cp <= '9'))
+                digit_run_rotates = vertical_digit_run_rotates(cursor);
+            rotate = digit_run_rotates;
+        }
+        previous_cp = cp;
+        if (cp != ' ' && cp != '\t') {
+            if (rotate) {
+                blit_rotated(framebuffer, x, y, cell, pixel_height, baseline, glyph, fg, bg);
+            } else {
+                // 全角句读抬到字格右上角；半角字形（数字、西文标点）在字身框里水平居中，
+                // 否则整串会贴着左边，看起来和汉字错开半格。
+                // Fullwidth stops lift into the cell's top-right corner; halfwidth glyphs (digits,
+                // Western punctuation) center across the em box, otherwise a run hugs the left
+                // edge and looks half a cell off against the ideographs.
+                int dx = 0, dy = 0;
+                if (vertical_corner_cp(cp)) { dx = pixel_height / 2; dy = -pixel_height / 2; }
+                else if (vertical_centered_cp(draw_cp) && glyph->width > 0)
+                    dx = (pixel_height - glyph->width) / 2 - glyph->left;
+                blit_upright(framebuffer, x + dx, y + cell + baseline + dy, glyph, fg, bg);
+            }
+        }
+        cell += glyph->advance_x;
+        if (*cursor != '\0') cell += tracking_px;
+    }
+    return cell;
+}
+
 static bool cjk_spacing_point(uint32_t cp) {
     return (cp >= 0x2e80 && cp <= 0xffef) || (cp >= 0x2018 && cp <= 0x201d);
+}
+
+// 竖排列高：与 ttf_draw_text_px_vertical 的推进一致，不落墨，供排版预留位置。
+// Vertical column height: the same advance ttf_draw_text_px_vertical produces, without inking,
+// so a caller can reserve room for it.
+int ttf_vertical_text_height_px(int pixel_height, const char* text, int tracking_px) {
+    if (text == NULL) return 0;
+    pixel_height = clamp_px(pixel_height);
+    int total = 0;
+    const char* cursor = text;
+    while (*cursor != '\0') {
+        const glyph_entry_t* glyph = get_glyph(decode_utf8(&cursor), pixel_height);
+        if (glyph == NULL) continue;
+        total += glyph->advance_x;
+        if (*cursor != '\0') total += tracking_px;
+    }
+    return total;
 }
 
 void ttf_draw_text_px_fitted(

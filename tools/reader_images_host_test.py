@@ -84,6 +84,13 @@ static size_t free_block=4u*1024u*1024u;
 static size_t heap_caps_get_largest_free_block(int caps){(void)caps;return free_block;}
 static size_t heap_caps_get_free_size(int caps){(void)caps;return free_block;}
 static unsigned uxTaskGetStackHighWaterMark(void *task){(void)task;return 4096;}
+// 竖排题头：本套用例只覆盖排版侧，几何一律留零。
+// Vertical heading: this suite only covers the layout side, so the geometry stays zero.
+typedef struct {int width,title_px,title_x,label_px,label_x,text_height;} reader_heading_t;
+static reader_heading_t reader_heading_metrics(const char *title,const char *label,EpdRect area){
+ (void)title;(void)label;(void)area;return (reader_heading_t){0};
+}
+static bool app_settings_book_vertical(void){return false;}
 static uint32_t book_layout_generation(void){return generation;}
 static int book_layout_page_image_count(size_t page){return page==s_page?slot_count:0;}
 static int book_layout_page_image(size_t page){return page==s_page?whole_image:-1;}
@@ -138,6 +145,7 @@ static void book_layout_set_runs(const html_run_t *runs,size_t count){(void)runs
 static size_t s_text_len,s_block_count,s_selected_toc=2,s_jump_offset,s_jump_page;
 static size_t s_chapter_lead_skip;
 static unsigned s_chapter_lead_height;
+static unsigned s_chapter_lead_width;
 static int s_px=10,s_view=READING;
 static char s_message[128],s_chapter_heading_title[128],s_chapter_heading_label[32],s_title[128],s_font_path[128];
 static int load_error,reflow_failures,reflows;
@@ -156,6 +164,11 @@ static esp_err_t book_chapter_load_blocks_target(size_t chapter,const char *anch
  out->images=calloc(1,sizeof(char*));out->images[0]=strdup("0");out->image_count=1;return ESP_OK;
 }
 static void book_layout_set_chapter_lead(size_t skip,unsigned height){(void)skip;(void)height;}
+static void book_layout_set_chapter_lead_width(unsigned px){(void)px;}
+static void apply_chapter_lead(const char *title,const char *label,size_t skip){
+ (void)title;(void)label;s_chapter_lead_skip=skip;s_chapter_lead_height=0;s_chapter_lead_width=0;
+ book_layout_set_chapter_lead(skip,0);
+}
 static bool book_layout_build_blocks(const char *text,size_t len,const blk_t *blocks,size_t count,EpdRect r,int px){
  (void)text;(void)len;(void)blocks;(void)count;(void)r;(void)px;assert(locked);++reflows;++generation;
  if(dims_fn){int w=0,h=0;assert(dims_fn(dims_ctx,0,&w,&h)&&w==60&&h==20);}

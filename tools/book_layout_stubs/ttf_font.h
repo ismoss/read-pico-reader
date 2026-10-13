@@ -28,3 +28,8 @@ void ttf_draw_text_px_spaced(uint8_t* fb, int x, int y, int px, const char* text
                              int tracking_px, uint8_t fg, uint8_t bg);
 void ttf_draw_text_px_fitted(uint8_t* fb, int x, int y, int px, const char* text,
                              int tracking_px, int target_width, uint8_t fg, uint8_t bg);
+int ttf_draw_text_px_rotated(uint8_t* fb, int x, int y, int px, const char* text,
+                             uint8_t fg, uint8_t bg);
+int ttf_draw_text_px_vertical(uint8_t* fb, int x, int y, int px, const char* text,
+                              int tracking_px, uint8_t fg, uint8_t bg);
+int ttf_vertical_text_height_px(int px, const char* text, int tracking_px);

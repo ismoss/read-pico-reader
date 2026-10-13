@@ -277,6 +277,14 @@ static char s_book_title[128];
 static char s_chapter_heading_title[128], s_chapter_heading_label[32];
 static size_t s_chapter_lead_skip;
 static unsigned s_chapter_lead_height;
+// 横排题头该占的行高，与当前模式无关地记着：首块是插图时它是 0，
+// 切回横排要用它，而不是拿竖排留下的 0 去算。
+// The row height a horizontal heading should take, remembered independently of the current mode:
+// it is zero when the chapter opens with an illustration, and switching back must use it rather
+// than the zero a vertical heading left behind.
+static unsigned s_chapter_lead_row_height;
+// 竖排首页为题头预留的列宽；横排为 0。/ Columns reserved for a vertical heading; 0 horizontally.
+static unsigned s_chapter_lead_width;
 static char s_font_path[192];
 static char* s_text;
 bool app_book_reader_body_visible(void) {
@@ -432,8 +440,17 @@ static EpdRect body_rect_for_tracking(int tracking_index) {
     int margin = s_margin;
     // Leave only a narrow strip for the full-book progress line in full screen.
     int bottom = s_reader_fullscreen ? READER_FULLSCREEN_PROGRESS_TOP - 2 : UI_BAR_TOP + 8;
-    EpdRect outer = {margin, top, UI_LOCK_WIDTH - 2 * margin, bottom - top};
     int tracking = (tracking_index - 2) * 2;
+    // 竖排把「边距」放到上下两端，左右只留一条窄边；整字收齐的是列高，不是行宽。
+    // Vertical setting moves the margin setting to the top and bottom edges, keeps a narrow side
+    // inset, and rounds the column height to whole glyphs instead of rounding a line's width.
+    if (app_settings_book_vertical()) {
+        EpdRect upright = {24, top + margin, UI_LOCK_WIDTH - 48, bottom - top - 2 * margin};
+        EpdRect turned = book_layout_balanced_rect(
+            (EpdRect){upright.y, upright.x, upright.height, upright.width}, s_px, tracking);
+        return (EpdRect){turned.y, turned.x, turned.height, turned.width};
+    }
+    EpdRect outer = {margin, top, UI_LOCK_WIDTH - 2 * margin, bottom - top};
     return book_layout_balanced_rect(outer, s_px, tracking);
 }
 static EpdRect body_rect(void) {
@@ -2122,14 +2139,17 @@ static void draw_layout_settings(uint8_t* fb) {
 // 用户确认半屏双列布局；绘制与点击共用同一矩形，间隙不穿透。/ Approved two-column half sheet; paint and hit testing share rectangles with inert gaps.
 static EpdRect reading_setting_rect(int index) {
     int extra=reader_ui_extra(56), footer=reader_ui_extra(36);
-    if (index == 6) return (EpdRect){36,1038-footer,612,84+footer};
-    if (index < 0 || index >= 6) return (EpdRect){0, 0, 0, 0};
+    if (index < 0 || index >= 8) return (EpdRect){0, 0, 0, 0};
     int row=index/2;
-    return (EpdRect){36+(index%2)*314,702+row*112-(3-row)*extra-footer,298,98+extra};
+    // 四行双列：竖排占第四行右格，与「关闭书内图片」并排；行距收到 104，
+    // 四行底部才仍然留在「完成」之上。
+    // Four two-column rows: the vertical switch takes the fourth row's right cell beside "hide
+    // in-book images", and a 104 pitch keeps every row clear of Done.
+    return (EpdRect){36+(index%2)*314,702+row*104-(3-row)*extra-footer,298,98+extra};
 }
 static int reading_settings_top(void) { return 580-reader_ui_extra(204); }
 static EpdRect reading_toggle_rect(int index) {
-    return reading_setting_rect(index == 0 ? 3 : index == 1 ? 5 : 6);
+    return reading_setting_rect(index == 0 ? 3 : index == 1 ? 5 : index == 2 ? 6 : 7);
 }
 static void draw_reading_switch(uint8_t *fb, EpdRect track, bool on) {
     ui_fill_round_rect(fb, track, 19, on ? 0x38 : 0xc4);
@@ -2154,9 +2174,11 @@ static void draw_reading_toggle(uint8_t *fb, int index, const char *title,
     ui_fill_round_rect(fb, row, 20, UI_GRAY_WHITE);
     ui_draw_control_frame(fb, row, 20, 0x68);
     if (index == 2) {
-        ui_text_box(fb,(EpdRect){row.x+22,row.y+6,476,row.height/2-12},25,title,EPD_DRAW_ALIGN_LEFT,false);
-        ui_text_box(fb,(EpdRect){row.x+22,row.y+row.height/2,476,row.height/2-8},20,detail,EPD_DRAW_ALIGN_LEFT,false);
-        draw_reading_switch(fb,(EpdRect){555,row.y+row.height/2-19,69,39},on);
+        // 半宽格放两行：标题与说明各降一号字，开关仍留在右端。
+        // A half-width cell carries two lines: title and detail step down a size, the switch stays right.
+        ui_text_box(fb,(EpdRect){row.x+20,row.y+10,row.width-40,row.height/2-16},21,title,EPD_DRAW_ALIGN_LEFT,false);
+        ui_text_box(fb,(EpdRect){row.x+20,row.y+row.height/2,row.width-40,row.height/2-10},17,detail,EPD_DRAW_ALIGN_LEFT,false);
+        draw_reading_switch(fb,(EpdRect){row.x+row.width-90,row.y+3*row.height/4-19,69,39},on);
     } else {
         ui_text_box(fb,(EpdRect){row.x+21,row.y+6,row.width-42,row.height/2-12},23,title,EPD_DRAW_ALIGN_LEFT,false);
         ui_text_box(fb,(EpdRect){row.x+21,row.y+row.height/2,166,row.height/2-8},26,on?"开启":"关闭",EPD_DRAW_ALIGN_LEFT,false);
@@ -2176,6 +2198,7 @@ static void draw_reading_settings(uint8_t* fb) {
     draw_reading_card(fb, 4, "按键控制", "自定义三键", false);
     draw_reading_toggle(fb, 1, "全屏沉浸", NULL, app_settings_reader_immersive());
     draw_reading_toggle(fb, 2, "关闭书内图片", "跳过正文插图，保留原书文件", app_settings_reader_hide_images());
+    draw_reading_toggle(fb, 3, "竖排（从右到左）", NULL, app_settings_book_vertical());
     ui_fill_round_rect(fb, (EpdRect){36, 1141, 612, 58}, 20, UI_GRAY_BLACK);
     reader_panel_text_vc(fb, 342, 1170, 26, "完成", EPD_DRAW_ALIGN_CENTER, true);
 }
@@ -2520,6 +2543,121 @@ static void draw_reader_header(uint8_t *fb) {
     draw_favorite_icon(fb, 605, 96, 30, 36, s_reader_favorite, 0x38);
     ui_hairline(fb, 151, 36, 612, UI_GRAY_LIGHT);
 }
+// 竖排章节题头：右列是编号（第三章），左列是章名，读序依旧自右向左；两列整体留出列宽，
+// 排版用同一个宽度在首页右边缘预留，绘制与预留因此不会错位。
+// A vertical chapter heading: the number column (第三章) on the right and the title on the left,
+// still read right to left. Both columns reserve their width, and the layout reserves the same
+// width at the right edge of the first page, so drawing and reservation cannot drift apart.
+typedef struct {
+    int width;       ///< 首页右起需要预留的列宽 / columns to reserve at the first page's right
+    int title_px;    ///< 章名字号 / title type size
+    int title_x;     ///< 章名列左边缘 / title column's left edge
+    int label_px;    ///< 编号字号，无编号时为 0 / number size, 0 without a label
+    int label_x;     ///< 编号列左边缘 / label column's left edge
+    int text_height; ///< 较长一列的高度，用来垂直居中 / taller column, used to center
+} reader_heading_t;
+
+static reader_heading_t reader_heading_metrics(const char *title, const char *label, EpdRect body) {
+    reader_heading_t metrics = {0};
+    if (title == NULL || title[0] == 0 || body.height <= 0 || body.width <= 0) return metrics;
+    // 题头跟横排的题头一样走系统字体：正文换卡上字体不改变章节标题。
+    // The heading uses the system face exactly like the horizontal one, so swapping the body face
+    // never changes chapter titles.
+    ttf_font_select(TTF_FONT_SLOT_SYSTEM);
+    const int avail = body.height - 48;
+    int px = 48;
+    int need = ttf_vertical_text_height_px(px, title, 0);
+    // 一列放不下就缩字号；竖排的题头不折列，缩到 24 为止。
+    // Shrink the size when one column cannot hold the title; a vertical heading does not break
+    // into more columns and stops at 24.
+    if (need > avail && avail > 0) {
+        px = px * avail / need;
+        px &= ~3;
+        if (px < 24) px = 24;
+    }
+    int label_px = label != NULL && label[0] ? 24 : 0;
+    const int gap = 12;
+    metrics.title_px = px;
+    metrics.label_px = label_px;
+    metrics.width = px + (label_px ? label_px + gap : 0);
+    // 题头最多占正文带的三分之一，留够列给正文。
+    // A heading takes at most a third of the body band, leaving the rest for body columns.
+    if (metrics.width > body.width / 3) {
+        int scale = body.width / 3 * 100 / metrics.width;
+        metrics.title_px = metrics.title_px * scale / 100;
+        if (metrics.title_px < 24) metrics.title_px = 24;
+        metrics.label_px = label_px ? label_px * scale / 100 : 0;
+        if (metrics.label_px && metrics.label_px < 18) metrics.label_px = 18;
+        metrics.width = metrics.title_px + (metrics.label_px ? metrics.label_px + gap : 0);
+    }
+    const int right = body.x + body.width;
+    metrics.title_x = right - metrics.width;
+    metrics.label_x = right - metrics.label_px;
+    int title_h = ttf_vertical_text_height_px(metrics.title_px, title, 0);
+    int label_h = metrics.label_px ? ttf_vertical_text_height_px(metrics.label_px, label, 0) : 0;
+    metrics.text_height = title_h > label_h ? title_h : label_h;
+    return metrics;
+}
+
+static void draw_vertical_heading(uint8_t *fb, EpdRect body) {
+    reader_heading_t metrics = reader_heading_metrics(s_chapter_heading_title, s_chapter_heading_label, body);
+    if (!metrics.width) return;
+    int y = body.y + (body.height - metrics.text_height) / 2;
+    if (y < body.y + 8) y = body.y + 8;
+    ttf_font_select(TTF_FONT_SLOT_SYSTEM);
+    if (metrics.label_px)
+        ttf_draw_text_px_vertical(fb, metrics.label_x, y, metrics.label_px, s_chapter_heading_label, 0, 0, 15);
+    ttf_draw_text_px_vertical(fb, metrics.title_x, y, metrics.title_px, s_chapter_heading_title, 0, 0, 15);
+}
+
+// 重排前把章节题头的几何重新说给排版：竖排留右侧列宽、横排留顶部行高，
+// 绘制侧读的是同一组 s_chapter_lead_*。切模式、切全屏、改字号都必须走这里，
+// 否则排版按旧模式预留、题头按新模式绘制，题头就会压到正文上。
+// Tell the layout the chapter heading geometry before every re-layout: columns to the right in
+// vertical setting, rows at the top in horizontal. Drawing reads the same s_chapter_lead_*
+// values. Switching mode or full screen or changing the type size must all come through here;
+// otherwise the layout reserves for the old mode while the heading draws in the new one and lands
+// on top of the body.
+// 题头几何按当前模式重算：竖排留右侧列宽、横排留顶部行高。
+// height 由调用方按原有规矩算好（首块是插图、或没有可用标题时为 0），这里不再自己推导——
+// 无条件按 214 算会把不该出现的题头带出来，正文里那份标题就与它并排成了两个标题。
+// Heading geometry for the current mode: columns to the right vertically, rows at the top
+// horizontally. `height` arrives already decided by the caller (zero when the first block is an
+// illustration or no title is usable); deriving it here unconditionally brought a heading onto
+// sheets that should have none, leaving it side by side with the body's own copy.
+static void apply_chapter_lead(const char *title, const char *label, size_t skip, unsigned height) {
+    s_chapter_lead_skip = skip;
+    if (book_kind() != BOOK_KIND_EPUB || title == NULL || title[0] == 0 || !height) {
+        s_chapter_lead_height = s_chapter_lead_width = 0;
+        book_layout_set_chapter_lead(0, 0);
+        book_layout_set_chapter_lead_width(0);
+        return;
+    }
+    if (app_settings_book_vertical()) {
+        // 量竖排题头会光栅化字形，调用方须已持有绘制锁。
+        // Measuring the vertical heading rasterizes glyphs; the caller must hold the draw lock.
+        s_chapter_lead_height = 0;
+        s_chapter_lead_width = (unsigned)reader_heading_metrics(title, label, body_rect()).width;
+        book_layout_set_chapter_lead(skip, 0);
+        book_layout_set_chapter_lead_width(s_chapter_lead_width);
+    } else {
+        s_chapter_lead_width = 0;
+        s_chapter_lead_height = height;
+        book_layout_set_chapter_lead(skip, s_chapter_lead_height);
+        book_layout_set_chapter_lead_width(0);
+    }
+}
+
+// 重排前把题头几何交给排版；调用方须持有绘制锁。所有正文重排都要走这一句，
+// 否则换了模式或字号之后，排版按上一次的题头尺寸预留，题头就会压住正文。
+// Hand the heading geometry to the layout before a re-layout; the caller holds the draw lock.
+// Every body re-layout needs this line, otherwise a mode or size change reserves room for the
+// previous heading and the heading lands on the body.
+static void refresh_chapter_lead(void) {
+    apply_chapter_lead(s_chapter_heading_title, s_chapter_heading_label, s_chapter_lead_skip,
+                       s_chapter_lead_row_height);
+}
+
 // PR9 未知尺寸整页图没有混排槽；在调用侧适配原有位图缓存。/ PR9's unknown-size page has no inline slot; adapt the bitmap cache here.
 static int reader_image_slots(size_t page) {
     int count = book_layout_page_image_count(page);
@@ -2581,16 +2719,24 @@ static void draw_reader(uint8_t* fb, size_t page) {
     if (!s_reader_fullscreen) draw_reader_header(fb);
     EpdRect body = body_rect();
     book_layout_draw_page(fb, page, body, s_px);
-    if (page == 0 && s_chapter_lead_height && s_chapter_heading_title[0]) {
-        char heading[128]; copy_text(heading, sizeof(heading), s_chapter_heading_title);
-        int heading_px = ui_text_title_fit(heading, 48, ui_content_width(), s_chapter_heading_title);
-        char label[sizeof(s_chapter_heading_label)]; copy_text(label, sizeof(label), s_chapter_heading_label);
-        int label_px = ui_text_title_fit(label, 24, ui_content_width(), s_chapter_heading_label);
-        ui_text_title_vc(fb, UI_LOCK_WIDTH / 2, body.y + 29, label_px, label,
-                          s_chapter_heading_label, EPD_DRAW_ALIGN_CENTER);
-        ui_text_title_vc(fb, UI_LOCK_WIDTH / 2, body.y + 112, heading_px, heading,
-                          s_chapter_heading_title, EPD_DRAW_ALIGN_CENTER);
-        ui_hairline(fb, body.y + 174, 210, 264, UI_GRAY_LIGHT);
+    if (page == 0 && s_chapter_heading_title[0] &&
+        (s_chapter_lead_height || s_chapter_lead_width)) {
+        if (app_settings_book_vertical()) {
+            // 竖排题头站在首页预留的那条列里，正文从它左边接着排。
+            // The vertical heading stands in the columns the first page reserved; the body
+            // continues to its left.
+            draw_vertical_heading(fb, body);
+        } else {
+            char heading[128]; copy_text(heading, sizeof(heading), s_chapter_heading_title);
+            int heading_px = ui_text_title_fit(heading, 48, ui_content_width(), s_chapter_heading_title);
+            char label[sizeof(s_chapter_heading_label)]; copy_text(label, sizeof(label), s_chapter_heading_label);
+            int label_px = ui_text_title_fit(label, 24, ui_content_width(), s_chapter_heading_label);
+            ui_text_title_vc(fb, UI_LOCK_WIDTH / 2, body.y + 29, label_px, label,
+                              s_chapter_heading_label, EPD_DRAW_ALIGN_CENTER);
+            ui_text_title_vc(fb, UI_LOCK_WIDTH / 2, body.y + 112, heading_px, heading,
+                              s_chapter_heading_title, EPD_DRAW_ALIGN_CENTER);
+            ui_hairline(fb, body.y + 174, 210, 264, UI_GRAY_LIGHT);
+        }
     }
     if (s_reader_panel != READER_PANEL_BACKGROUND_PREVIEW)
         ui_reader_background_paint(fb, (EpdRect){0,0,UI_LOCK_WIDTH,UI_LOCK_HEIGHT}, true);
@@ -2989,7 +3135,9 @@ static void free_book(void) {
     s_reader_dims_ctx = (reader_dims_ctx_t){0};
     book_layout_free();
     book_layout_set_chapter_lead(0, 0);
+    book_layout_set_chapter_lead_width(0);
     s_chapter_lead_skip = s_chapter_lead_height = 0;
+    s_chapter_lead_width = 0;
     s_chapter_heading_title[0] = s_chapter_heading_label[0] = 0;
     free(s_text);
     free(s_blocks);
@@ -3131,6 +3279,27 @@ static void prepare_inline_image(void) {
                  (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) / 1024));
     }
 }
+// 标题匹配要宽松：书内导航与正文的写法常常不同（"第一章 出发" 对 "出发"、"1. Prologue" 对
+// "序章"，竖排书尤其如此）。逐字比较失败时正文标题块不会被跳过，题头与正文就各显示一次。
+// Heading matching has to be forgiving: an authored navigation title rarely matches the body text
+// verbatim ("Chapter 1 Departure" against "Departure", a numbered English title against its
+// Japanese one), and a strict compare leaves the body heading on the page, so it shows up twice.
+static bool heading_text_matches(const char *text, const char *toc, const char *heading,
+                                 const char *label) {
+    if (text == NULL || text[0] == 0) return false;
+    const char *candidates[3] = {toc, heading, label};
+    for (int i = 0; i < 3; ++i) {
+        const char *cand = candidates[i];
+        if (cand == NULL || cand[0] == 0) continue;
+        // 互相包含即视为同一标题；短于三个字节的候选不作为依据，免得误吞正文。
+        // Either containing the other counts as the same heading; candidates shorter than three
+        // bytes are ignored so ordinary body text cannot be swallowed.
+        if (strlen(cand) < 3) continue;
+        if (strstr(text, cand) != NULL || strstr(cand, text) != NULL) return true;
+    }
+    return false;
+}
+
 static bool load_chapter_at(app_ctx_t* ctx, size_t chapter, size_t offset,
                             bool last_page, const char *anchor, size_t source_offset) {
     bool clear_toc = chapter != s_chapter || (!anchor && source_offset == SIZE_MAX);
@@ -3167,7 +3336,9 @@ static bool load_chapter_at(app_ctx_t* ctx, size_t chapter, size_t offset,
             }
         }
         size_t skip_blocks = 0;
-        while (skip_blocks < loaded.count && skip_blocks < 2 &&
+        // 最多看四个块：标题可能被拆成"第一章"、"出发"、"——副标题"这样几块。
+        // Up to four blocks: a heading can arrive split across several.
+        while (skip_blocks < loaded.count && skip_blocks < 4 &&
                loaded.blocks[skip_blocks].heading && loaded.blocks[skip_blocks].image < 0) {
             char body_heading[128] = {0};
             size_t len = loaded.blocks[skip_blocks].len;
@@ -3176,21 +3347,32 @@ static bool load_chapter_at(app_ctx_t* ctx, size_t chapter, size_t offset,
             while (len && (body_heading[len - 1] == ' ' || body_heading[len - 1] == '\t')) body_heading[--len] = 0;
             const char *trimmed = body_heading;
             while (*trimmed == ' ' || *trimmed == '\t') ++trimmed;
-            if (strcmp(trimmed, toc_title) && strcmp(trimmed, heading) &&
-                (!label[0] || strcmp(trimmed, label))) break;
+            if (!heading_text_matches(trimmed, toc_title, heading, label)) break;
             ++skip_blocks;
         }
         if (skip_blocks) lead_skip = skip_blocks < loaded.count ? loaded.blocks[skip_blocks].offset : loaded.len;
-        if (skip_blocks < loaded.count && loaded.blocks[skip_blocks].image >= 0) lead_skip = 0;
-        else
+        // 首块是插图时不预留题头：那页整页留给插图，标题在它后面才排。
+        // 这个条件一直是题头该不该出现的判据，横排竖排都一样。
+        // An illustration at the head of the chapter reserves nothing: it owns that page and the
+        // heading follows. This condition has always decided whether a sheet gets a heading at all,
+        // in either setting.
+        if (skip_blocks < loaded.count && loaded.blocks[skip_blocks].image >= 0) {
+            lead_skip = 0;
+            lead_height = 0;
+        } else {
             lead_height = body_rect().height > 214 ? 214 : 0;
+        }
     }
     size_t old_lead_skip = s_chapter_lead_skip;
     unsigned old_lead_height = s_chapter_lead_height;
+    unsigned old_lead_width = s_chapter_lead_width;
     reader_dims_ctx_t old_dims_ctx = s_reader_dims_ctx;
     lock_draw();
     invalidate_prep();
-    book_layout_set_chapter_lead(lead_skip, lead_height);
+    // 题头几何按当前模式重算，横排留顶部行高、竖排留右侧列宽，绘制与预留不会错开。
+    // Recompute the heading geometry for the current mode -- rows at the top horizontally,
+    // columns at the right vertically -- so drawing and reservation cannot drift apart.
+    apply_chapter_lead(heading, label, lead_skip, lead_height);
     s_reader_dims_ctx = (reader_dims_ctx_t){chapter, loaded.images, loaded.image_count};
     book_layout_set_image_dims(reader_image_dims, &s_reader_dims_ctx);
     book_layout_set_runs(loaded.runs, loaded.run_count);
@@ -3203,7 +3385,13 @@ static bool load_chapter_at(app_ctx_t* ctx, size_t chapter, size_t offset,
         // The run table dies with `loaded`, so put the previous chapter's back before the
         // rollback layout reads freed memory.
         book_layout_set_runs(s_runs, s_run_count);
+        // 题头几何也跟着回滚，否则这一章的题头参数会留在失败的那次上。
+        // Roll the heading geometry back too, or the failed chapter's parameters would stick.
+        s_chapter_lead_skip = old_lead_skip;
+        s_chapter_lead_height = old_lead_height;
+        s_chapter_lead_width = old_lead_width;
         book_layout_set_chapter_lead(old_lead_skip, old_lead_height);
+        book_layout_set_chapter_lead_width(old_lead_width);
         bool restored = s_text && book_layout_build_blocks(s_text, s_text_len, s_blocks, s_block_count, body_rect(), s_px);
         unlock_draw();
         if (!restored) {
@@ -3230,7 +3418,7 @@ static bool load_chapter_at(app_ctx_t* ctx, size_t chapter, size_t offset,
     s_chapter = chapter;
     if (clear_toc) s_selected_toc = SIZE_MAX;
     s_chapter_lead_skip = lead_skip;
-    s_chapter_lead_height = lead_height;
+    s_chapter_lead_row_height = lead_height;
     copy_text(s_chapter_heading_title, sizeof(s_chapter_heading_title), heading);
     copy_text(s_chapter_heading_label, sizeof(s_chapter_heading_label), label);
     s_page = last_page ? book_layout_page_count() - 1 :
@@ -3899,6 +4087,9 @@ static app_redraw_t apply_reader_layout(app_ctx_t* ctx, int next_px, int next_ma
     s_margin = next_margin;
     s_line_spacing = next_line;
     book_layout_set_spacing(next_line, next_para);
+    // 正文带随字号与边距变了，题头的预留跟着重算。
+    // The body band moved with the size and margin, so the heading's reservation follows.
+    refresh_chapter_lead();
     bool ok = book_layout_build_blocks(s_text, s_text_len, s_blocks, s_block_count, body_rect(), s_px);
     if (ok) s_page = book_layout_page_for_offset(off);
     else {
@@ -3906,6 +4097,7 @@ static app_redraw_t apply_reader_layout(app_ctx_t* ctx, int next_px, int next_ma
         s_margin = old_margin;
         s_line_spacing = old_line;
         book_layout_set_spacing(old_line, old_para);
+        refresh_chapter_lead();
         (void)book_layout_build_blocks(s_text, s_text_len, s_blocks, s_block_count, body_rect(), s_px);
     }
     unlock_draw();
@@ -3987,8 +4179,9 @@ static app_redraw_t apply_reader_option(app_ctx_t* ctx, int kind) {
         app_settings_set_reader_power_turn(!app_settings_reader_power_turn());
         return APP_REDRAW_PAGE;
     }
-    if (!s_text || (kind != 1 && kind != 2)) return APP_REDRAW_NONE;
-    bool previous = kind == 1 ? app_settings_reader_immersive() : app_settings_reader_hide_images();
+    if (!s_text || kind < 1 || kind > 3) return APP_REDRAW_NONE;
+    bool previous = kind == 1 ? app_settings_reader_immersive() :
+                    kind == 2 ? app_settings_reader_hide_images() : app_settings_book_vertical();
     // 重新开启插图时，先补齐尺寸；文件读取必须在绘制锁外。
     // Probe missing dimensions before re-enabling images, outside the drawing lock.
     if (kind == 2 && previous) for (size_t i = 0; i < s_block_count; ++i) {
@@ -4005,18 +4198,34 @@ static app_redraw_t apply_reader_option(app_ctx_t* ctx, int kind) {
     size_t off = book_layout_page_start_offset(s_page);
     invalidate_prep();
     if (kind == 1) app_settings_set_reader_immersive(!previous);
-    else {
+    else if (kind == 2) {
         app_settings_set_reader_hide_images(!previous);
         book_layout_set_images_visible(previous);
+    } else {
+        // 竖排要重排整章：列序自右向左，页界和插图分页都跟着变。
+        // Vertical setting re-typesets the chapter: column order runs right to left and both the
+        // page boundaries and illustration pagination follow it.
+        app_settings_set_book_vertical(!previous);
+        book_layout_set_vertical(!previous);
     }
+    // 模式变了，题头预留也跟着换轴：竖排留右侧列宽、横排留顶部行高。
+    // The mode changed, so the heading's reservation changes axis too: columns to the right
+    // vertically, rows at the top horizontally.
+    apply_chapter_lead(s_chapter_heading_title, s_chapter_heading_label, s_chapter_lead_skip,
+                       s_chapter_lead_row_height);
     bool ok = book_layout_build_blocks(s_text, s_text_len, s_blocks, s_block_count, body_rect(), s_px);
     if (ok) s_page = book_layout_page_for_offset(off);
     else {
         if (kind == 1) app_settings_set_reader_immersive(previous);
-        else {
+        else if (kind == 2) {
             app_settings_set_reader_hide_images(previous);
             book_layout_set_images_visible(!previous);
+        } else {
+            app_settings_set_book_vertical(previous);
+            book_layout_set_vertical(previous);
         }
+        apply_chapter_lead(s_chapter_heading_title, s_chapter_heading_label, s_chapter_lead_skip,
+                       s_chapter_lead_row_height);
         (void)book_layout_build_blocks(s_text, s_text_len, s_blocks, s_block_count, body_rect(), s_px);
         copy_text(s_reader_notice, sizeof(s_reader_notice), "排版失败，请重试");
         s_reader_notice_until = esp_timer_get_time() / 1000 + 1800;
@@ -4053,11 +4262,15 @@ static app_redraw_t toggle_reader_fullscreen(app_ctx_t* ctx) {
     lock_draw();
     invalidate_prep();
     s_reader_fullscreen = !s_reader_fullscreen;
+    // 全屏切换会换掉整个正文带，题头的预留必须跟着换。
+    // Toggling full screen swaps the whole body band, so the heading's reservation must follow.
+    refresh_chapter_lead();
     bool ok = book_layout_build_blocks(s_text, s_text_len, s_blocks, s_block_count, body_rect(), s_px);
     bool restored = true;
     if (ok) s_page = book_layout_page_for_offset(off);
     else {
         s_reader_fullscreen = !s_reader_fullscreen;
+        refresh_chapter_lead();
         restored = book_layout_build_blocks(s_text, s_text_len, s_blocks, s_block_count, body_rect(), s_px);
     }
     unlock_draw();
@@ -4209,7 +4422,7 @@ static app_redraw_t reading_settings_action(app_ctx_t *ctx, uint16_t x, uint16_t
     } else if (ui_rect_hit(reading_setting_rect(4), x, y)) {
         s_reader_panel = READER_PANEL_KEY_SETTINGS;
     } else {
-        for (int i = 0; i < 3; ++i)
+        for (int i = 0; i < 4; ++i)
             if (ui_rect_hit(reading_toggle_rect(i), x, y)) return apply_reader_option(ctx, i);
         return APP_REDRAW_NONE;
     }
@@ -4953,7 +5166,8 @@ static app_redraw_t action_at(app_ctx_t* ctx, uint16_t x, uint16_t y) {
         if (reader_image_slots(s_page)) tap_area = ui_rect_union(tap_area, book_layout_image_rect());
         if (!ui_rect_hit(tap_area, x, y)) return APP_REDRAW_NONE;
         int target = book_reader_tap_feed(&s_reader_tap, tap_area, x, y,
-                                         app_settings_reader_vertical_turn(), ctx->now_ms);
+                                         app_settings_reader_vertical_turn(),
+                                         app_settings_book_vertical(), ctx->now_ms);
         if (target == BOOK_READER_TAP_FULLSCREEN) return toggle_reader_fullscreen(ctx);
         if (target) return turn_page(ctx, target);
         return APP_REDRAW_NONE;
@@ -5010,6 +5224,10 @@ static void on_enter(app_ctx_t* ctx) {
     // Full-bleed illustrations: the panel width is a constant, so publish it once per entry and
     // every later re-layout reuses the same band.
     book_layout_set_image_bleed_width(UI_LOCK_WIDTH);
+    // 竖排是阅读设置里的手动开关，进页时同步给排版；关着就是原来的横排。
+    // Vertical setting is a manual reader switch, published to the layout on entry; off is the
+    // original horizontal setting.
+    book_layout_set_vertical(app_settings_book_vertical());
     book_layout_set_typography(((int)app_settings_book_tracking() - 2) * 2);
     book_layout_set_first_line_indent(app_settings_book_indent());
     book_layout_set_first_line_indent_adjust(app_settings_book_indent_adjust());
@@ -5249,9 +5467,11 @@ static bool reader_tools_swipe(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
     return true;
 }
 static int reader_swipe_direction(ui_gesture_type_t type, bool vertical) {
-    if (type == UI_GESTURE_SWIPE_L || (vertical && type == UI_GESTURE_SWIPE_U)) return 1;
-    if (type == UI_GESTURE_SWIPE_R || (vertical && type == UI_GESTURE_SWIPE_D)) return -1;
-    return 0;
+    int direction = 0;
+    if (type == UI_GESTURE_SWIPE_L || (vertical && type == UI_GESTURE_SWIPE_U)) direction = 1;
+    else if (type == UI_GESTURE_SWIPE_R || (vertical && type == UI_GESTURE_SWIPE_D)) direction = -1;
+    if (direction && !vertical && app_settings_book_vertical()) direction = -direction;
+    return direction;
 }
 
 static app_redraw_t gesture_event(app_ctx_t* ctx, const ui_gesture_event_t* ev) {

@@ -122,6 +122,33 @@ void ttf_draw_text_px_bw(
     enum EpdFontFlags align, uint8_t fg, uint8_t bg
 );
 
+/// 竖排：把每个字形在字身框内顺时针转 90° 后沿列向下排，返回推进的列高。
+/// 字身框是 pixel_height 见方，(x, y) 是第一个字身框的左上角；拉丁字母、数字、括号和
+/// 横向符号用它，汉字与假名保持正立由调用方直接绘制。
+/// Vertical setting: turn each glyph 90° clockwise inside its em box and stack the boxes down a
+/// column, returning the height consumed. The em box is pixel_height square and (x, y) is the
+/// first box's top-left. Latin letters, digits, brackets and horizontal marks use it; ideographs
+/// and kana stay upright and the caller draws them directly.
+int ttf_draw_text_px_rotated(
+    uint8_t* framebuffer, int x, int y, int pixel_height, const char* text,
+    uint8_t fg, uint8_t bg
+);
+
+/// 竖排单列：从 (x, y) 的字身框起逐字向下，汉字与假名正立、全角句读抬到右上角、拉丁与括号
+/// 转 90°；tracking_px 加在字与字之间，用来摊平列内余量。返回推进的列高。
+/// One vertical column: glyphs run down from the em box at (x, y), with ideographs and kana
+/// upright, fullwidth stops lifted to the top-right corner and Latin and brackets turned 90°.
+/// tracking_px goes between glyphs and spreads a column's slack. Returns the height consumed.
+int ttf_draw_text_px_vertical(
+    uint8_t* framebuffer, int x, int y, int pixel_height, const char* text,
+    int tracking_px, uint8_t fg, uint8_t bg
+);
+
+/// 竖排下一列能放多少像素：ttf_draw_text_px_vertical 的返回值口径，供界面排版预留位置。
+/// How many pixels a vertical column of this text takes; same measure ttf_draw_text_px_vertical
+/// returns, so UI layout can reserve room for it.
+int ttf_vertical_text_height_px(int pixel_height, const char* text, int tracking_px);
+
 void ttf_measure_line(int size, const char* text, int* above, int* below);
 void ttf_measure_line_px(int pixel_height, const char* text, int* above, int* below);
 int ttf_text_width_px(int pixel_height, const char* text);

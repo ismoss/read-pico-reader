@@ -113,6 +113,11 @@ void app_settings_set_reader_hide_images(bool on);
 /// puts body text back on the system face.
 bool app_settings_book_fonts(void);
 void app_settings_set_book_fonts(bool on);
+/// 竖排正文（自上而下成列、列序自右向左）；默认关闭，只影响正文排版与插图分页。
+/// Vertical body text (columns run down, ordered right to left); off by default, and only the
+/// body layout and illustration pagination are affected.
+bool app_settings_book_vertical(void);
+void app_settings_set_book_vertical(bool on);
 typedef enum {
     APP_READER_KEY_PREV, ///< 上一页 / Previous page
     APP_READER_KEY_NEXT, ///< 下一页 / Next page
