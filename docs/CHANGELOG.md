@@ -3,6 +3,11 @@
 按版本简述对用户可见的变化；使用方法见 [README](../README.zh-CN.md)。
 User-visible changes by release; see [README](../README.md) for usage.
 
+## 未发布 / Unreleased
+
+- 设置与锁屏的图标统一到图标库：「锁屏密码」以前复用「锁屏样式」的票根，现在是一把锁；输入密码界面上方那枚手绘的锁也换成同一枚图标；「自动休眠锁屏」的秒表换成闭眼。图标仍全部由 tools/icons/lucide 下的 SVG 生成。
+  Settings and lock-screen icons now come from the icon set: the lock-screen password row no longer borrows the lock style's ticket but gets a lock, the hand-drawn lock above the PIN entry becomes the same icon, and auto sleep shows a closed eye instead of a stopwatch. Every icon is still generated from the SVGs under tools/icons/lucide.
+
 ## 0.3.3-rc91 / 2026-10-12
 
 - 合入 PR #24、#25，支持 EPUB 内嵌 TTF/OpenType 字体，修复开书与关闭书内字体的栈溢出，减少大型章节索引和多字体缓存占用。

@@ -60,6 +60,8 @@ ICONS = (
     "type",              # 系统字体 / system font
     "a-large-small",     # 系统字号 / system font size
     "ticket",            # 锁屏样式·阅读票根 / lock style ticket
+    "eye-closed",          # 自动休眠锁屏 / auto sleep lock
+    "lock",              # 锁屏密码 / lock screen password
     "clock",             # 日期与时间 / date and time
     "contrast",          # 系统对比度 / system contrast
     "copy",              # 保存与恢复 / save and restore
