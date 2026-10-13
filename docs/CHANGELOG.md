@@ -3,6 +3,14 @@
 按版本简述对用户可见的变化；使用方法见 [README](../README.zh-CN.md)。
 User-visible changes by release; see [README](../README.md) for usage.
 
+## 未发布 / Unreleased
+
+- 蓝牙翻页器修好一条完整链路：HID 报告映射（0x2A4B）以前读出来却没被用上，按键落在报告的哪个字节全靠猜；订阅输入报告时又一次性并发发出多个 CCCD 写，撞上协议栈很小的 ATT 处理池（proc alloc failed）之后状态不一致，直接断言重启；照抄来的那组连接参数会被控制器以 HCI 0x12 拒绝，部分设备因此根本连不上；报告在被按住期间还会被逐帧当成新按下，一按就疯狂翻页。现在按 CrossMux 的次序建立链路（连接 → 确认有 HID → 配对 → 订阅），订阅串行进行，报告路径去抖、按下状态带超时，翻页器连得上也按得动。另外新增崩溃日志：建立链路与按键的关键步骤留在 RTC 里，崩溃后重启，首页「上次运行」区直接列出崩溃前的经过，并带上异常类型与触发地址。
+  The Bluetooth page-turner now walks a whole link: the HID Report Map (0x2A4B) was read but never used, so which byte carried a key was pure guesswork; subscribing to input reports fired several CCCD writes at once, and running into the stack's small ATT procedure pool (proc alloc failed) left it inconsistent and asserted into a restart; a copied set of connection parameters was refused by the controller with HCI 0x12, so some remotes could not connect at all; and a held key looked like a fresh press on every report frame, turning pages frantically. The bring-up now follows CrossMux's order (connect, confirm HID, pair, subscribe) with serialised subscription, a debounced report path and a held-key timeout, so the remote both connects and turns pages. A crash log comes with it: bring-up and key steps are kept in RTC, and the next boot lists the run-up to the crash, along with the exception type and faulting address, in the home screen's last-run block.
+
+- 蓝牙翻页器学按键改为记下按下时外设发来的整帧字节：同一个键每次按下的字节一模一样，所以这一串就是它独有的标识，学习时记下它、使用时逐字节比对，不必再猜哪个字节是键码。第一次按下就能学会——以前要等一条「松开」报告，首次按下和从不发松开报告的遥控器永远学不到；点「学习」时把当时那一帧钉成基准，静止帧里带非零常量的遥控器不会再被学成那串常量；静默 150ms 后同一个键再按一次仍算一次新的按下。按键名一列显示这帧里非零的字节，例如 `06 B1`，同一个键每次都一样。
+  Learning a key now records the whole report frame the remote sends while it is held: the same key sends the same bytes every press, so that string is its own identifier, recorded when learning and compared byte for byte afterwards, with no guessing which byte holds the code. The first press already learns -- it used to need a release report, so a first press and a remote that never sends one could never be learned; tapping 学习 pins the frame present then as the baseline, so a remote whose resting frame carries non-zero constants no longer gets those constants learned instead of the key; and 150 ms of silence makes the next press of the same key count again. The key row shows that frame's non-zero bytes, such as `06 B1`, identical on every press of that key.
+
 ## 0.3.3-rc91 / 2026-10-12
 
 - 合入 PR #24、#25，支持 EPUB 内嵌 TTF/OpenType 字体，修复开书与关闭书内字体的栈溢出，减少大型章节索引和多字体缓存占用。
