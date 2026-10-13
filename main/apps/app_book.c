@@ -5121,7 +5121,7 @@ static int book_remote_direction(void) {
     ble_pt_raw_t raw;
     while (ble_pt_pop_raw(&raw)) {
         if (!raw.pressed) continue;
-        ble_pt_action_t action = ble_pt_action_for_raw(ble_pt_raw_code(&raw));
+        ble_pt_action_t action = ble_pt_action_for_frame(&raw.frame);
         if (action == BLE_PT_ACTION_PREV) direction = -1;
         else if (action == BLE_PT_ACTION_NEXT) direction = 1;
     }

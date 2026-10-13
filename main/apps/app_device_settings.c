@@ -517,16 +517,30 @@ static ble_layout_t ble_layout(void) {
 // 一行的左标签 + 让出按钮后的右值，外加分隔线。与 row() 同高，但右端不会压到按钮。
 // A row's left label plus a right value that stops short of the button, with the usual divider.
 // Same height as row(), but the value never runs under the button.
-// 学到的键按原始边沿显示：字节值为主，字节下标和报告号非零时才补上，免得两个键看起来一样。
-// Show a learned key as its raw edge: the byte value carries it, and the byte index and report id
-// are appended only when they are non-zero so two keys never read alike.
-static void format_bound_key(uint32_t code, char *out, size_t size) {
-    const unsigned value = code & 0xFFu;
-    const unsigned byte_index = (code >> 8) & 0xFFu;
-    const unsigned report_id = (code >> 16) & 0xFFu;
-    if (!byte_index && !report_id) snprintf(out, size, "0x%02X", value);
-    else if (!report_id) snprintf(out, size, "0x%02X b%u", value, byte_index);
-    else snprintf(out, size, "0x%02X r%u b%u", value, report_id, byte_index);
+// 学到的键按整帧显示：帧里非零的字节照原样列出来。同一个键每次按下发的字节一样，所以这串
+// 标识每次都一样；不同的键只要有一个字节不同，读出来就不同。
+// A learned key shows its whole frame: the non-zero bytes, in order. The same key sends the same
+// bytes every press, so this identifier never changes, and two keys that differ in any byte read
+// differently.
+static void format_bound_key(const ble_pt_frame_t *frame, char *out, size_t size) {
+    if (!frame || !frame->len) {
+        if (size) out[0] = 0;
+        return;
+    }
+    size_t used = 0;
+    unsigned shown = 0;
+    for (size_t i = 0; i < frame->len && used + 4 < size; ++i) {
+        if (!frame->bytes[i]) continue;
+        if (shown == 3) {  // 值列只有 140px：最多列 3 个字节，多的用 + 表示 / the value column holds three
+            snprintf(out + used, size - used, " +");
+            return;
+        }
+        const int written = snprintf(out + used, size - used, shown ? " %02X" : "%02X", frame->bytes[i]);
+        if (written <= 0) break;
+        used += (size_t)written;
+        ++shown;
+    }
+    if (!shown) snprintf(out, size, "00");  // 理论上到不了：全零帧不给绑 / unreachable: a zero frame is never bound
 }
 
 static void ble_row(uint8_t *fb, int y, const char *label, const char *value) {
@@ -1186,12 +1200,13 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
 
         section(fb, l.learn_title_top, "按键映射");
         static const char *const learn_names[] = {"上一页", "下一页"};
-        const uint32_t bound[] = {ble_pt_binding(BLE_PT_ACTION_PREV), ble_pt_binding(BLE_PT_ACTION_NEXT)};
+        static const ble_pt_action_t learn_actions[] = {BLE_PT_ACTION_PREV, BLE_PT_ACTION_NEXT};
         for (int i = 0; i < 2; ++i) {
             // 学到的键直接显示出来；没学过就走内置映射。
             // Show the learned key itself; with none, the built-in map applies.
             char bound_label[40];
-            if (bound[i]) format_bound_key(bound[i], bound_label, sizeof(bound_label));
+            ble_pt_frame_t bound;
+            if (ble_pt_binding(learn_actions[i], &bound)) format_bound_key(&bound, bound_label, sizeof(bound_label));
             else snprintf(bound_label, sizeof(bound_label), "内置按键");
             ble_row(fb, l.learn_top[i], learn_names[i], bound_label);
             ui_draw_button(fb, ble_button_rect(l.learn_top[i]), "学习", false);
@@ -1306,10 +1321,10 @@ static bool ble_receive_feedback(void) {
     bool changed = false;
     ble_pt_raw_t raw;
     while (ble_pt_pop_raw(&raw)) {
-        if (!raw.pressed || raw.was_rest || !ble_pt_connected()) continue;
+        if (!raw.pressed || !ble_pt_connected()) continue;
         if (s_ble_learning) {
             const ble_pt_action_t action = s_ble_learning == 1 ? BLE_PT_ACTION_PREV : BLE_PT_ACTION_NEXT;
-            const esp_err_t error = ble_pt_bind(action, ble_pt_raw_code(&raw));
+            const esp_err_t error = ble_pt_bind(action, &raw.frame);
             snprintf(s_ble_feedback, sizeof(s_ble_feedback), "%s",
                      error == ESP_OK ? (action == BLE_PT_ACTION_PREV ? "识别成功 · 已绑定上一页" : "识别成功 · 已绑定下一页")
                                      : "识别成功 · 绑定保存失败，请重试");
@@ -1914,6 +1929,12 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
                 }
                 ble_pt_raw_t stale;
                 while (ble_pt_pop_raw(&stale)) {}
+                // 把此刻那一帧当基准：点「学习」时用户还没按键，外设发的就是静止帧。有些遥控器
+                // 的静止帧带着非零常量，不这样标一下，那串常量会被当成一次按下学进去。
+                // Pin the frame present now as the baseline: the user has not pressed yet, so what the
+                // remote sends is its resting frame. Some remotes keep non-zero constants there, and
+                // without this the constants get learned as if they were a press.
+                ble_pt_learn_begin();
                 s_ble_feedback[0] = s_ble_notice[0] = 0;
                 s_ble_learning = i + 1;
                 s_ble_scroll = 0;

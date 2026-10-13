@@ -225,15 +225,30 @@ static bool s_discovery_started;
 static bool s_has_keyboard_page, s_has_consumer_page;
 static uint8_t s_preferred_byte = 0xFF;
 
-// 静止帧：外设什么都没按时发的报告。第一帧如果就是全松开的，用它做基准；之后每一帧
-// 都与它比较来判定边沿。边沿必须同时看上一帧，否则「等于静止值」会在每次报告里重复触发。
-// The rest frame: the report the remote sends with nothing pressed. The first all-released frame
-// becomes the baseline and later frames are compared against it. Edge detection also needs the
-// previous frame, or "equals rest" would fire a release on every report.
-static uint8_t s_rest[FRAME_MAX];
-static uint8_t s_last[FRAME_MAX];
-static size_t s_frame_len;
+// 静止帧：外设什么都没按时发的报告。它唯一的用途是判断一帧算不算「按下了」。学习界面会把
+// 点「学习」那一刻的帧定为基准——有些遥控器的静止帧带着非零常量（协议字节、状态字节），只按
+// 「全零」判断会把静止帧也当成一次按下，学到的就成了它。第一帧「什么都没按」的报告照旧算基准。
+// The rest frame: the report the remote sends with nothing pressed. Its only job is deciding
+// whether a frame counts as a press. A learning screen pins the frame present when 学习 is tapped
+// as the baseline, because some remotes keep non-zero constants in their resting frame and an
+// all-zero test alone would read that frame as a press and learn it instead. The first report with
+// nothing pressed still becomes one.
+static ble_pt_frame_t s_rest;
 static bool s_rest_known;
+
+// 原始边沿的判定状态：正在按着的那一帧、上一帧、按下之前那一帧，以及最近一帧的到达时刻。
+// Press state for raw edges: the frame the open press was recorded from, the previous frame, the
+// frame before the press, and when the last frame arrived.
+static ble_pt_frame_t s_raw_held, s_raw_prev, s_raw_base;
+static bool s_raw_down;
+static uint32_t s_raw_last_ms;
+
+// 静默多久算这一次按下结束。不少遥控器松开时不发报告，只能靠静默收尾；收尾之后同一个帧再发来
+// 才算新的一次按下，否则第二次按同一个键会被当成「还按着」而丢掉。
+// How long silence ends a press. Many remotes send nothing on release, so silence closes it; once
+// closed, the same frame counts as a fresh press -- otherwise the second press of a key reads as
+// "still held" and is dropped.
+#define RAW_RELEASE_GAP_MS 150
 
 // 自动重复：HID 只在状态变化时发报告，按住不放只会来一次，所以自己合成重复。
 // Auto-repeat: HID only reports on state change, so a held key arrives once and repeats are
@@ -248,7 +263,7 @@ static volatile uint32_t s_held_since, s_last_repeat;
 
 typedef struct {
     char addr[18];
-    uint32_t codes[BLE_PT_MAX_BINDINGS];  // 槽位 0 = PREV，1 = NEXT / slot 0 = PREV, 1 = NEXT
+    ble_pt_frame_t frames[BLE_PT_MAX_BINDINGS];  // 槽位 0 = PREV，1 = NEXT / slot 0 = PREV, 1 = NEXT
 } binding_set_t;
 
 static binding_set_t s_bindings;  // 当前连接外设的绑定 / bindings of the connected peer
@@ -336,8 +351,14 @@ static void bindings_load(const char *addr) {
     nvs_handle_t h;
     if (nvs_open(NVS_NS_BINDINGS, NVS_READONLY, &h) != ESP_OK) return;
     char key[16];
-    size_t len = sizeof(s_bindings.codes);
-    nvs_get_blob(h, bond_key(key, sizeof(key), addr), s_bindings.codes, &len);
+    size_t len = sizeof(s_bindings.frames);
+    // 旧固件在这里存的是 4 个 32 位码值，长度对不上就当作没绑过：让用户重新学一次，比按一个
+    // 错误的身份翻页好。
+    // Older firmware stored four 32-bit codes here; a length mismatch counts as nothing bound,
+    // which beats turning pages on a wrong identity.
+    if (nvs_get_blob(h, bond_key(key, sizeof(key), addr), s_bindings.frames, &len) != ESP_OK ||
+        len != sizeof(s_bindings.frames))
+        memset(s_bindings.frames, 0, sizeof(s_bindings.frames));
     nvs_close(h);
 }
 
@@ -365,23 +386,102 @@ static void key_push(const ble_pt_event_t *ev) {
 // 一次按下只有在它的释放还有位置时才入环，环满就整对丢弃，绝不只丢释放。
 // A press only enters with room left for its release; a full ring drops the whole pair, never a
 // release alone.
-static void raw_push(bool pressed, uint8_t report_id, uint8_t byte_index, uint8_t value,
-                     bool was_rest) {
+static void raw_push(bool pressed, const ble_pt_frame_t *frame) {
     portENTER_CRITICAL(&s_ring_lock);
     if (pressed) ++s_input_serial;
     const uint8_t used = (uint8_t)((s_raws.head - s_raws.tail + RAW_RING_LEN) % RAW_RING_LEN);
     const uint8_t keep = pressed ? 1 : 0;  // 按下要给自己的释放留位 / a press reserves room for its release
     if ((uint8_t)(RAW_RING_LEN - 1 - used) > keep) {
         ble_pt_raw_t *slot = &s_raws.items[s_raws.head];
-        slot->report_id = report_id;
-        slot->byte_index = byte_index;
-        slot->value = value;
+        slot->frame = *frame;
         slot->pressed = pressed;
-        slot->was_rest = was_rest;
         slot->at_ms = (uint32_t)(esp_timer_get_time() / 1000);
         s_raws.head = (uint8_t)((s_raws.head + 1) % RAW_RING_LEN);
     }
     portEXIT_CRITICAL(&s_ring_lock);
+}
+
+/* ---- 整帧身份 / Whole-frame identity ---- */
+
+// 整份清零再拷内容：比较只看 len 个字节，但入环、进 NVS 的结构体里不该有未初始化的字节。
+// Zero the whole struct before copying: comparisons look at len bytes only, but neither the ring
+// nor the struct written to NVS should carry uninitialised bytes.
+static ble_pt_frame_t frame_of(const uint8_t *data, size_t len) {
+    ble_pt_frame_t frame = {0};
+    if (len > BLE_PT_FRAME_MAX) len = BLE_PT_FRAME_MAX;
+    frame.len = (uint8_t)len;
+    if (len) memcpy(frame.bytes, data, len);
+    return frame;
+}
+
+// 逐字节比两帧，长度也要一样；空帧不等于任何帧。
+// Compare two frames byte for byte, lengths included; an empty frame equals nothing.
+static bool frame_same(const ble_pt_frame_t *a, const ble_pt_frame_t *b) {
+    return a->len && a->len == b->len && !memcmp(a->bytes, b->bytes, a->len);
+}
+
+// 一帧是不是「什么都没按」：全零，或就是基准帧。9 字节帧的首字节是报告号，不是键码。
+// Whether a frame means "nothing pressed": all zero, or exactly the baseline. Byte 0 of a 9-byte
+// frame is the report id, not a key code.
+static bool frame_idle(const ble_pt_frame_t *frame) {
+    if (!frame->len) return true;
+    const size_t first = frame->len == 9 ? 1 : 0;
+    bool all_zero = true;
+    for (size_t i = first; i < frame->len && all_zero; ++i) all_zero = frame->bytes[i] == 0;
+    if (all_zero) return true;
+    return s_rest_known && frame_same(frame, &s_rest);
+}
+
+// 收尾一次按下：松开边沿带的是按下那一刻的整帧，绑在它上面的动作才认得出是同一个键。
+// Close an open press: the release edge carries the frame the press was recorded from, so an action
+// bound to that frame can tell it is the same key.
+static void raw_release(void) {
+    s_raw_down = false;
+    raw_push(false, &s_raw_held);
+}
+
+// 断链或换台：清掉原始边沿的状态，免得新外设的第一帧接着上一台没结束的按下。
+// A dropped or switched link clears the raw state, so the next peer's first frame does not
+// continue a press the previous peer left open.
+static void raw_reset(void) {
+    s_raw_down = false;
+    s_raw_held.len = s_raw_prev.len = s_raw_base.len = 0;
+    s_raw_last_ms = 0;
+}
+
+// 一帧 → 原始边沿。整帧就是身份：同一个键每次按下的字节一模一样，记下这一串就够。
+// One frame to raw edges. The whole frame is the identity: the same key sends the same bytes on
+// every press, so recording that string is all it takes.
+static void raw_frame(const uint8_t *data, size_t len, uint32_t now) {
+    // 静默够久 = 上一次按下已经结束（遥控器多半不发松开报告）。先收尾，再判这一帧。
+    // Enough silence means the previous press is over (most remotes send no release report); close
+    // it before judging this frame.
+    if (s_raw_down && now - s_raw_last_ms > RAW_RELEASE_GAP_MS) raw_release();
+
+    const ble_pt_frame_t frame = frame_of(data, len);
+    if (frame_idle(&frame)) {
+        if (s_raw_down) raw_release();
+    } else if (!s_raw_down) {
+        s_raw_base = s_raw_prev;  // 按下之前那一帧，多半是静止帧 / the frame before the press, usually the rest frame
+        s_raw_held = frame;
+        s_raw_down = true;
+        raw_push(true, &s_raw_held);
+    } else if (!frame_same(&frame, &s_raw_held)) {
+        // 帧变了，上一次按下到此为止。回到按下之前那一帧只是松开（有些遥控器的松开帧带着非零
+        // 常量）；换成别的帧才算又一次按下，这样连按两个不同的键不会丢掉后一个。
+        // The frame changed, so the previous press is over. Back at the pre-press frame it is only a
+        // release -- some remotes send non-zero constants on release; any other frame is another
+        // press, so two different keys in quick succession do not lose the second one.
+        raw_release();
+        if (!frame_same(&frame, &s_raw_base)) {
+            s_raw_base = s_raw_prev;
+            s_raw_held = frame;
+            s_raw_down = true;
+            raw_push(true, &s_raw_held);
+        }
+    }
+    s_raw_prev = frame;
+    s_raw_last_ms = now;
 }
 
 /* ---- HID 报告解析（移植自 CrossMux）/ Report parsing (ported) ---- */
@@ -459,44 +559,40 @@ static void emit_usage(uint8_t usage, uint8_t mods) {
 static void ingest_report(const uint8_t *data, size_t len) {
     if (!data || !len || len > FRAME_MAX) return;
     ble_pt_crumb(BLE_PT_CRUMB_INGEST);
+    const uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
     // 记下最近一次收到数据的时刻：按下状态靠它兜底超时（见 poll_locked）——
     // 对端不发「松开」那条全零报告时，s_held_usage 否则永远不会清。
     // Remember when data last arrived: the held state times out on it (see poll_locked), because
     // s_held_usage otherwise never clears when the peer never sends the all-zero release report.
-    s_last_rx_ms = (uint32_t)(esp_timer_get_time() / 1000);
+    s_last_rx_ms = now;
 
     const uint8_t code = extract_primary_code(data, len);
     const uint8_t mods = s_has_keyboard_page ? data[len == 9 ? 1 : 0] : 0;
 
     // 静止帧取第一帧「什么都没按」的报告。/ The rest frame is the first report with nothing pressed.
-    if (!s_rest_known) {
-        if (!code || s_has_keyboard_page) {
-            memcpy(s_rest, data, len);
-            if (code) {
-                // 标准键盘无需等待先松键，首个按下也可用于学习。/ Standard keyboards can learn their first press without a prior release.
-                memset(s_rest, 0, len);
-                if (len == 9) s_rest[0] = data[0];
-            }
-            memcpy(s_last, s_rest, len);
-            s_frame_len = len;
-            s_rest_known = true;
-        } else {
-            if (code != s_held_usage || mods != s_held_mods) emit_usage(code, mods);
-            return;
+    if (!s_rest_known && (!code || s_has_keyboard_page)) {
+        s_rest = frame_of(data, len);
+        if (code) {
+            // 标准键盘无需等待先松键，首个按下也可用于学习。/ Standard keyboards can learn their first press without a prior release.
+            // 只清按键区间，报告 ID、修饰键与保留字节都留着：它们是状态，不是按键。
+            // 整帧清零的话，报告里每个非零常量都会被当成静止帧的一部分，反倒是那些常量成了
+            // 静止帧——学习时按下的键与它一比就分出真假。
+            // Only the key bytes are zeroed; the report id, the modifiers and the reserved byte
+            // stay. They are state, not keys, and a fully zeroed frame would make every non-zero
+            // constant part of the baseline, which is exactly what the resting frame must not do.
+            const size_t first_key = s_has_keyboard_page ? (len == 9 ? 3 : 2) : 0;
+            for (size_t i = first_key; i < len; ++i) s_rest.bytes[i] = 0;
+            if (len == 9) s_rest.bytes[0] = data[0];
         }
+        s_rest_known = true;
     }
-    if (len != s_frame_len) return;  // 长度变了，之前学的基准不再适用 / frame shape changed
 
-    // 报告 id 是 9 字节帧的首字节，其余按 0。/ The report id is the first byte of a 9-byte frame, else 0.
-    const uint8_t report_id = (len == 9) ? data[0] : 0;
-    for (size_t i = 0; i < len; ++i) {
-        const uint8_t rest = s_rest[i];
-        const bool now_pressed = data[i] != rest;
-        const bool was_pressed = s_last[i] != rest;
-        if (now_pressed && !was_pressed) raw_push(true, report_id, (uint8_t)i, data[i], false);
-        else if (!now_pressed && was_pressed) raw_push(false, report_id, (uint8_t)i, rest, rest != 0);
-    }
-    memcpy(s_last, data, len);
+    // 原始边沿先记：学习按键不该等一条「松开」报告，第一次按下就得算数。首帧就是按下时，
+    // 键路径照旧在下面投递（那里的去抖会处理重复帧）。
+    // Raw edges come first: learning a key must not wait for a release report, so the very first
+    // press counts. When the first frame is already a press, the key path below still delivers it
+    // (its debounce takes care of duplicate frames).
+    raw_frame(data, len, now);
 
     if (code) {
         // 报告路径去抖：同一个键 500ms 内只投递一次。
@@ -510,7 +606,6 @@ static void ingest_report(const uint8_t *data, size_t len) {
         // until memory or the watchdog restarts the board -- the "one press and it restarts"
         // symptom, with the same key reported over and over. Auto-repeat does not come through
         // here, so holding to turn pages is unaffected.
-        const uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
         const bool changed = code != s_held_usage || mods != s_held_mods;
         const bool debounced = code == s_emit_usage && now - s_emit_ms < SAME_KEY_DEBOUNCE_MS;
         if (changed && !debounced) {
@@ -1155,6 +1250,7 @@ static int gap_cb(struct ble_gap_event *event, void *arg) {
             s_conn_handle = BLE_HS_CONN_HANDLE_NONE;
             s_held_usage = 0;
             s_rest_known = false;
+            raw_reset();
             s_subscribed_count = 0;
             s_input_chr_count = 0;
             s_discovery_started = false;
@@ -1268,6 +1364,7 @@ static int start_connect(const char *addr, uint8_t type) {
     // hardening such as an 8 s supervision timeout can follow.
     s_connecting = true;
     s_rest_known = false;
+    raw_reset();
     s_has_keyboard_page = s_has_consumer_page = false;
     s_preferred_byte = 0xFF;
     s_held_usage = 0;
@@ -1727,6 +1824,18 @@ static void poll_locked(void) {
         if (ble_pt_connect(addr) == ESP_OK) ESP_LOGI(TAG, "connecting to %s", s_conn_name);
     }
 
+    // 原始边沿的收尾：遥控器不发松开报告时，静默够久就把这一次按下结束掉，下一次按下
+    //（哪怕是同一个键）才算新的一次。放在这里是因为主循环每轮都调 poll()，而按下与松开之间
+    // 可能隔很久、中间一条报告都没有。
+    // Closing raw presses: when the remote sends no release report, enough silence ends the press so
+    // the next one -- even of the same key -- counts as a new press. This lives here because the main
+    // loop pumps poll() every iteration, while press and release can be far apart with no report at
+    // all in between.
+    {
+        const uint32_t raw_now = (uint32_t)(esp_timer_get_time() / 1000);
+        if (s_raw_down && raw_now - s_raw_last_ms > RAW_RELEASE_GAP_MS) raw_release();
+    }
+
     const uint8_t usage = s_held_usage;
     if (!usage) return;
     const uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
@@ -1792,12 +1901,6 @@ bool ble_pt_pop_raw(ble_pt_raw_t *out) {
     return got;
 }
 
-uint32_t ble_pt_raw_code(const ble_pt_raw_t *raw) {
-    if (!raw) return 0;
-    return (uint32_t)raw->value | ((uint32_t)raw->byte_index << 8) |
-           ((uint32_t)raw->report_id << 16);
-}
-
 /* ---- 已配对 / Pairings ---- */
 
 uint8_t ble_pt_bond_count(void) { return s_bond_count; }
@@ -1826,30 +1929,56 @@ void ble_pt_forget(const char *addr) {
 
 /* ---- 手动映射 / Manual bindings ---- */
 
-esp_err_t ble_pt_bind(ble_pt_action_t action, uint32_t code) {
+void ble_pt_learn_begin(void) {
+    // 刚连上就点学习时还没收到过帧，那就什么都不做：「全零」规则照旧够用。
+    // Learning tapped right after connecting has no frame yet; the all-zero rule still applies.
+    if (!s_raw_prev.len) return;
+    s_rest = s_raw_prev;
+    s_rest_known = true;
+}
+
+esp_err_t ble_pt_bind(ble_pt_action_t action, const ble_pt_frame_t *frame) {
     if (action != BLE_PT_ACTION_PREV && action != BLE_PT_ACTION_NEXT) return ESP_ERR_INVALID_ARG;
     if (!s_bindings.addr[0]) return ESP_ERR_INVALID_STATE;  // 没连着外设 / no peer connected
-    if (!code) return ESP_ERR_INVALID_ARG;
-    uint32_t codes[BLE_PT_MAX_BINDINGS];
-    memcpy(codes, s_bindings.codes, sizeof(codes));
+    if (!frame || frame->len > BLE_PT_FRAME_MAX) return ESP_ERR_INVALID_ARG;
+
+    ble_pt_frame_t frames[BLE_PT_MAX_BINDINGS];
+    memcpy(frames, s_bindings.frames, sizeof(frames));
     const unsigned index = action == BLE_PT_ACTION_PREV ? 0 : 1;
-    codes[index] = code;
-    if (codes[1 - index] == code) codes[1 - index] = 0;
+    if (!frame->len) {
+        // 空帧 = 清除这一条。/ An empty frame clears the slot.
+        memset(&frames[index], 0, sizeof(frames[0]));
+    } else {
+        bool all_zero = true;
+        for (size_t i = 0; i < frame->len && all_zero; ++i) all_zero = frame->bytes[i] == 0;
+        // 全零帧是「什么都没按」：拿它当身份，静止的外设就会一直翻页。
+        // An all-zero frame is "nothing pressed"; as an identity it would turn pages while the
+        // peripheral sits idle.
+        if (all_zero) return ESP_ERR_INVALID_ARG;
+        frames[index] = *frame;
+        // 同一个帧不能同时绑两个动作：先绑的那个让位，否则翻页方向由槽位顺序决定。
+        // One frame must not drive both actions: the earlier binding gives way, or the direction
+        // would depend on slot order.
+        if (frame_same(&frames[1 - index], &frames[index])) memset(&frames[1 - index], 0, sizeof(frames[0]));
+    }
 
     nvs_handle_t h;
     esp_err_t err = nvs_open(NVS_NS_BINDINGS, NVS_READWRITE, &h);
     if (err != ESP_OK) return err;
     char key[16];
-    err = nvs_set_blob(h, bond_key(key, sizeof(key), s_bindings.addr), codes, sizeof(codes));
+    err = nvs_set_blob(h, bond_key(key, sizeof(key), s_bindings.addr), frames, sizeof(frames));
     if (err == ESP_OK) err = nvs_commit(h);
     nvs_close(h);
-    if (err == ESP_OK) memcpy(s_bindings.codes, codes, sizeof(codes));
+    if (err == ESP_OK) memcpy(s_bindings.frames, frames, sizeof(frames));
     return err;
 }
 
-uint32_t ble_pt_binding(ble_pt_action_t action) {
-    if (action != BLE_PT_ACTION_PREV && action != BLE_PT_ACTION_NEXT) return 0;
-    return s_bindings.codes[action == BLE_PT_ACTION_PREV ? 0 : 1];
+bool ble_pt_binding(ble_pt_action_t action, ble_pt_frame_t *out) {
+    if (action != BLE_PT_ACTION_PREV && action != BLE_PT_ACTION_NEXT) return false;
+    const ble_pt_frame_t *slot = &s_bindings.frames[action == BLE_PT_ACTION_PREV ? 0 : 1];
+    if (!slot->len) return false;
+    if (out) *out = *slot;
+    return true;
 }
 
 // 内置映射：上/下、左右、PageUp/PageDown 都算翻页。市面上的翻页器按键五花八门，
@@ -1883,19 +2012,20 @@ ble_pt_action_t ble_pt_action_for_usage(uint8_t usage, uint8_t mods) {
     }
 }
 
-ble_pt_action_t ble_pt_action_for_raw(uint32_t code) {
-    if (!code) return BLE_PT_ACTION_NONE;
+ble_pt_action_t ble_pt_action_for_frame(const ble_pt_frame_t *frame) {
+    if (!frame || !frame->len) return BLE_PT_ACTION_NONE;
     // 手动绑定优先：它更具体，也允许用户把内置映射覆盖掉。
     // Manual bindings win: they are more specific and let the user override the built-in map.
-    if (code == s_bindings.codes[0]) return BLE_PT_ACTION_PREV;
-    if (code == s_bindings.codes[1]) return BLE_PT_ACTION_NEXT;
-    // 阅星瞳协议：裸的一字节报告，报告号和字节下标都为 0，所以整个码值就是 0x01 / 0x02。
-    // 声明了键盘页的外设上，byte 0 是修饰键字节，那里的 0x01 是左 Ctrl，不能当成翻页。
-    // YueXingTong: a bare one-byte report, so report id and byte index are both zero and the
-    // whole code is 0x01 / 0x02. On a peripheral that declared a keyboard page, payload byte 0 is
-    // the modifier byte and 0x01 there is left Ctrl, which must not turn a page.
-    if (s_has_keyboard_page) return BLE_PT_ACTION_NONE;
-    if (code == YXT_CODE_PREV) return BLE_PT_ACTION_PREV;
-    if (code == YXT_CODE_NEXT) return BLE_PT_ACTION_NEXT;
+    if (frame_same(frame, &s_bindings.frames[0])) return BLE_PT_ACTION_PREV;
+    if (frame_same(frame, &s_bindings.frames[1])) return BLE_PT_ACTION_NEXT;
+    // 阅星瞳协议：裸的一字节报告，报告号和字节下标都为 0，所以整帧就是 0x01 / 0x02。
+    // 声明了键盘页的外设上，byte 0 是修饰键字节，那里的 0x01 是左 Ctrl；9 字节帧的 byte 0 是
+    // 报告号。两者都不是键码，不能当成翻页。
+    // YueXingTong: a bare report, so the whole frame is 0x01 / 0x02. On a peripheral that declared
+    // a keyboard page, byte 0 is the modifier byte and 0x01 there is left Ctrl; on a 9-byte frame
+    // byte 0 is the report id. Neither is a key code, and neither may turn a page.
+    if (s_has_keyboard_page || frame->len == 9) return BLE_PT_ACTION_NONE;
+    if (frame->bytes[0] == YXT_CODE_PREV) return BLE_PT_ACTION_PREV;
+    if (frame->bytes[0] == YXT_CODE_NEXT) return BLE_PT_ACTION_NEXT;
     return BLE_PT_ACTION_NONE;
 }
