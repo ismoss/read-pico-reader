@@ -689,8 +689,9 @@ static void setting_icon(uint8_t *fb, int index, int cx, int cy) {
         UI_ICON_REFRESH_CW,        // 11 首页强刷
         UI_ICON_DOWNLOAD,          // 12 系统升级
         UI_ICON_CPU,               // 13 BOOT 刷机
-        UI_ICON_TIMER,             // 14 自动休眠
+        UI_ICON_EYE_CLOSED,        // 14 自动休眠
         UI_ICON_SLIDERS_HORIZONTAL, // 15 主页刷新模式 / Main refresh mode
+        UI_ICON_LOCK,              // 16 锁屏密码 / lock screen password
     };
     if (index < 0 || index >= (int)(sizeof(icons) / sizeof(icons[0]))) return;
     ui_draw_icon(fb, cx, cy, SETTINGS_ICON_PX, icons[index], SETTINGS_ICON_INK);
@@ -1346,7 +1347,7 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
     const char *personal_values[]={app_settings_shelf_style()==5?"列表书架":app_settings_shelf_style()==1?"深色书轨":"亚克力书架",
         app_settings_lock_style()==2?"书架拼贴":app_settings_lock_style()==1?"壁纸":"阅读票根",
         lock_pin_enabled()?"已开启":"已关闭",signature};
-    const int personal_icons[]={4,5,5,10};
+    const int personal_icons[]={4,5,16,10};
     setting_group(fb,SETTINGS_PERSONAL_Y-49,"个性化功能",SETTINGS_PERSONAL_Y,
                   personal_icons,personal_labels,personal_values,SETTINGS_PERSONAL_ROWS);
     const char *maintenance_labels[]={"系统升级","保存与恢复","BOOT 刷机"};

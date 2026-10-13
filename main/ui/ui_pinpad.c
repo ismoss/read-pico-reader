@@ -109,22 +109,6 @@ static bool rounded_inside(float x,float y,float left,float top,float width,floa
     float cy=y<top+radius?top+radius:y>top+height-radius?top+height-radius:y;
     float dx=x-cx,dy=y-cy;return dx*dx+dy*dy<=radius*radius;
 }
-static void lock_icon(uint8_t *fb){
-    // 原生4×4覆盖采样：圆角锁身与圆拱锁梁，避免放大位图和尖方角。
-    // Native 4×4 coverage sampling rounds the body and shackle, with no scaled bitmap or sharp corners.
-    for(int y=136;y<195;++y)for(int x=319;x<365;++x){
-        unsigned coverage=0;
-        for(int j=0;j<4;++j)for(int i=0;i<4;++i){
-            float xx=x+(i+0.5f)/4,yy=y+(j+0.5f)/4,dx=xx-342,dy=yy-154;
-            float distance=dx*dx+dy*dy;
-            bool body=rounded_inside(xx,yy,320,160,44,34,9)&&!rounded_inside(xx,yy,323,163,38,28,6);
-            bool shackle=(yy<=154&&distance>=12*12&&distance<=16*16)||
-                (yy>154&&yy<163&&((xx>=326&&xx<330)||(xx>354&&xx<=358)));
-            coverage+=body||shackle;
-        }
-        if(coverage){unsigned gray=(pixel(fb,x,y)>>4)*17u;epd_draw_pixel(x,y,ui_image_dither_gray((gray*(16-coverage)+8)/16,x,y),fb);}
-    }
-}
 static void paint(uint8_t *fb,const ui_pinpad_t *pad,EpdRect area){
     int right=area.x+area.width,bottom=area.y+area.height;
     for(int y=area.y;y<bottom&&y<PAD_H;++y)for(int x=area.x;x<right&&x<PAD_W;++x)
@@ -133,7 +117,9 @@ static void paint(uint8_t *fb,const ui_pinpad_t *pad,EpdRect area){
             epd_draw_pixel(x,y,gray,fb);
         }
     if(intersects(area,(EpdRect){180,135,324,168})){
-        lock_icon(fb);
+        // 锁用图标库里的那一枚：全机图标同源，换起来也只改这里。
+        // The lock comes from the icon set, the single source for every icon in the firmware.
+        ui_draw_icon(fb,342,165,56,UI_ICON_LOCK,0);
         text(fb,342,260,48,pad->title,0,pad,-1);
     }
     if(intersects(area,ui_pinpad_entry_area())){
