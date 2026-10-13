@@ -19,6 +19,7 @@ unit = r'''
 #define UI_LOCK_HEIGHT 1216
 #define FRAME_BYTES (684u*1216u/2u)
 #define MODE_GC16 1
+enum EpdDrawError {EPD_DRAW_SUCCESS=0,EPD_DRAW_FAULT=1};
 #define APP_WAKE_KEY 1
 #define APP_WAKE_TIMEOUT 3
 #define APP_SLEEP_DEEP 1
@@ -35,7 +36,9 @@ typedef struct {bool active;} app_lock_font_t;
 typedef void *sc7a20h_handle_t;typedef void *cst836u_handle_t;
 typedef int app_wake_source_t;
 static const uint8_t lock_4bpp_bin_start[1]={0};
-static uint8_t pixels[FRAME_BYTES],style;
+static uint8_t pixels[FRAME_BYTES],panel[FRAME_BYTES],style;
+static bool frame_ready, s_lock_feedback_visible, feedback_seen, final_ok=true;
+static unsigned full_presents, entry_clears;
 static unsigned draws[3],fallback,presents,auths,font_begin,font_end,pause,resume,clear_resume;
 static bool pin,draw_ok=true,transfer_ok=true,timeout,reader,boot_cache,cache_ok;
 static unsigned cached_style;
@@ -43,18 +46,22 @@ static jmp_buf deep;
 static const char *app_settings_wallpaper_path(void){return "/sdcard/wallpaper.jpg";}
 static uint8_t app_settings_lock_style(void){return style;}
 static bool lock_pin_enabled(void){return pin;}
-static bool draw(unsigned chosen,uint8_t *fb){assert(chosen==style);++draws[chosen];memset(fb,0x10+chosen,FRAME_BYTES);return draw_ok;}
-static bool ui_wallpaper_draw(uint8_t *fb,const char *path,EpdRect a){assert(!strcmp(path,app_settings_wallpaper_path())&&a.width==684&&a.height==1216);return draw(1,fb);}
+static bool draw(unsigned chosen,uint8_t *fb){assert(chosen==style&&panel[0]==(feedback_seen?0xff:0x32));++draws[chosen];memset(fb,0x10+chosen,FRAME_BYTES);frame_ready=draw_ok;return draw_ok;}
+static bool ui_wallpaper_prepare_lock(uint8_t *fb,const char *path){assert(!strcmp(path,app_settings_wallpaper_path()));return draw(1,fb);}
+static void ui_wallpaper_cache_commit(const uint8_t *fb){assert(style==1&&draw_ok&&presents==1&&fb==pixels&&!memcmp(panel,pixels,FRAME_BYTES));}
 static bool book_ticket_draw(uint8_t *fb,bool background){assert(background==reader);return draw(0,fb);}
 static bool book_lock_collage_draw(uint8_t *fb){return draw(2,fb);}
-static void ui_draw_full_image(uint8_t *fb,const uint8_t *art){assert(art==lock_4bpp_bin_start);++fallback;memset(fb,0xfe,FRAME_BYTES);}
+static bool book_lock_collage_prepare(uint8_t *fb){return draw(2,fb);}
+static enum EpdDrawError update_display_full(EpdiyHighlevelState *h){(void)h;++full_presents;assert(feedback_seen&&!s_lock_feedback_visible&&panel[0]==255&&panel[1]==0);if(!final_ok){panel[0]=0x77;return EPD_DRAW_FAULT;}memcpy(panel,pixels,FRAME_BYTES);++presents;return EPD_DRAW_SUCCESS;}
+static void book_lock_collage_cache_commit(const uint8_t *fb){assert(style==2&&draw_ok&&presents==1&&fb==pixels&&!memcmp(panel,pixels,FRAME_BYTES));}
+static void ui_draw_full_image(uint8_t *fb,const uint8_t *art){assert(art==lock_4bpp_bin_start&&panel[0]==(feedback_seen?255:0x32));++fallback;memset(fb,0xfe,FRAME_BYTES);frame_ready=true;}
 static uint8_t *epd_hl_get_framebuffer(EpdiyHighlevelState *h){(void)h;return pixels;}
 static void epd_poweron(void){}
 static void epd_poweroff(void){}
-static void epd_clear(void){}
+static void epd_clear(void){if(!presents){assert(frame_ready);++entry_clears;}memset(panel,255,FRAME_BYTES);}
 static void epd_hl_set_all_white(void *h){(void)h;memset(pixels,255,FRAME_BYTES);}
-static void epd_hl_update_screen_from_white(void *h,int mode,int temp){(void)h;assert(mode==MODE_GC16&&temp==25);assert(pixels[0]==(draw_ok?0x10+style:0xfe));++presents;}
-static void app_font_begin_lock(app_lock_font_t *s){s->active=true;++font_begin;}
+static enum EpdDrawError epd_hl_update_screen_from_white(void *h,int mode,int temp){(void)h;assert(mode==MODE_GC16&&temp==25&&frame_ready&&panel[0]==255);assert(pixels[0]==(draw_ok?0x10+style:0xfe));memcpy(panel,pixels,FRAME_BYTES);++presents;return EPD_DRAW_SUCCESS;}
+static void app_font_begin_lock(app_lock_font_t *s){assert(panel[0]==(feedback_seen?0xff:0x32));s->active=true;++font_begin;}
 static void app_font_end_lock(app_lock_font_t *s){assert(s->active);++font_end;}
 static bool read_pico_transfer_pause_for_sleep(void){++pause;return transfer_ok;}
 static void read_pico_transfer_resume_after_sleep(void){++resume;}
@@ -74,7 +81,7 @@ static int epd_height(void){return 1216;}
 for name in ('draw_wallpaper', 'enter_lock_and_sleep', 'app_lock_boot_gate'):
     unit += function(name, ROOT/'main/sleep.c') + '\n'
 unit += r'''
-static void reset(void){memset(draws,0,sizeof(draws));fallback=presents=auths=font_begin=font_end=pause=resume=clear_resume=0;memset(pixels,0x32,FRAME_BYTES);draw_ok=transfer_ok=true;timeout=reader=boot_cache=cache_ok=false;}
+static void reset(void){memset(draws,0,sizeof(draws));fallback=presents=auths=font_begin=font_end=pause=resume=clear_resume=0;memset(pixels,0x32,FRAME_BYTES);memset(panel,0x32,FRAME_BYTES);frame_ready=s_lock_feedback_visible=feedback_seen=false;full_presents=entry_clears=0;final_ok=true;draw_ok=transfer_ok=true;timeout=reader=boot_cache=cache_ok=false;}
 int main(void){
  EpdiyHighlevelState hl={0};int64_t ignore=0;
  // 两种来源的阅读背景只影响票根内容，不决定样式。/ Reader provenance affects ticket content, never the style.
@@ -85,6 +92,9 @@ int main(void){
   assert(auths==password&&pause==1&&resume==1&&clear_resume==1&&ignore==3000);
   assert(font_begin==(s!=1||password)&&font_end==font_begin&&app_settings_lock_style()==s);
  }
+ // 白底圆锁历史一次GC16完成后再缓存/PIN，失败恢复原清屏，自动/其他样式不走提前反馈。/ Present once from true badge history before cache/PIN; faults clear and idle/styles keep the original path.
+ for(unsigned success=0;success<2;++success)for(unsigned password=0;password<2;++password){reset();style=2;pin=password;final_ok=success;s_lock_feedback_visible=feedback_seen=true;memset(panel,255,FRAME_BYTES);panel[1]=0;enter_lock_and_sleep(&hl,NULL,(void*)1,(void*)2,false);assert(full_presents==1&&presents==1&&entry_clears==!success&&auths==password&&!s_lock_feedback_visible);}
+ reset();style=2;pin=false;transfer_ok=false;s_lock_feedback_visible=feedback_seen=true;enter_lock_and_sleep(&hl,NULL,(void*)1,(void*)2,false);assert(!full_presents&&!s_lock_feedback_visible&&!presents);
  // 失败只用内建回退，绝不改成其他样式；传输忙时不绘锁屏。/ Draw failure falls back only to built-in art; active uploads defer lock.
  for(unsigned s=0;s<3;++s){reset();style=s;pin=false;draw_ok=false;enter_lock_and_sleep(&hl,NULL,(void*)1,(void*)2,false);assert(draws[s]==1&&fallback==1&&style==s);}
  reset();transfer_ok=false;enter_lock_and_sleep(&hl,NULL,(void*)1,(void*)2,false);assert(!presents&&!auths&&!font_begin&&clear_resume==1&&!resume);
@@ -99,7 +109,7 @@ int main(void){
  }
  for(unsigned s=0;s<3;++s){reset();style=s;pin=boot_cache=true;draw_ok=false;app_lock_boot_gate(&hl,(void*)2,(void*)1);assert(auths==1&&draws[s]==1&&fallback==1&&style==s);}
  reset();pin=false;app_lock_boot_gate(&hl,(void*)2,(void*)1);assert(!auths&&!font_begin);
- puts("PASS: real auto/manual lock entry chooses ticket/wallpaper/collage with/without PIN and reader background; upload deferral; deep timeout; cold gate cache/fault fallback keeps selected style");
+ puts("PASS: real single-pass final collage retains white/badge history, avoids duplicate entry clear, recovers final faults and consumes feedback before cache/PIN; auto/manual lock entry chooses ticket/wallpaper/collage with/without PIN and reader background; upload deferral; deep timeout; cold gate cache/fault fallback keeps selected style");
 }
 '''
 with tempfile.TemporaryDirectory(dir=ROOT/'build') as folder:

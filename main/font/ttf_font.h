@@ -143,6 +143,12 @@ void ttf_draw_set_runs(const ttf_run_t* runs, size_t count);
 /// First-glyph left bearing without rasterizing; used for paragraph-opening punctuation alignment.
 int ttf_text_left_bearing_px(int pixel_height, const char* text);
 void ttf_set_weight(int wght);
+/// Reader stroke adjustment -2..2, zero preserves native rasterization.
+void ttf_set_stroke_adjust(int level);
+int ttf_get_stroke_adjust(void);
+/// 绘制时使用灰阶覆盖或二值边缘，复用同一份字形缓存，不改变字宽。/ Select gray coverage or binary edges while drawing, reusing glyphs without changing advances.
+void ttf_set_antialias(bool enabled);
+bool ttf_get_antialias(void);
 int ttf_get_weight(void);
 
 void ttf_font_cache_clear(void);

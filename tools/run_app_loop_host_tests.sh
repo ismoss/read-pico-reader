@@ -18,3 +18,5 @@ cc -std=c11 -D_DEFAULT_SOURCE -Wall -Wextra -Werror -fsanitize=address,undefined
   -Itools/sd_probe_stubs -Icomponents/read_pico/include \
   tools/sd_probe_host_test.c -o "$out/sd_probe"
 "$out/sd_probe"
+
+python3 tools/lock_feedback_host_test.py

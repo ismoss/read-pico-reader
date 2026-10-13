@@ -36,7 +36,8 @@ static int sample_count, step, ticks, enters, exits, touch_calls, keys[3], event
 static int menus, highlights, restores, fulls, mode, tick_consumed[32];
 static int long_keys;
 static uint8_t idle_minutes;
-static int idle_locks, before_locks;
+static int idle_locks, before_locks, lock_feedback_calls, lock_badges;
+static bool feedback_enabled;
 static bool online_busy;
 static bool ble_enabled, saved_wifi, upload_busy, click_enabled, click_active;
 static read_pico_transfer_status_t transfer_status;
@@ -49,6 +50,8 @@ static bool home_on_touch, home_on_tick, home_on_key, start_second;
 static int home_enters, home_renders, last_menu_leaf, rendered_leaf;
 static const app_desc_t* menu_background;
 static app_desc_t first, second;
+int ui_nav_hit(uint16_t x,uint16_t y){return y>=1108&&x<684?x/171:-1;}
+void ui_nav_request(app_ctx_t *ctx,int index){ctx->request_app=index==0?&first:&second;}
 static bool full_tick, lock_due, font_due, shake_activity;
 static int64_t time_offset, time_step;
 static int du_areas, gl_areas;
@@ -115,8 +118,9 @@ void rails_idle_check(int64_t n) {(void)n;}
 bool read_pico_pmu_ready(void) {return lock_due;}
 read_pico_pmu_key_action_t read_pico_pmu_take_key_action(void) {return READ_PICO_PMU_KEY_SHORT;}
 void enter_lock_and_sleep(EpdiyHighlevelState*h,int64_t*t,void*a,void*tp,bool reader) {(void)tp;(void)h;(void)t;(void)a;(void)reader;assert(!nav_armed);++idle_locks;lock_due=false;time_offset+=1000000;}
+void app_lock_feedback(EpdiyHighlevelState*h) {(void)h;++lock_feedback_calls;if(feedback_enabled){assert(!before_locks&&!idle_locks);++lock_badges;}}
 void app_lock_wait_key_idle(int ms) {(void)ms;}
-void app_enter_host_sleep(app_sleep_mode_t mode) {(void)mode;longjmp(done,1);}
+esp_err_t app_enter_host_sleep(app_sleep_mode_t mode) {(void)mode;longjmp(done,1);}
 void app_restart_host(void) {longjmp(done,1);}
 void epd_poweroff(void) {}
 const char* app_settings_font_path(void) {return "builtin";}
@@ -172,11 +176,12 @@ static app_redraw_t tick(app_ctx_t*c) {
     if(home_on_tick){c->request_return=true;home_on_tick=false;}
     return full_tick ? APP_REDRAW_FULL : APP_REDRAW_NONE;
 }
+static app_redraw_t consume_power(app_ctx_t*c) {(void)c;lock_due=false;return APP_REDRAW_DONE;}
 static void reset(void) {
     ble_enabled=saved_wifi=upload_busy=click_enabled=click_active=false;
     transfer_status=(read_pico_transfer_status_t){0};
     quick_draws=quick_gl=quick_du=wifi_starts=wifi_stops=ble_resets=click_presses=click_restores=0;
-    main_fast=main_water=false;shelf_exit_arms=0;idle_minutes=0;idle_locks=before_locks=0;online_busy=false;
+    main_fast=main_water=false;shelf_exit_arms=0;idle_minutes=0;idle_locks=before_locks=lock_feedback_calls=lock_badges=0;feedback_enabled=false;online_busy=false;
     nav_arms=nav_draws=nav_full_arms=nav_area_draws=0;nav_armed=NULL;
     main_source_visible=main_target_visible=true;
     media_test=sd_font=saved_sd_font=false;media_lost=media_ready=builtin_opens=font_opens=probes=0;loss_step=-1;
@@ -214,6 +219,14 @@ static app_redraw_t nav_return_tick(app_ctx_t* ctx) {
 }
 static app_redraw_t main_late_tick(app_ctx_t* ctx) {(void)ctx;return step == 1 ? response : APP_REDRAW_NONE;}
 int main(void) {
+    reset();add(10,1141,1,0);
+    app_ctx_t loading={.tp=(void*)1};
+    assert(app_poll_main_navigation(&loading)&&loading.request_app==&first&&loading.user_activity);
+    loading.request_app=NULL; samples[0]=(sample_t){.x=200,.y=1141,.count=1};
+    assert(!app_poll_main_navigation(&loading)); // current shelf, not a cancellation
+    samples[0]=(sample_t){.x=10,.y=1141,.count=2};assert(!app_poll_main_navigation(&loading));
+    samples[0]=(sample_t){.x=10,.y=1141,.count=1,.error=-1};assert(!app_poll_main_navigation(&loading));
+
     reset();add(100,400,1,0);add(110,400,1,0);add(0,0,0,0);run();
     assert(touch_calls==1&&ticks==3&&!tick_consumed[0]);
     reset();response=APP_REDRAW_AREA;add(100,400,1,0);run();assert(touch_calls==1&&tick_consumed[0]);
@@ -419,6 +432,19 @@ int main(void) {
     reset();click_enabled=true;add(85,1141,1,0);add(0,0,0,1);add(0,0,0,0);run();
     assert(click_presses==1&&click_restores==1&&!click_active);
     puts("quick layer/click scheduler: modal ownership, local BW/gray, one saved-network connect/disconnect, upload/no-credential guards, BLE toggle, full/lock and release/multitouch/read-error restoration passed");
+    // 反馈必须早于页面保存/后台收尾；下一页与自动休眠不显示主动锁屏徽标。
+    // Acknowledgement precedes saves/joins; consumed page turns and idle sleep omit it.
+    for(int policy=0;policy<3;++policy){
+        reset();main_fast=policy==1;main_water=policy==2;feedback_enabled=true;
+        first.on_before_lock=before_lock;lock_due=true;time_step=3000000;
+        add(0,0,0,0);add(0,0,0,0);run();
+        assert(lock_badges==1&&lock_feedback_calls==1&&before_locks==1&&idle_locks==1);
+        reset();feedback_enabled=true;first.on_power_short=consume_power;lock_due=true;time_step=3000000;
+        add(0,0,0,0);add(0,0,0,0);run();assert(!lock_badges&&!lock_feedback_calls&&!before_locks&&!idle_locks);
+        reset();feedback_enabled=true;idle_minutes=1;time_step=60000000;first.on_before_lock=before_lock;
+        add(0,0,0,0);add(0,0,0,0);run();assert(idle_locks==1&&before_locks==1&&!lock_feedback_calls&&!lock_badges);
+    }
+    puts("PASS: manual lock acknowledgement precedes page save/reader joins in all three modes; consumed power turns and auto sleep omit the badge");
     puts("app_loop: 50 scheduler scenarios passed, including automatic lock, save callback, input reset and busy guards");
     return 0;
 }

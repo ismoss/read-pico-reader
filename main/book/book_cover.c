@@ -562,6 +562,73 @@ bool book_cover_load_list_gray(const char *path, const char *title, const char *
     return good;
 }
 
+/* ---- 已处理的黑白点阵落卡 / Persistent finished monochrome raster ---- */
+// 更改封面点阵算法时递增此版本；首页与书架各保留一个快刷结果，不按相位累积文件。
+// Bump for changes to dithering; retain one Home and one shelf raster per book, not one per phase.
+#define FAST_COVER_REVISION 1u
+typedef struct {
+    cover_cache_header_t source;
+    uint32_t revision, width, height, stride, contrast, phase, white_edge;
+    uint64_t checksum;
+} fast_cover_header_t;
+static uint64_t fast_cover_checksum(const uint8_t *data, size_t size) {
+    uint64_t hash = UINT64_C(14695981039346656037);
+    while (size--) hash = (hash ^ *data++) * UINT64_C(1099511628211);
+    return hash;
+}
+static bool fast_cover_key(const char *source, const char *title, const char *author,
+                            book_fast_cover_key_t key, char path[120], fast_cover_header_t *header) {
+    const bool home = key.width == 172 && key.height == 250;
+    if (!source || !*source || !key.width || key.width > 176 || !key.height ||
+        (key.height > 240 && !home) ||
+        key.stride < (key.width+7)/8 || key.stride > 22 || key.phase > 15 || key.contrast > 200) return false;
+    char canonical[256];
+    if (book_title_from_path(source, canonical, sizeof(canonical))) title = canonical;
+    if (!title || !*title) return false;
+    memset(header, 0, sizeof(*header));
+    if (!cover_cache_key(source, title, author, path, 120, &header->source)) return false;
+    snprintf(path, 120, "/sdcard/.readpico/covers/%016llx-%sfast.bin",
+             (unsigned long long)header->source.path_hash, home ? "home-" : "");
+    header->revision = FAST_COVER_REVISION; header->width = key.width; header->height = key.height;
+    header->stride = key.stride; header->contrast = key.contrast; header->phase = key.phase;
+    return true;
+}
+bool book_cover_fast_cache_read(const char *source, const char *title, const char *author,
+                                book_fast_cover_key_t key, uint8_t *out, bool *white_edge) {
+    char path[120]; fast_cover_header_t expected, found;
+    if (!out || !white_edge || !fast_cover_key(source, title, author, key, path, &expected)) return false;
+    FILE *file = fopen(path, "rb"); if (!file) return false;
+    const size_t bytes = (size_t)key.stride * key.height;
+    bool ok = fread(&found, 1, sizeof(found), file) == sizeof(found) &&
+        found.source.magic == expected.source.magic && found.source.schema == expected.source.schema &&
+        found.source.template_version == expected.source.template_version &&
+        found.source.file_size == expected.source.file_size && found.source.modified == expected.source.modified &&
+        found.source.path_hash == expected.source.path_hash && found.source.text_hash == expected.source.text_hash &&
+        found.revision == expected.revision && found.width == key.width && found.height == key.height &&
+        found.stride == key.stride && found.contrast == key.contrast && found.phase == key.phase &&
+        found.white_edge <= 1 && fread(out, 1, bytes, file) == bytes && fgetc(file) == EOF &&
+        fast_cover_checksum(out, bytes) == found.checksum;
+    fclose(file);
+    if (ok) *white_edge = found.white_edge != 0;
+    return ok;
+}
+void book_cover_fast_cache_write(const char *source, const char *title, const char *author,
+                                 book_fast_cover_key_t key, const uint8_t *out, bool white_edge) {
+    char path[120], temp[128]; fast_cover_header_t header;
+    if (!out || !fast_cover_key(source, title, author, key, path, &header)) return;
+    if ((mkdir("/sdcard/.readpico", 0777) && errno != EEXIST) ||
+        (mkdir("/sdcard/.readpico/covers", 0777) && errno != EEXIST)) return;
+    if (snprintf(temp, sizeof(temp), "%s.tmp", path) >= (int)sizeof(temp)) return;
+    header.white_edge = white_edge;
+    const size_t bytes = (size_t)key.stride * key.height;
+    header.checksum = fast_cover_checksum(out, bytes);
+    FILE *file = fopen(temp, "wb"); if (!file) return;
+    bool ok = fwrite(&header, 1, sizeof(header), file) == sizeof(header) && fwrite(out, 1, bytes, file) == bytes;
+    if (fclose(file)) ok = false;
+    if (ok && !rename(temp, path)) return;
+    (void)remove(temp);
+}
+
 static bool file_frame(FILE *file, bool png, uint8_t *sof, unsigned *width, unsigned *height) {
     if (fseek(file, 0, SEEK_SET)) return false;
     if (png) {

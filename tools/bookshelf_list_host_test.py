@@ -73,6 +73,7 @@ static uint8_t ui_contrast_gray(uint8_t gray){return gray;}
 #define BOOK_COVER_H 240
 static int s_view=0,style=5,s_pressed_control=-1;
 enum {SHELF,BULK};
+static unsigned s_cover_pending_mask;
 #define SHELF_BOOK_LIFT_PX 16
 #define SHELF_LIST_BOUNCE_PX 8
 #define SHELF_FAST_COVER_STRIDE 21
@@ -96,7 +97,7 @@ static void ui_hairline(uint8_t *fb,int y,int x,int w,uint8_t c){epd_draw_hline(
 static void copy_text(char *d,size_t n,const char *v){snprintf(d,n,"%s",v);}
 static void fit_text(char *v,int px,int w){while(*v&&ui_text_fixed_width_px(px,v)>w){size_t n=strlen(v)-1;while(n&&((unsigned char)v[n]&0xc0)==0x80)--n;v[n]=0;}}
 '''
- for n in ('row_rect','shelf_cover_image','draw_favorite_icon','draw_shelf_favorite_icon','cover_favorite_needs_white_edge','draw_shelf_cover','paint_list_cover_feedback','draw_list_title','draw_list_row'):
+ for n in ('row_rect','shelf_cover_image','shelf_cover_frame_ready','draw_favorite_icon','draw_shelf_favorite_icon','cover_favorite_needs_white_edge','draw_shelf_cover','paint_list_cover_feedback','draw_list_title','draw_list_row'):
   unit+=function(n,ROOT/'main/apps/app_book.c')+'\n'
  unit+=r'''
 static void save(const char *path,uint8_t *frame){FILE *f=fopen(path,"wb");assert(f);for(int y=0;y<1216;++y)for(int x=0;x<684;++x){uint8_t v=(pixel(frame,x,y)>>4)*17;assert(fwrite(&v,1,1,f)==1);}assert(!fclose(f));}
@@ -139,6 +140,17 @@ int main(int argc,char **argv){
  epd_draw_hline(0,1096,684,0x90,fb);epd_fill_rect((EpdRect){224,1097,54,4},0,fb);
  const char *nav[]={"首页","书架","文件管理","设置"};for(int i=0;i<4;++i){ui_draw_round_rect(fb,(EpdRect){65+i*171,1132,35,34},3,0);ui_text_fixed_vc(fb,85+i*171,1190,17,nav[i],EPD_DRAW_ALIGN_CENTER,false);}
  save(argv[3],fb);
+ // 同一占位帧不因某张封面先解码而变化，点按回弹也不提前露出单张封面。
+ uint8_t *placeholder=malloc(684*1216/2);assert(placeholder);
+ memset(fb,255,684*1216/2);s_cover_pending_mask=8;
+ s_covers[0].gray=NULL;draw_shelf_cover(fb,row_rect(0),0,items[0].name,items[0].favorite);
+ memcpy(placeholder,fb,684*1216/2);
+ s_covers[0].width=176;s_covers[0].height=240;s_covers[0].gray=calloc(176*240,1);assert(s_covers[0].gray);
+ draw_shelf_cover(fb,row_rect(0),0,items[0].name,items[0].favorite);assert(!memcmp(placeholder,fb,684*1216/2));
+ paint_list_cover_feedback(&ctx,0);assert(!memcmp(placeholder,fb,684*1216/2));
+ s_cover_pending_mask=0;draw_shelf_cover(fb,row_rect(0),0,items[0].name,items[0].favorite);
+ assert(memcmp(placeholder,fb,684*1216/2));free(s_covers[0].gray);s_covers[0].gray=NULL;
+ free(placeholder);
  // 长标题强制双行且仅触碰右侧文字区，避免作者和进度被覆盖。
  // A long title stays in the two-line text region without touching author/progress.
  memset(fb,255,684*1216/2);draw_list_title(fb,"名字很长名字很长名字很长名字很长名字很长名字很长名字很长",258);

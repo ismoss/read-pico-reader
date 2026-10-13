@@ -108,6 +108,10 @@ void ui_draw_frosted_pocket(uint8_t *framebuffer, EpdRect rect);
 void ui_text_set_system_scale(bool enabled);
 void ui_text_set_system_font(bool enabled);
 int ui_text_effective_px(int px);
+/// 按系统字号绘制单行文字，按字形真实边界适配控件；不打开第二份字体。
+/// Scale one line to the UI preference, fitting native glyphs within a control without loading another face.
+void ui_text_box(uint8_t *fb, EpdRect box, int px, const char *text,
+                 enum EpdFontFlags align, bool inverted);
 /// 灰阶图片在绘制时增强明暗差，原始缓存保持不变。/ Increase image contrast at draw time without altering cached pixels.
 uint8_t ui_contrast_gray(uint8_t gray);
 /// 将已画图片区域转为稳定黑白点阵，仅由本地主页面测试调用。/ Convert a painted image region to stable black/white dots; used only by the local main-page trial.

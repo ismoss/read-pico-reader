@@ -29,6 +29,8 @@
  * User adopts the top quick layer: capture only a 72px downward swipe starting within the top 32px; suspend page input/ticks while covered. WiFi connects saved credentials or disconnects on the next tap; Bluetooth toggles its setting. Reuse full refresh and lock. Per the user, all modes retain grays with clearer outlines. Closing redraws and locally settles the underlay, retaining navigation.
  * 用户点击反馈：底栏及圆形返回键按下局部放大，释放复位；只暂存一个小控件，切页、全刷及锁屏丢弃缓存，不回放旧画面。
  * User click feedback: locally enlarge navigation/round backs on press and restore on release. Retain one small control only; navigation, full refresh and lock discard it without replaying old frames.
+ * 用户修订：确认主动锁屏后，拼贴样式先给局部圆锁反馈，再保存/等待阅读预渲染；自动休眠和直接关机/重启不加此反馈。
+ * User revision: acknowledge accepted manual collage locks before saves/reader joins; omit the badge for automatic sleep and direct shutdown/restart.
  */
 
 #include "app_loop.h"
@@ -59,6 +61,7 @@
 #include "app_font_context.h"
 #include "ui_kit.h"
 #include "ui_menu.h"
+#include "ui_nav.h"
 #include "ui_gesture.h"
 #include "ui_power_dialog.h"
 #include "ui_quick_menu.h"
@@ -363,7 +366,8 @@ static bool poll_media(app_ctx_t* ctx, const app_desc_t* current,
 // Save the current page first, then settle a clock-free static frame so shutdown never leaves a misleading frozen time.
 // 锁屏前先由页面保存进度，再持久化一次恢复上下文；不在翻页或点击时写入。
 // Flush page progress before persisting one lock checkpoint; never write it on page turns or taps.
-static void prepare_lock(app_ctx_t *ctx, const app_desc_t *current) {
+static void prepare_lock(app_ctx_t *ctx, const app_desc_t *current, bool feedback) {
+    if (feedback) app_lock_feedback(ctx->hl);
     if (current->on_before_lock) current->on_before_lock(ctx);
     int tab = app_index_of(current);
     pico_resume_t resume = {.tab = tab >= 0 && tab < 4 ? (uint8_t)tab : 0};
@@ -375,14 +379,29 @@ static void prepare_lock(app_ctx_t *ctx, const app_desc_t *current) {
     (void)pico_boot_save_resume(&resume);
 }
 static void run_power_action(app_ctx_t *ctx, const app_desc_t *current, bool restart) {
-    prepare_lock(ctx, current);
+    prepare_lock(ctx, current, false);
     ui_power_final_draw(ctx->fb, restart);
     guard_draw_result(ctx->hl, update_display_full(ctx->hl));
     app_lock_wait_key_idle(800);
     epd_poweroff();
     pico_boot_clear_resume();
     if (restart) app_restart_host();
-    app_enter_host_sleep(APP_SLEEP_OFF);
+    esp_err_t error = app_enter_host_sleep(APP_SLEEP_OFF);
+    if (error != ESP_OK) ESP_LOGW(TAG, "power off failed: %s", esp_err_to_name(error));
+    // 关机交接失败时回到可操作原页；不关闭书籍后再重新自动开书。/ A failed shutdown returns to the operable current page without closing/reopening the book.
+    app_present(ctx, current, APP_REDRAW_PAGE);
+}
+
+bool app_poll_main_navigation(app_ctx_t *ctx) {
+    if (!ctx || !ctx->tp) return false;
+    if (ctx->request_app) return true;
+    cst836u_touch_t touch = {0};
+    if (cst836u_read(ctx->tp, &touch) != ESP_OK || !touch.touched || touch.count != 1) return false;
+    int index = ui_nav_hit(touch.x, touch.y);
+    if (index < 0 || index == 1) return false;
+    ui_nav_request(ctx, index);
+    ctx->user_activity = true;
+    return ctx->request_app != NULL;
 }
 
 void app_loop_run(const app_loop_config_t* config) {
@@ -473,7 +492,8 @@ void app_loop_run(const app_loop_config_t* config) {
         ctx.pressed = pressed;
         ctx.released = released;
         ctx.consumed = false;
-        ctx.request_app = NULL;
+        // A load may have captured navigation after the prior switch. Consume it at the normal boundary.
+
         ctx.request_menu = false;
         ctx.request_return = false;
         bool selected_from_menu = false;
@@ -536,11 +556,13 @@ void app_loop_run(const app_loop_config_t* config) {
                     else app_present(&ctx, current, APP_REDRAW_PAGE);
                 } else if (action == UI_POWER_ACTION_SHUTDOWN) {
                     if (!app_settings_staged_shutdown()) {
+                        power_dialog_open = false;
+                        ui_gesture_reset(&power_gesture);
                         run_power_action(&ctx, current, false);
                     } else {
                         power_dialog_open = false;
                         ui_gesture_reset(&power_gesture);
-                        prepare_lock(&ctx, current);
+                        prepare_lock(&ctx, current, true);
                         extern const app_desc_t app_book;
                         main_lock_boundary();
                         enter_lock_and_sleep(ctx.hl, &s_lock_ignore_until_ms, ctx.acc, ctx.tp,
@@ -695,7 +717,7 @@ void app_loop_run(const app_loop_config_t* config) {
                     bool reader_power_lock = !menu_open && current == &app_book &&
                         app_book_reader_body_visible() && app_settings_reader_power_turn();
                     if (reader_power_lock) {
-                        prepare_lock(&ctx, current);
+                        prepare_lock(&ctx, current, true);
                         main_lock_boundary();
                         enter_lock_and_sleep(ctx.hl, &s_lock_ignore_until_ms, ctx.acc, ctx.tp, true);
                         ctx.now_ms = esp_timer_get_time() / 1000;
@@ -724,7 +746,7 @@ void app_loop_run(const app_loop_config_t* config) {
                         present_page(&ctx, current, &gesture, power_redraw);
                         ctx.consumed = true;
                     } else {
-                        prepare_lock(&ctx, current);
+                        prepare_lock(&ctx, current, true);
                         extern const app_desc_t app_book;
                         main_lock_boundary();
                         enter_lock_and_sleep(ctx.hl, &s_lock_ignore_until_ms, ctx.acc, ctx.tp,
@@ -830,7 +852,7 @@ void app_loop_run(const app_loop_config_t* config) {
             cancel_gesture(&ctx, current, &gesture);
             if (menu_pressed >= 0) menu_feedback(&ctx, current, menu_leaf, menu_pressed, false, &feedback);
             menu_pressed = UI_MENU_HIT_NONE;
-            prepare_lock(&ctx, current);
+            prepare_lock(&ctx, current, false);
             extern const app_desc_t app_book;
             main_lock_boundary();
             enter_lock_and_sleep(ctx.hl, &s_lock_ignore_until_ms, ctx.acc, ctx.tp,

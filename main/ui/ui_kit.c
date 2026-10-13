@@ -35,8 +35,8 @@ void ui_text_set_system_font(bool enabled) { s_system_ttf = enabled; }
 
 int ui_text_effective_px(int px) {
     px += 2;
-    // 用户的系统字号只应用于系统界面；阅读正文及工具保持书内设置。
-    // Apply the UI-size preference only to system screens; reading uses its own settings.
+    // 系统界面与阅读工具跟随系统字号；正文关闭此开关，保持书内字号。
+    // System screens and reader controls follow UI size; body drawing disables this switch.
     return s_system_text_scale && px < 46 ?
         (px * app_settings_system_font_size() + 50) / 100 : px;
 }
@@ -281,6 +281,32 @@ void ui_text_fixed_context_vc(
         ttf_measure_line_px(px, text, &above, &below);
         ttf_draw_text_px(framebuffer, x, center_y + (above - below) / 2, px, text, align, fg, bg);
     }
+}
+
+void ui_text_box(uint8_t *fb, EpdRect box, int px, const char *text,
+                 enum EpdFontFlags align, bool inverted) {
+    if (!fb || !text || !text[0] || box.width <= 0 || box.height <= 0) return;
+    px = ui_text_effective_px(px);
+    const bool builtin = (!s_system_ttf || ttf_font_is_builtin()) && ui_font_has_text(text);
+    while (px > 1) {
+        int above = 0, below = 0;
+        if (builtin) ui_font_measure_line_px(px,text,&above,&below);
+        else ttf_measure_line_px(px,text,&above,&below);
+        // 基线与居中坐标分别取整，预留两像素避免奇数字形越过控件边界。
+        // Reserve two pixels for separate baseline/center rounding on odd glyph bounds.
+        const int width = ui_text_fixed_width_px(px,text), height = above + below + 2;
+        if (width <= box.width && height <= box.height) break;
+        int next = px - 1;
+        if (width > box.width && width > 0 && px * box.width / width < next)
+            next = px * box.width / width;
+        if (height > box.height && height > 0 && px * box.height / height < next)
+            next = px * box.height / height;
+        px = next > 0 ? next : 1;
+    }
+    int x = box.x;
+    if (align == EPD_DRAW_ALIGN_CENTER) x += box.width / 2;
+    else if (align == EPD_DRAW_ALIGN_RIGHT) x += box.width;
+    ui_text_fixed_vc(fb,x,box.y+box.height/2,px,text,align,inverted);
 }
 
 void ui_text_fixed_ink_vc(uint8_t *fb, int x, int center_y, int px, const char *text,

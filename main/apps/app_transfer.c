@@ -534,9 +534,16 @@ static app_redraw_t provisioning_action(int id) {
     if (s_forget_confirm) {
         if (id == 12) { s_forget_confirm = false; s_network_message[0] = 0; }
         else if (id == 11) {
-            if (s_session_started) stop_session();
+            // 断联后页面标记可能已丢失；以组件的真实会话为准，上传中不能清配置。
+            // A failed reconnect may lose the page flag; stop the actual component session, never an active upload.
+            if (!stop_upload_if_idle()) {
+                snprintf(s_network_message, sizeof(s_network_message), "正在传输，请完成后再遗忘");
+                return APP_REDRAW_PAGE;
+            }
+            s_network_connect_pending = s_scan_pending = false;
             esp_err_t err = read_pico_transfer_forget_wifi();
             if (err == ESP_OK) {
+                read_pico_transfer_get_status(&s_status);
                 s_forget_confirm = false;
                 s_saved_configured = false;
                 s_saved_ssid[0] = 0;
@@ -573,7 +580,16 @@ static app_redraw_t provisioning_action(int id) {
                 }
                 s_network_connect_pending = false;
                 snprintf(s_network_message, sizeof(s_network_message), "已断开，连接信息保留");
-            } else queue_network_start(READ_PICO_TRANSFER_MODE_STA);
+            } else {
+                // 未连上不等于驱动已停止；重试前先释放仍在等待或超时的旧 STA。
+                // Disconnected does not mean stopped; release the pending or timed-out STA before retrying.
+                if (!stop_upload_if_idle()) {
+                    snprintf(s_network_message, sizeof(s_network_message), "正在传输，请完成后再连接");
+                    return APP_REDRAW_PAGE;
+                }
+                s_network_connect_pending = false;
+                queue_network_start(READ_PICO_TRANSFER_MODE_STA);
+            }
         }
         else if (id == 7 && s_network_page) --s_network_page;
         else if (id == 8) {

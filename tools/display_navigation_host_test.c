@@ -44,6 +44,7 @@ static enum EpdDrawMode last_mode;
 static char owner_a, owner_b;
 static enum EpdRotation rotation = EPD_ROT_INVERTED_PORTRAIT;
 static int nav_draws, water_calls, water_fails;
+static EpdRect last_water_area;
 static int clean_calls;
 // 所有真实推屏和欠载恢复都必须持有 OTA 互斥锁，包括递归兜底。
 // Every physical scan and underrun recovery must hold OTA exclusion, including recursive fallback.
@@ -75,16 +76,20 @@ void epd_hl_waveform(EpdiyHighlevelState* state, const EpdWaveform* waveform) {s
 enum EpdDrawError e0470_page_turn(EpdiyHighlevelState* state, EpdRect area, e0470_turn_dir_t dir) {
     assert(ota_display_depth);
     (void)dir; ++water_calls;
-    assert(area.y==0 && area.height==UI_NAV_REFRESH_END && scan==READ_PICO_EPD_SCAN_FAST);
+    last_water_area=area;
+    assert(area.y>=0 && area.y%32==0 && area.y+area.height==UI_NAV_REFRESH_END && scan==READ_PICO_EPD_SCAN_FAST);
     if(water_fails)return (enum EpdDrawError)water_fails;
     const size_t stride=W/2;
-    for(int y=0;y<H;++y){memcpy(panel+y*stride,state->front_fb+y*stride,UI_NAV_REFRESH_END/2);memcpy(state->back_fb+y*stride,state->front_fb+y*stride,UI_NAV_REFRESH_END/2);}
+    for(int y=0;y<H;++y){memcpy(panel+y*stride+area.y/2,state->front_fb+y*stride+area.y/2,area.height/2);memcpy(state->back_fb+y*stride+area.y/2,state->front_fb+y*stride+area.y/2,area.height/2);}
     return EPD_DRAW_SUCCESS;
 }
+static int turn_tick_us=21000;
+void e0470_page_turn_set_tick_us(int us){turn_tick_us=us;}
+int e0470_page_turn_tick_us(void){return turn_tick_us;}
 enum EpdDrawError e0470_page_turn_with_waveform_compact(EpdiyHighlevelState* state, EpdRect area,
     e0470_turn_dir_t dir, const EpdWaveform* waveform, unsigned bands) {
     assert(ota_display_depth);
-    assert(waveform==&main_water && bands==16);
+    assert(waveform==&main_water && bands==E0470_TURN_FAST_BANDS && turn_tick_us==E0470_TURN_FAST_TICK_US);
     return e0470_page_turn(state,area,dir);
 }
 
@@ -549,7 +554,13 @@ int main(void) {
     for(int y=0;y<H;++y)memcpy(final+y*(W/2)+UI_NAV_REFRESH_END/2,back+y*(W/2)+UI_NAV_REFRESH_END/2,(W-UI_NAV_REFRESH_END)/2);
     memcpy(front,final,BYTES);display_main_transition_arm(&owner_a,false,true);
     assert(update_display_fast_page(&hl)==EPD_DRAW_SUCCESS);assert_final();
-    assert(water_calls==1 && !calls && !allocations && !bw_calls);
+    assert(water_calls==1 && !calls && !allocations && !bw_calls && turn_tick_us==21000);
+    // Entering the shelf: one ripple includes the header and content, stopping before fixed navigation.
+    reset();main_mode=APP_MAIN_REFRESH_WATER;gray_target(2);
+    display_main_transition_arm(&owner_a,false,true);
+    assert(update_display_fast_page(&hl)==EPD_DRAW_SUCCESS);assert_final();
+    assert(water_calls==1&&!gray_calls&&last_water_area.y==0&&last_water_area.height==UI_NAV_REFRESH_END);
+    assert(!clears&&!allocations&&!bw_calls&&!nav_draws);
     reset();main_mode=APP_MAIN_REFRESH_WATER;gray_target(2);water_fails=EPD_DRAW_OTHER_ERROR;
     display_main_transition_arm(&owner_a,false,true);assert(update_display_fast_page(&hl)==EPD_DRAW_SUCCESS);assert_final();
     assert(water_calls==1 && gc_calls==1 && clears==1);

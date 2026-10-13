@@ -80,13 +80,18 @@ void app_settings_set_last_boot(uint8_t reason);
 bool app_settings_pickup_wake(void);
 void app_settings_set_pickup_wake(bool on);
 /// 阅读默认字号，36..72，默认 48。/ Default reading size, 36..72, initially 48.
+/// Reading stroke weight -2..2: thin, lighter, native, heavier, bold.
+int8_t app_settings_book_weight(void);
+bool app_settings_set_book_weight(int8_t level);
+/// 阅读抗锯齿默认开启；关闭只改变字形边缘，不改变排版或图片。/ Reading AA defaults on; disabling affects glyph edges, not layout or images.
+bool app_settings_book_antialias(void);
+bool app_settings_set_book_antialias(bool enabled);
 uint8_t app_settings_book_px(void);
 /// 无效字号恢复 48。/ Invalid sizes fall back to 48.
 void app_settings_set_book_px(uint8_t px);
-/// 实验性晃动翻页，默认关闭。/ Experimental shake page turn, off by default.
-bool app_settings_book_shake(void);
-/// 保存实验性晃动翻页开关。/ Persist the experimental shake page-turn switch.
-void app_settings_set_book_shake(bool on);
+/// Reading backgrounds are selected from /sdcard/pictures; empty means white.
+const char *app_settings_book_background_path(void);
+bool app_settings_set_book_background_path(const char *path);
 /// 阅读时每 5/10/15/30 页全刷；0 关闭周期全刷，手动全刷仍可用。
 /// Full-screen cleanup every 5/10/15/30 turns; 0 disables periodic cleanup only.
 uint8_t app_settings_reader_full_pages(void);
@@ -162,7 +167,7 @@ void app_settings_set_book_reading_line_offset(int8_t offset_px);
 /// 阅读行高百分比，110..150。/ Reader line-height percentage: 110..150.
 uint8_t app_settings_book_line_spacing(void);
 void app_settings_set_book_line_spacing(uint8_t percent);
-/// 阅读页左右边距，24..60 像素。/ Reader horizontal margin: 24..60 pixels.
+/// 阅读页左右边距，0..48 像素。/ Reader horizontal margin: 0..48 pixels.
 uint8_t app_settings_book_margin(void);
 void app_settings_set_book_margin(uint8_t px);
 /// 段后距离百分比，0/25/50/75。/ Paragraph-gap percentage: 0/25/50/75.

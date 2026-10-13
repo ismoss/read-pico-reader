@@ -62,6 +62,7 @@ static int s_count, s_folder, s_page;
 static int s_requested_folder = -1;
 static int s_counts[3];
 static bool s_scan_pending;
+static int64_t s_space_poll_ms;
 static char s_message[96];
 static char s_dir[288] = "/sdcard";
 static read_pico_sd_info_t s_sd;
@@ -247,6 +248,7 @@ static void file_deleted(const char *path, bool directory, void *ctx) {
         app_font_activate_system();
     }
     if (!strcmp(app_settings_font_path(), path)) app_settings_set_font_path("");
+    if (!strcmp(app_settings_book_background_path(), path)) (void)app_settings_set_book_background_path("");
     if (!strcmp(app_settings_wallpaper_path(), path)) {
         app_settings_set_wallpaper_path("");
         app_settings_set_lock_style(0);
@@ -497,6 +499,24 @@ static void render_rename(uint8_t *fb) {
     ui_keyboard_draw(fb, 560);
 }
 
+static bool storage_space_valid(const read_pico_sd_info_t *info) {
+    return info->mounted && info->space_valid && info->filesystem_bytes &&
+           info->free_bytes<=info->filesystem_bytes && info->filesystem_bytes<=info->capacity_bytes;
+}
+static void storage_amount(char *text,size_t size,uint64_t bytes) {
+    if (bytes>=1073741824ULL) snprintf(text,size,"%.2f GB",bytes/1073741824.0);
+    else if (bytes>=1048576ULL) snprintf(text,size,"%.1f MB",bytes/1048576.0);
+    else if (bytes) snprintf(text,size,"%.1f KB",bytes/1024.0);
+    else snprintf(text,size,"0 MB");
+}
+static void storage_usage(const read_pico_sd_info_t *info,char *total,size_t total_size,char *usage,size_t usage_size) {
+    storage_amount(total,total_size,info->space_valid?info->filesystem_bytes:info->capacity_bytes);
+    if (!storage_space_valid(info)) { snprintf(usage,usage_size,"空间统计暂不可用，请重新进入此页"); return; }
+    char used[24],available[24];
+    storage_amount(used,sizeof(used),info->filesystem_bytes-info->free_bytes);
+    storage_amount(available,sizeof(available),info->free_bytes);
+    snprintf(usage,usage_size,"已用 %s · 可用 %s",used,available);
+}
 static void render(app_ctx_t *ctx, uint8_t *fb) {
     if (s_view == FILE_VIEW_ACTIONS) {
         file_view_t restore = s_view;
@@ -564,10 +584,7 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
         ui_text(fb, 58, 188, 27, "存储卡", EPD_DRAW_ALIGN_LEFT, false);
         char total[32], usage[80];
         if (s_sd.mounted) {
-            snprintf(total, sizeof(total), "%.1f GB", s_sd.capacity_bytes / 1073741824.0);
-            snprintf(usage, sizeof(usage), "已用 %.1f GB · 可用 %.1f GB",
-                     (s_sd.capacity_bytes - s_sd.free_bytes) / 1073741824.0,
-                     s_sd.free_bytes / 1073741824.0);
+            storage_usage(&s_sd,total,sizeof(total),usage,sizeof(usage));
         } else if (sd_needs_format()) {
             // 卡在但读不了：说清是文件系统的问题，并给出可点的出路。
             // Present but unreadable: say the filesystem is the problem and offer the way out.
@@ -582,8 +599,8 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
         ui_text(fb, 58, 231, 19, usage, EPD_DRAW_ALIGN_LEFT, false);
         EpdRect capacity = {58, 263, 566, 6};
         ui_fill_round_rect(fb, capacity, 3, 0xa0);
-        if (s_sd.mounted && s_sd.capacity_bytes) {
-            capacity.width = (int)((s_sd.capacity_bytes - s_sd.free_bytes) * 566 / s_sd.capacity_bytes);
+        if (storage_space_valid(&s_sd)) {
+            capacity.width = (int)((s_sd.filesystem_bytes - s_sd.free_bytes) * 566 / s_sd.filesystem_bytes);
             if (capacity.width > 0) ui_fill_round_rect(fb, capacity, 3, 0x68);
         }
         ui_text(fb, 42, 308, 21, "传输文件", EPD_DRAW_ALIGN_LEFT, false);
@@ -646,7 +663,10 @@ static void on_enter(app_ctx_t *ctx) {
     snprintf(s_dir, sizeof(s_dir), "/sdcard");
     s_page = 0; s_scan_pending = true;
     read_pico_sd_start_probe();
-    read_pico_sd_get_info(&s_sd);
+    if (read_pico_sd_get_info(&s_sd)==ESP_OK && s_sd.mounted) {
+        (void)read_pico_sd_refresh_space(); read_pico_sd_get_info(&s_sd);
+    }
+    s_space_poll_ms=ctx->now_ms;
     s_sd_format_confirm = false;
     s_sd_notice[0] = 0;
     for (int i = 0; i < 3; ++i) s_counts[i] = count_root(i);
@@ -672,9 +692,20 @@ static app_redraw_t on_tick(app_ctx_t *ctx) {
         return ui_keyboard_idle_tick(ctx->touch && ctx->touch->touched, ctx->now_ms) == UI_KEYBOARD_CHANGED
             ? rename_paint(ctx, false) : APP_REDRAW_NONE;
     }
-    if (!s_scan_pending) return APP_REDRAW_NONE;
+    if (!s_scan_pending) {
+        if (s_folder<0 && s_sd.mounted && !(ctx->touch && ctx->touch->touched) && ctx->now_ms-s_space_poll_ms>=15000) {
+            s_space_poll_ms=ctx->now_ms;
+            read_pico_sd_info_t previous=s_sd;
+            (void)read_pico_sd_refresh_space(); read_pico_sd_get_info(&s_sd);
+            if (previous.space_valid!=s_sd.space_valid || previous.filesystem_bytes!=s_sd.filesystem_bytes || previous.free_bytes!=s_sd.free_bytes)
+                return APP_REDRAW_PAGE;
+        }
+        return APP_REDRAW_NONE;
+    }
     if (read_pico_sd_get_info(&s_sd) == ESP_ERR_NOT_FINISHED) return APP_REDRAW_NONE;
     s_scan_pending = false;
+    if (s_sd.mounted) { (void)read_pico_sd_refresh_space(); read_pico_sd_get_info(&s_sd); }
+    s_space_poll_ms=ctx->now_ms;
     for (int i = 0; i < 3; ++i) s_counts[i] = count_root(i);
     if (s_folder >= 0) scan_folder(s_folder);
     else scan_folder(3);

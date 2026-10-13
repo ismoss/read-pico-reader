@@ -21,6 +21,9 @@ static unsigned ota_display_depth;
 bool pico_online_display_begin(void) { ++ota_display_depth; return true; }
 void pico_online_display_end(bool held) { assert(held && ota_display_depth); --ota_display_depth; }
 void e0470_page_turn_release(void) {}
+static int turn_tick_us = 21000;
+void e0470_page_turn_set_tick_us(int us) { turn_tick_us = us; }
+int e0470_page_turn_tick_us(void) { return turn_tick_us; }
 bool app_settings_main_fast_refresh(void) {return false;}
 int epd_width(void) {return 1216;}
 int epd_height(void) {return 684;}

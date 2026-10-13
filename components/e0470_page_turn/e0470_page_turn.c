@@ -4,10 +4,10 @@
  *
  * 基于 MindReset Read Pico 官方 E0470 波形与刷新路径实现。
  * Built on the MindReset Read Pico E0470 waveform and refresh path.
- * 错相揭页引擎实现。阅读保留原16带/GL16；主页可指定柔和序列和条带数。差分只算一次，每拍只换对应相位的1K LUT。
- * Staggered page-turn engine: reading retains original 16 bands / GL16; main pages may supply a soft sequence and band count. Calculate differences once and select per-band 1 KiB phase LUTs on each tick.
- * 用户要求阅读快档并进一步加快主页：阅读和主页均16带37相共52拍、一拍一带；保留各自原节拍与所有扫描相位，原错开启动接口仍可用。
- * User requests fast reading and a further main ripple speedup: both use 16 bands/37 phases over 52 ticks, launching one band per tick; retain each caller's pacing and every scan phase, keeping the spaced-launch API available.
+ * 错相揭页引擎实现。阅读使用8带/GL16；主页可指定柔和序列和条带数。差分只算一次，每拍只换对应相位的1K LUT。
+ * Staggered page-turn engine: reading uses 8 bands / GL16; main pages may supply a soft sequence and band count. Calculate differences once and select per-band 1 KiB phase LUTs on each tick.
+ * 用户最新指定：阅读和主页均8带37相共44拍，每拍11090us；保留各自灰阶序列、完整相位与原错开启动接口。
+ * Latest user request: reader and main use eight bands/37 phases over 44 ticks at 11090us, with independent gray sequences. Preserve every scan phase and the spaced-launch API.
  */
 
 #include "e0470_page_turn.h"
@@ -24,7 +24,7 @@
 
 static const char* TAG = "e0470_turn";
 
-#define TURN_DEFAULT_BANDS 16
+#define TURN_DEFAULT_BANDS E0470_TURN_FAST_BANDS
 #define TURN_BANDS_MAX 32
 #define TURN_PHASE_CAP 40
 #define TURN_LINE_MAX 2048

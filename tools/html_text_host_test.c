@@ -128,6 +128,44 @@ int main(void) {
                                     external, strlen(external), &t) == ESP_OK);
     assert(t.count == 1 && t.blocks[0].align == 1);
     html_text_free(&t);
+    // 同一题头用 br 分开章号和章名时，两行保持居中与各自字体，正文仍左对齐。
+    // A br splits the chapter label and name without losing centering or faces; prose stays left aligned.
+    t = parse_faces("<div><img src='logo.png'/></div><h2 class='chapter-title'>"
+                    "<span class='num'>第一章</span><br/> 山边小村</h2><p>正文</p>",
+                    "h2.chapter-title{text-align:center;font-family:B;margin-top:0.5em;margin-bottom:1.8em}"
+                    "h2.chapter-title .num{font-family:A}",
+                    "￼\n第一章\n山边小村\n正文");
+    assert(t.count == 4 && t.image_count == 1);
+    assert(t.blocks[1].heading && t.blocks[2].heading);
+    assert(t.blocks[1].heading_level == 2 && t.blocks[2].heading_level == 2);
+    assert(t.blocks[1].align == 1 && t.blocks[2].align == 1);
+    assert(t.blocks[1].line_break_after && !t.blocks[2].line_break_after);
+    assert(t.blocks[1].margin_before_percent == 50 && t.blocks[1].margin_after_percent == 0);
+    assert(t.blocks[2].margin_before_percent == 0 && t.blocks[2].margin_after_percent == 180);
+    assert(!t.blocks[0].line_break_after && !t.blocks[3].line_break_after);
+    assert(t.runs[t.blocks[1].run_first].slot == 1);
+    assert(t.runs[t.blocks[2].run_first].slot == 2);
+    assert(!t.blocks[3].heading && t.blocks[3].align == 0);
+    assert_runs_cover(&t);
+    html_text_free(&t);
+    t = parse("<p style='text-align:right;margin-top:1em;margin-bottom:1em'>"
+              "甲<br>乙<BR />丙<br/>丁</p><p>正文</p>", "甲\n乙\n丙\n丁\n正文");
+    assert(t.count == 5 && t.blocks[4].align == 0);
+    for (size_t i = 0; i < 4; ++i) assert(t.blocks[i].align == 2);
+    // 换行不加段后距；末行保留一次整段的段后距。/ Defer the paragraph margin until its final line.
+    for (size_t i = 0; i < 3; ++i)
+        assert(t.blocks[i].line_break_after && t.blocks[i].margin_after_percent == 0);
+    for (size_t i = 1; i < 4; ++i) assert(t.blocks[i].margin_before_percent == 0);
+    assert(!t.blocks[3].line_break_after && t.blocks[3].margin_after_percent == 100);
+    assert(!t.blocks[4].line_break_after);
+    html_text_free(&t);
+    t = parse("<p style='margin-bottom:1em'>甲<br/><br/></p><p>乙</p>", "甲\n乙");
+    assert(t.count == 2 && !t.blocks[0].line_break_after && t.blocks[0].margin_after_percent == 100);
+    html_text_free(&t);
+    t = parse("<p style='margin-bottom:1em'>甲<br/><img src='a.png'/>乙</p>", "甲\n￼\n乙");
+    assert(t.count == 3 && !t.blocks[0].line_break_after && !t.blocks[1].line_break_after);
+    assert(t.blocks[0].margin_after_percent == 100 && t.blocks[1].image == 0);
+    html_text_free(&t);
     t = parse("  <div><div> </div></div><br><hr> ", "");
     assert(t.count == 0);
     html_text_free(&t);

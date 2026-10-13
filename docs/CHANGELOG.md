@@ -8,17 +8,33 @@ User-visible changes by release; see [README](../README.md) for usage.
 - 蓝牙翻页器修好一条完整链路：HID 报告映射（0x2A4B）以前读出来却没被用上，按键落在报告的哪个字节全靠猜；订阅输入报告时又一次性并发发出多个 CCCD 写，撞上协议栈很小的 ATT 处理池（proc alloc failed）之后状态不一致，直接断言重启；照抄来的那组连接参数会被控制器以 HCI 0x12 拒绝，部分设备因此根本连不上；报告在被按住期间还会被逐帧当成新按下，一按就疯狂翻页。现在按 CrossMux 的次序建立链路（连接 → 确认有 HID → 配对 → 订阅），订阅串行进行，报告路径去抖、按下状态带超时，翻页器连得上也按得动。另外新增崩溃日志：建立链路与按键的关键步骤留在 RTC 里，崩溃后重启，首页「上次运行」区直接列出崩溃前的经过，并带上异常类型与触发地址。
   The Bluetooth page-turner now walks a whole link: the HID Report Map (0x2A4B) was read but never used, so which byte carried a key was pure guesswork; subscribing to input reports fired several CCCD writes at once, and running into the stack's small ATT procedure pool (proc alloc failed) left it inconsistent and asserted into a restart; a copied set of connection parameters was refused by the controller with HCI 0x12, so some remotes could not connect at all; and a held key looked like a fresh press on every report frame, turning pages frantically. The bring-up now follows CrossMux's order (connect, confirm HID, pair, subscribe) with serialised subscription, a debounced report path and a held-key timeout, so the remote both connects and turns pages. A crash log comes with it: bring-up and key steps are kept in RTC, and the next boot lists the run-up to the crash, along with the exception type and faulting address, in the home screen's last-run block.
 
-- 正文插图去掉左右边距，按整屏宽等比缩放并居中，页首插图贴到阅读区顶端、全屏沉浸时铺满整页；正文仍按阅读边距排版，插图页两侧的点击同样能翻页。整页位图放不下时按最大空闲块缩一档，不再整页消失。
-  Body illustrations drop the side margins and scale into a panel-wide band: a page-start one reaches the top of the reading area and fills the page in immersive full screen. Text keeps its reading margins and taps on an illustration page's side strips still turn the page. A page bitmap that no longer fits the largest free block shrinks instead of vanishing.
+- 蓝牙翻页器学按键改为记下按下时外设发来的整帧字节：同一个键每次按下的字节一模一样，所以这一串就是它独有的标识，学习时记下它、使用时逐字节比对，不必再猜哪个字节是键码。第一次按下就能学会——以前要等一条「松开」报告，首次按下和从不发松开报告的遥控器永远学不到；点「学习」时把当时那一帧钉成基准，静止帧里带非零常量的遥控器不会再被学成那串常量；静默 150ms 后同一个键再按一次仍算一次新的按下。按键名一列显示这帧里非零的字节，例如 `06 B1`，同一个键每次都一样。
+  Learning a key now records the whole report frame the remote sends while it is held: the same key sends the same bytes every press, so that string is its own identifier, recorded when learning and compared byte for byte afterwards, with no guessing which byte holds the code. The first press already learns -- it used to need a release report, so a first press and a remote that never sends one could never be learned; tapping 学习 pins the frame present then as the baseline, so a remote whose resting frame carries non-zero constants no longer gets those constants learned instead of the key; and 150 ms of silence makes the next press of the same key count again. The key row shows that frame's non-zero bytes, such as `06 B1`, identical on every press of that key.
 
-- 阅读 EPUB 时按样式表使用书内自带字体：`@font-face` 声明并被打包进来的 TTF 按 CSS 指定的位置逐段换字体，行高、字距与两端对齐的算法不变；字体按需解压进 PSRAM，装载失败、装不下或槽位用完时该段回退系统字体。字体设置面板最下面新增“书内自带字体”开关，默认开启，关掉后整本书回到系统字体。TXT 与不含字体的 EPUB 不受影响。
-  EPUB reading now honours a book's own fonts: TTFs declared in `@font-face` and shipped in the package switch span by span exactly where the stylesheet asks, leaving line height, tracking and justification untouched. Faces are inflated into PSRAM on demand, and one that fails, does not fit or finds no free slot falls back to the system face for that span. The font sheet gains an “embedded book fonts” switch, on by default; turning it off puts the whole book back on the system face. TXT and EPUBs without faces are unaffected.
-- 书内字体支持 CFF/OpenType（OTTO）轮廓——章节标题常用的正是这种格式，以前会被静默跳过。字体按剩余内存排队装载：装不下的那一种回退系统字体，而不是让整本书加载失败。
-  Embedded faces now include CFF/OpenType (OTTO) outlines, the format heading faces often ship in and which used to be skipped in silence. Faces load in the order PSRAM can hold; one that does not fit falls back to the system face rather than failing the whole book.
-- 修掉两处重启：打开带内嵌字体的书、以及关掉「书内自带字体」开关，都会把主任务栈顶穿。EPUB 索引的标题与锚点改为变长存储，3884 章的索引少占约 1.4 MB 内存。
-  Fixed two reboots: opening a book with embedded faces, and switching the embedded-face toggle off, both overran the main task stack. EPUB index titles and anchors are also stored variable-length now, saving roughly 1.4 MB on a 3884-chapter book.
-- 插图与字形缓存、下一页预渲染共用 PSRAM：字形缓存改为所有字体槽共享一笔预算，下一页预渲染只在留够「一张插图解码 + 一章正文」之后才占用整页缓冲。此前翻几页之后插图会整页消失。
-  Illustrations now share PSRAM with the glyph cache and the page prefetch: the glyph cache is one budget across every font slot, and prefetching the next page takes its full framebuffer only when a page's illustration and a chapter of text still fit. Previously illustrations vanished after a few page turns.
+## 0.3.3-rc91 / 2026-10-12
+
+- 合入 PR #24、#25，支持 EPUB 内嵌 TTF/OpenType 字体，修复开书与关闭书内字体的栈溢出，减少大型章节索引和多字体缓存占用。
+  Include PR #24/#25 for embedded EPUB faces, stack safety and bounded index/glyph memory.
+- 阅读新增五档字重和抗锯齿开关；重排字体与阅读设置，中键长按默认返回首页，底部上滑始终打开工具栏。
+  Add five stroke weights and optional antialiasing, paired reading controls, default Home on middle hold and bottom-edge Tools.
+- 系统设置重新分组，字号并入系统字体，选择字体可确认同步阅读；100–200%保持单行，阅读工具与子面板适配系统字号。
+  Regroup Settings, confirm reader-font sync and fit large system sizes in Settings and reader panels.
+- 修复边距滑杆、居中章节题头的两行对齐和间距，字体丢失稳定回退；水波纹插图页使用一次灰阶更新。
+  Fix margin stops, two-line heading alignment/spacing and missing-face fallback; present illustrated ripple pages once in gray.
+- 书架、首页续读与拼贴复用TF成品封面；书架整页准备好后一起显示，修复偶发封面漏刷，保留冷缓存有界准备和低内存回退。
+  Reuse prepared TF covers, reveal whole shelf pages and retain retries and bounded cold-cache work.
+- 壁纸锁屏缓存最终16级灰阶抖动画布；拼贴优化缓存准备，主动锁屏先清白显示圆锁再生成完整画面，保留画质。
+  Cache full-quality wallpaper locks and streamline collage preparation with immediate white/lock feedback.
+- 主页和阅读水波纹采用8条带、11,090µs目标节拍，保留完整37相与固定底栏；普通纯文字翻页减轻短暂压黑。
+  Match main/reader ripple launch timing while retaining gray phases and navigation; soften transient darkening on ordinary text turns.
+- 设置只绘制可见行并复用头像，入口箭头独立于字体；阅读状态栏按分钟更新时间。
+  Cull Settings rows, reuse avatar pixels, draw independent chevrons and update the reading clock each minute.
+- 修复 WiFi 断联重连和确认遗忘；TF容量使用真实挂载分区并重算过期FAT32提示；票根长统计保持边界。
+  Fix WiFi reconnect/forget, partition allocation counts and ticket statistic bounds.
+- 合入官方 a2a63a6 的睡眠/关机外设与引脚低功耗处理，保留密码、按键唤醒和阅读恢复；功耗以实机为准。
+  Port official low-power peripheral/pin parking, preserving PIN, key wake and reader recovery; power draw requires hardware measurement.
+- 在线刷机、TF与OTA使用同一次产品构建，Bin、完整USB包和SHA-256发布至GitHub Release；原固定版本地址保持。
+  Publish one verified product build for USB, TF and OTA with immutable older URLs and Release checksums.
 
 ## 官网说明书 / 2026-10-10
 

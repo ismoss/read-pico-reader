@@ -94,7 +94,7 @@ One file, one `app_desc_t`. Order matches `app_registry.c`.
 | `app_font_pick.c` | 卡上 TTF 列表与字重。/ Font picker. | `ttf_font` |
 | `app_ioe.c` | FCA9555 Port-0。/ Expander pins. | `fca9555` |
 | `app_selftest.c` | 设备功能自检入口。/ Device self-test UI. | `pmu_selftest` |
-| `app_book.c` | TXT / EPUB 书架、目录、字号与逐书进度；晃动翻页实验默认关。/ TXT / EPUB shelf, TOC, size and per-book progress; experimental shake defaults off. | `book_*`, `ttf_font` |
+| `app_book.c` | TXT / EPUB 书架、目录、字号与逐书进度与 TF 阅读背景。/ TXT / EPUB shelf, TOC, size, progress and SD reading backgrounds. | `book_*`, `ttf_font` |
 | `app_image.c` | 内置灰阶图与 TF 卡 JPG/PNG 图片对比。/ Built-in gray chart and SD JPG/PNG image comparison. | `book_cover`, `read_pico_sd` |
 | `app_transfer.c` | 设备热点/已有 WiFi 传 TXT/EPUB，触屏/网页配网与热点二维码，离页停止；停止按钮返回进入前的位置。/ AP/STA upload with touchscreen/web provisioning and hotspot QR; stops and returns to the entry origin. | `read_pico_transfer`, `book_store` |
 
@@ -129,7 +129,7 @@ Defined in [`main/app/app.h`](main/app/app.h). The loop presents via `app_presen
 - `on_power_short()` 可选：页面可消费电源键短按；返回 `APP_REDRAW_NONE` 时主循环继续锁屏。阅读正文的“电源键翻页”开关开启后短按翻下一页，长按由主循环锁屏；其他页面保留原电源键逻辑。/ Optional short-power callback may consume the press; `APP_REDRAW_NONE` keeps the lock path. With reader power-turn enabled, short presses advance in the reader body and long presses lock; other pages keep their usual power behavior.
 - `on_media_ready()` 可选：首次无卡启动后插卡或显式重挂完成时通知当前页面更新目录；不要用它绕过拔卡后的句柄清理。/ Optional callback refreshes page listings after a first insertion or explicit remount; it must not bypass handle cleanup after removal.
 - `on_gesture()` 可选；提供后不再接收 `on_touch()`。主循环负责识别与全局中断取消，页面解释动作。/ Optional gesture callback replaces `on_touch`; the loop recognizes and cancels, the page interprets.
-- `on_key()` 默认只收 `UI_KEY_1`；`owns_keys` 页面在菜单关闭时接收三键。产品系统页按用户决定使用左返回、中首页、右返回；阅读正文三键短按可自定义，两套推荐默认上一页/工具栏/下一页；三键短按或中键长按至少保留一个工具栏入口；中键长按可自定义，默认全刷，中间双击切全屏独立于按键及翻页模式；新开书默认全屏，翻页关闭工具栏并回全屏。/ Normally KEY1 only; `owns_keys` pages receive all three outside the menu. Product system pages use Back/Home/Back; reader short actions are configurable, defaulting to previous/tools/next; at least one short key or middle hold must open the toolbar; middle holds are configurable and default to refresh and center double taps toggle full screen independently of key/tap modes; new books open full screen and turns dismiss tools and return to full screen.
+- `on_key()` 默认只收 `UI_KEY_1`；`owns_keys` 页面在菜单关闭时接收三键。产品系统页按用户决定使用左返回、中首页、右返回；阅读正文三键短按可自定义，两套推荐默认上一页/工具栏/下一页；三键短按或中键长按至少保留一个工具栏入口；中键长按可自定义，默认返回首页，中间双击切全屏独立于按键及翻页模式；新开书默认全屏，翻页关闭工具栏并回全屏。/ Normally KEY1 only; `owns_keys` pages receive all three outside the menu. Product system pages use Back/Home/Back; reader short actions are configurable, defaulting to previous/tools/next; at least one short key or middle hold must open the toolbar; middle holds are configurable and default to home and center double taps toggle full screen independently of key/tap modes; new books open full screen and turns dismiss tools and return to full screen.
 
 标志：
 

@@ -34,6 +34,9 @@ void ui_fill_round_rect(uint8_t *fb, EpdRect r, int radius, uint8_t gray);
 void ui_draw_round_rect(uint8_t *fb, EpdRect r, int radius, uint8_t gray);
 void ui_text_fixed(uint8_t *fb,int x,int y,int px,const char *text,enum EpdFontFlags align,bool inverse);
 int ui_text_fixed_width_px(int px,const char *text);
+int ui_text_effective_px(int px);
+EpdRect ui_inset_rect(EpdRect rect,int d);
+void ui_text_box(uint8_t *fb,EpdRect box,int px,const char *text,enum EpdFontFlags align,bool inverse);
 bool ui_rect_hit(EpdRect r,int x,int y);
 void ui_hairline(uint8_t *fb,int y,int x,int width,uint8_t gray);
 """,
@@ -71,6 +74,9 @@ void ui_text_fixed(uint8_t *fb,int x,int y,int px,const char *text,enum EpdFontF
     labels++;
 }
 int ui_text_fixed_width_px(int px,const char *text){int width=0;for(;*text;text++)if(((unsigned char)*text&0xc0)!=0x80)width+=((unsigned char)*text<128?px/2:px);return width;}
+int ui_text_effective_px(int px){return px;}
+EpdRect ui_inset_rect(EpdRect r,int d){return (EpdRect){r.x+d,r.y+d,r.width-2*d,r.height-2*d};}
+void ui_text_box(uint8_t *fb,EpdRect box,int px,const char *text,enum EpdFontFlags align,bool inverse){assert(box.width>0&&box.height>0);ui_text_fixed(fb,box.x,box.y,px,text,align,inverse);}
 bool ui_rect_hit(EpdRect r,int x,int y){return x>=r.x&&x<r.x+r.width&&y>=r.y&&y<r.y+r.height;}
 void ui_hairline(uint8_t *fb,int y,int x,int width,uint8_t gray){(void)fb;(void)y;(void)x;(void)width;(void)gray;}
 void ui_nav_status(uint8_t *fb){(void)fb;}

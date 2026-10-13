@@ -197,6 +197,27 @@ static void cover_draw(uint8_t *fb, const uint8_t *gray, const char *title) {
     }
     ui_draw_round_rect(fb, box, 0, UI_GRAY_BLACK);
 }
+// Preserve exact counters, shrinking only when needed. Two lines fit long statistics.
+static void ticket_stat(uint8_t *fb, int y, int height, int px, const char *text) {
+    px = ui_text_effective_px(px);
+    if (px > height) px = height;
+    char line[128]; snprintf(line, sizeof(line), "%s", text);
+    while (px > 18 && ui_text_fixed_width_px(px, line) > 520) --px;
+    if (ui_text_fixed_width_px(px, line) <= 520) {
+        ui_text_fixed(fb, 82, y, px, line, EPD_DRAW_ALIGN_LEFT, false);
+        return;
+    }
+    char *sep = strstr(line, "  ·  ");
+    if (sep && height >= 44) {
+        *sep = 0; char *tail = sep + strlen("  ·  ");
+        text_fit(line, 18, 520); text_fit(tail, 18, 520);
+        ui_text_fixed(fb, 82, y, 18, line, EPD_DRAW_ALIGN_LEFT, false);
+        ui_text_fixed(fb, 82, y + height / 2, 18, tail, EPD_DRAW_ALIGN_LEFT, false);
+    } else {
+        text_fit(line, px, 520);
+        ui_text_fixed(fb, 82, y, px, line, EPD_DRAW_ALIGN_LEFT, false);
+    }
+}
 bool book_ticket_draw(uint8_t *fb, bool reader_background) {
     (void)reader_background;
     char path[288];
@@ -231,7 +252,7 @@ bool book_ticket_draw(uint8_t *fb, bool reader_background) {
     if (progress_valid) snprintf(line, sizeof(line), "已读 %u%%  ·  第 %u 章", progress.pct,
                                  (unsigned)progress.chapter + 1);
     else snprintf(line, sizeof(line), "已读 —  ·  章节 —");
-    ui_text(fb, 82, 802, 34, line, EPD_DRAW_ALIGN_LEFT, false);
+    ticket_stat(fb, 802, 54, 34, line);
     EpdRect track = {82, 868, 520, 10};
     epd_fill_rect(track, UI_GRAY_LIGHT, fb);
     track.width = progress_valid ? track.width * progress.pct / 100 : 0;
@@ -239,11 +260,11 @@ bool book_ticket_draw(uint8_t *fb, bool reader_background) {
     if (day && stats.day == day) snprintf(line, sizeof(line), "今日阅读 %llu 分钟  ·  翻页 %u 次",
         (unsigned long long)(stats.today_seconds / 60), (unsigned)stats.today_turns);
     else snprintf(line, sizeof(line), "今日阅读 —  ·  日期未同步");
-    ui_text(fb, 82, 914, 28, line, EPD_DRAW_ALIGN_LEFT, false);
+    ticket_stat(fb, 914, 48, 28, line);
     snprintf(line, sizeof(line), "累计阅读 %llu 小时 %llu 分钟  ·  翻页 %u 次",
              (unsigned long long)(stats.total_seconds / 3600),
              (unsigned long long)((stats.total_seconds / 60) % 60), (unsigned)stats.total_turns);
-    ui_text(fb, 82, 969, 28, line, EPD_DRAW_ALIGN_LEFT, false);
+    ticket_stat(fb, 969, 74, 28, line);
     ui_hairline(fb, 1050, 82, 520, UI_GRAY_BLACK);
     ui_text(fb, 82, 1080, 26, "在每一页里，留下时间的凭证", EPD_DRAW_ALIGN_LEFT, false);
     return true;

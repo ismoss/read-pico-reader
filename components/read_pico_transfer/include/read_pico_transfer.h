@@ -97,7 +97,8 @@ bool read_pico_transfer_wifi_backup_valid(const read_pico_transfer_wifi_backup_t
 /// 恢复单个 NVS 凭据；已运行的 WiFi 会话在下次重连时采用新配置。
 /// Restore the single NVS record; an active WiFi session adopts it on its next connection.
 esp_err_t read_pico_transfer_import_wifi_backup(const read_pico_transfer_wifi_backup_t *backup);
-/// 仅热点或停止状态可遗忘；上传中拒绝。/ Forget only while AP or stopped; rejected during upload.
+/// 仅热点或 STA 资源已释放时可遗忘（含启动失败）；上传中拒绝。
+/// Forget while AP or after releasing STA resources, including a failed start; rejected during upload.
 esp_err_t read_pico_transfer_forget_wifi(void);
 /// 停服后同步扫描2.4GHz网络；最多16个去重SSID，按信号降序，临时射频和STA接口均释放。/ Scan synchronously while stopped; up to 16 unique SSIDs by descending RSSI; release temporary radio and STA resources.
 esp_err_t read_pico_transfer_scan_wifi(read_pico_transfer_network_t out[READ_PICO_TRANSFER_SCAN_MAX], size_t *count);

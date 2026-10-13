@@ -19,6 +19,7 @@ static unsigned captured_count;
 static size_t measured_codepoints;
 static size_t measure_calls;
 static int first_draw_px, last_draw_px, first_draw_x, last_draw_x;
+static int first_draw_y, last_draw_y, captured_y[128];
 static int last_tracking_px;
 static int fitted_target;
 static int test_cjk_advance;
@@ -80,14 +81,15 @@ int ttf_text_left_bearing_px(int px, const char* text) {
 }
 void ttf_draw_text_px(uint8_t* fb, int x, int y, int px, const char* text,
                       enum EpdFontFlags align, uint8_t fg, uint8_t bg) {
-    (void)fb; (void)y; (void)px; (void)align;
+    (void)fb; (void)align;
     assert(fg <= 15 && bg <= 15);
-    if (!drawn[0]) { first_draw_px = px; first_draw_x = x; }
+    if (!drawn[0]) { first_draw_px = px; first_draw_x = x; first_draw_y = y; }
     last_draw_px = px;
     last_draw_x = x;
+    last_draw_y = y;
     assert(strlen(drawn) + strlen(text) < sizeof(drawn));
     strcat(drawn, text);
-    if(capture_lines){assert(captured_count<128&&strlen(text)<512);strcpy(captured[captured_count++],text);}
+    if(capture_lines){assert(captured_count<128&&strlen(text)<512);captured_y[captured_count]=y;strcpy(captured[captured_count++],text);}
 }
 void ttf_draw_text_px_spaced(uint8_t* fb, int x, int y, int px, const char* text,
                              int tracking_px, uint8_t fg, uint8_t bg) {
@@ -372,6 +374,44 @@ int main(void) {
     drawn[0] = 0;
     book_layout_draw_page(&fb, 0, r, 10);
     assert(first_draw_x == 50 && last_draw_x == 50);
+    // 使用真实解析块验证两行题头的绘制坐标，而非仅检查 CSS 标记。
+    // Verify both heading lines' drawing coordinates using parsed blocks, not just CSS metadata.
+    const char split_html[] = "<h2 style='text-align:center;margin-bottom:1.8em'>"
+                              "<span>第一章</span><br/>山边小村</h2>";
+    html_text_t split_title = {0};
+    assert(html_to_blocks(split_html, strlen(split_html), &split_title) == ESP_OK);
+    r = (EpdRect){10, 0, 300, 84};
+    assert(book_layout_build_blocks(split_title.utf8, split_title.len, split_title.blocks,
+                                    split_title.count, r, 20));
+    assert(book_layout_page_count() == 1);
+    drawn[0] = 0;
+    book_layout_draw_page(&fb, 0, r, 20);
+    assert(!strcmp(drawn, "第一章山边小村"));
+    assert(first_draw_px == 28 && last_draw_px == 28);
+    assert(first_draw_x == 118 && last_draw_x == 104);
+    assert(first_draw_y == 28 && last_draw_y == 70);
+    book_layout_free();
+    html_text_free(&split_title);
+    // 真正分段仍保留段后距；段内 br 仅占一行，两者不能混为一谈。
+    // Paragraph boundaries retain their gaps; an in-paragraph br advances just one line.
+    const char paragraph_html[] = "<p style='margin-bottom:1em'>甲<br/>乙</p><p>丙</p>";
+    assert(html_to_blocks(paragraph_html, strlen(paragraph_html), &split_title) == ESP_OK);
+    r = (EpdRect){10, 0, 300, 200};
+    assert(book_layout_build_blocks(split_title.utf8, split_title.len, split_title.blocks,
+                                    split_title.count, r, 20));
+    drawn[0] = 0; capture_lines = true; captured_count = 0;
+    book_layout_draw_page(&fb, 0, r, 20);
+    capture_lines = false;
+    assert(captured_count == 3 && captured_y[0] == 20 && captured_y[1] == 50 && captured_y[2] == 115);
+    book_layout_free(); html_text_free(&split_title);
+    const char separate_html[] = "<h2 style='margin-bottom:1.8em'>第一章</h2><h2>山边小村</h2>";
+    assert(html_to_blocks(separate_html, strlen(separate_html), &split_title) == ESP_OK);
+    assert(book_layout_build_blocks(split_title.utf8, split_title.len, split_title.blocks,
+                                    split_title.count, r, 20));
+    drawn[0] = 0;
+    book_layout_draw_page(&fb, 0, r, 20);
+    assert(last_draw_y - first_draw_y == 106);
+    book_layout_free(); html_text_free(&split_title);
     r = (EpdRect){0, 0, 100, 45};
     book_layout_set_chapter_lead(6, 20);
     assert(book_layout_build_blocks(styled, strlen(styled), blocks, 2, r, 10));

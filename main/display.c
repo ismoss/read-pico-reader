@@ -12,8 +12,10 @@
  * User revision: all main-screen modes retain navigation and move only its marker locally; ordinary retains original grays and body cleanup cadence. Fast checkerboard acrylic and covers share one BW target. Initial entry, unlock and explicit full refresh rebuild complete navigation; never fabricate back.
  * 用户修订：所有推屏及欠载恢复与 OTA 擦写共用递归锁；无升级任务时保持原波形、范围和节奏。
  * User revision: serialize all display output and underrun recovery with OTA flash operations; keep existing waveforms, bounds and cadence outside updates.
- * 用户要求加快主页水波纹：复用阅读的一拍一带调度，以16带37相共52拍完成；保留主页12ms节拍、原灰阶、底栏边界、OTA锁及失败恢复。
- * User requests faster main-page ripple: reuse reader-style compact launches for 16 bands/37 phases over 52 ticks; retain main 12ms pacing, original grays, navigation bounds, OTA locking and recovery.
+ * 用户要求加快主页水波纹：复用阅读的一拍一带调度，以8带37相共44拍、11090us完成；保留主页原灰阶序列、底栏边界、OTA锁及失败恢复。
+ * User requests faster main-page ripple: reuse reader-style compact launches for eight bands/37 phases over 44 ticks at 11090us; retain main gray sequences, navigation bounds, OTA locking and recovery.
+ * 用户修订：书架顶部文字、框线与封面/亚克力一起使用水波纹，不再拆分顶部差分刷新；底栏仍固定。
+ * User revision: shelf headers, frames, covers and acrylic share one ripple instead of a separate header differential; navigation remains fixed.
  */
 
 #include "display.h"
@@ -287,11 +289,16 @@ static bool main_begin(EpdiyHighlevelState* hl, enum EpdDrawError* result) {
         // Water outputs the final gray target directly, without a BW prepass or a second whole-page gray update; common recovery handles failure.
         read_pico_epd_use_scan(READ_PICO_EPD_SCAN_FAST);
         epd_lcd_set_prefill_lines(s_bulk_io ? 127 : 64);
-        *result = e0470_page_turn_with_waveform_compact(hl, main_body_area(), E0470_TURN_RTL,
-                                                       display_main_water_waveform(), 16);
+        EpdRect ripple = main_body_area();
+        const int prior_tick=e0470_page_turn_tick_us();
+        e0470_page_turn_set_tick_us(E0470_TURN_FAST_TICK_US);
+        *result = e0470_page_turn_with_waveform_compact(hl, ripple, E0470_TURN_RTL,
+                                                       display_main_water_waveform(), E0470_TURN_FAST_BANDS);
+        e0470_page_turn_set_tick_us(prior_tick);
         if (*result == EPD_DRAW_NO_PHASES_AVAILABLE) {
             use_scan_for(body_wave, MODE_GL16);
-            *result = epd_hl_update_area(hl, MODE_GL16, 25, main_body_area());
+            epd_hl_waveform(hl, body_wave);
+            *result = epd_hl_update_area(hl, MODE_GL16, 25, ripple);
         }
         // 主页面动画不长期保留相位缓存，避免与联网和阅读资源争用。
         // Release main-animation LUTs instead of competing with networking and reader resources.

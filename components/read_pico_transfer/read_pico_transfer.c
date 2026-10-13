@@ -822,8 +822,11 @@ cleanup:
 esp_err_t read_pico_transfer_forget_wifi(void) {
     read_pico_transfer_status_t status;
     read_pico_transfer_get_status(&status);
+    // 启动失败会保留 ERROR 提示，但已释放驱动；此时仍允许用户清除坏配置。
+    // A failed start retains its ERROR message after releasing the driver; allow clearing its credentials.
     if (status.state == READ_PICO_TRANSFER_UPLOADING ||
-        (status.state != READ_PICO_TRANSFER_STOPPED && status.mode == READ_PICO_TRANSFER_MODE_STA)) return ESP_ERR_INVALID_STATE;
+        (status.mode == READ_PICO_TRANSFER_MODE_STA && (s_wifi || s_started || s_http || s_netif)))
+        return ESP_ERR_INVALID_STATE;
     if (!claim_config()) return ESP_ERR_INVALID_STATE;
     esp_err_t err = store_credentials(NULL);
     if (err == ESP_OK) {

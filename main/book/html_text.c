@@ -445,9 +445,20 @@ static esp_err_t run_open(writer_t* w) {
     return ESP_OK;
 }
 
-static esp_err_t finish_block(writer_t* w) {
+static esp_err_t finish_block(writer_t* w, bool line_break) {
     w->space = false;
-    if (!w->active) return ESP_OK;
+    if (!w->active) {
+        // 段尾 br 没有后续文字时，结束标签仍需收回整段的段后距。
+        // A trailing br with no following text still keeps the paragraph's closing margin.
+        if (!line_break && w->text.count) {
+            blk_t* last = &w->text.blocks[w->text.count - 1];
+            if (last->line_break_after) {
+                last->line_break_after = false;
+                last->margin_after_percent = w->current_style.after;
+            }
+        }
+        return ESP_OK;
+    }
     if (w->text.count == HTML_TEXT_MAX_BLOCKS) return ESP_ERR_INVALID_SIZE;
     esp_err_t run_err = run_open(w);
     if (run_err != ESP_OK) return run_err;
@@ -466,7 +477,8 @@ static esp_err_t finish_block(writer_t* w) {
         .align = w->block_style.align,
         .indent_percent = w->block_style.indent,
         .margin_before_percent = w->block_style.before,
-        .margin_after_percent = w->block_style.after,
+        .margin_after_percent = line_break ? 0 : w->block_style.after,
+        .line_break_after = line_break,
         .run_first = w->block_run_first,
         .run_count = w->text.run_count - w->block_run_first,
     };
@@ -637,7 +649,7 @@ static bool image_attr(const char* at, const char* end, bool object,
 
 static esp_err_t add_image(writer_t* w, const char* path) {
     if (w->text.image_count == HTML_IMAGE_MAX) return ESP_OK;
-    esp_err_t err = finish_block(w);
+    esp_err_t err = finish_block(w, false);
     if (err != ESP_OK) return err;
     char** images = heap_caps_realloc(w->text.images, (w->text.image_count + 1) * sizeof(char*), PSRAM_CAPS);
     if (!images) return ESP_ERR_NO_MEM;
@@ -650,7 +662,7 @@ static esp_err_t add_image(writer_t* w, const char* path) {
     int index = (int)w->text.image_count++;
     err = emit(w, 0xfffc);
     if (err != ESP_OK) return err;
-    err = finish_block(w);
+    err = finish_block(w, false);
     if (err == ESP_OK) w->text.blocks[w->text.count - 1].image = index;
     return err;
 }
@@ -779,9 +791,16 @@ esp_err_t html_to_blocks_with_css_target(const char* html, size_t len,
                 if (!closing && !self_closing && (name_equal(name, "head") || name_equal(name, "style") || name_equal(name, "script"))) {
                     memcpy(skip, name, sizeof(skip));
                 } else if (block_tag(name)) {
-                    err = finish_block(&w);
+                    bool line_break = name_equal(name, "br");
+                    err = finish_block(&w, line_break);
                     if (err != ESP_OK) goto fail;
-                    if (!closing && !self_closing) w.current_style = style_for(&w, name, html + at, html + end);
+                    // br 仅换行；整段结束时才加段后距，不重复段前距和首行缩进。
+                    // A br continues alignment and defers the trailing margin until paragraph end.
+                    if (line_break)
+                        w.current_style = (css_style_t){.mask = w.current_style.mask & (CSS_ALIGN | CSS_AFTER),
+                                                       .align = w.current_style.align,
+                                                       .after = w.current_style.after};
+                    else if (!closing && !self_closing) w.current_style = style_for(&w, name, html + at, html + end);
                     else w.current_style = (css_style_t){0};
                     if (name[0] == 'h' && name[1] >= '1' && name[1] <= '3' && !name[2]) w.heading = !closing && !self_closing;
                     if (name[0] == 'h' && name[1] >= '1' && name[1] <= '6' && !name[2])
@@ -810,7 +829,7 @@ esp_err_t html_to_blocks_with_css_target(const char* html, size_t len,
         if (err != ESP_OK) goto fail;
         pos += n;
     }
-    err = finish_block(&w);
+    err = finish_block(&w, false);
     if (err == ESP_OK) err = reserve_text(&w, 0);
     if (err != ESP_OK) goto fail;
     w.text.utf8[w.text.len] = 0;
