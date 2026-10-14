@@ -44,6 +44,7 @@
 #include "ui_home_clock.h"
 #include "ui_wallpaper.h"
 #include "read_pico_pmu.h"
+#include "read_pico_crashlog.h"
 #include <math.h>
 #include "display.h"
 #include "display_main_waveform.h"
@@ -753,12 +754,14 @@ static void on_enter(app_ctx_t *ctx) {
         memset(&s_current,0,sizeof(s_current));memset(s_recent,0,sizeof(s_recent));s_scan_pending=!same;
         if(s_scan_pending) read_pico_sd_start_probe();
         scan_books();restore_cover_cache();
+        rp_boot_mark("scan");
         if(same||error!=ESP_ERR_NOT_FINISHED)remember_scan_state(&sd);
     }
     restore_cover_cache();
     s_cover_next=0;uint32_t key=folder_key();
     if(key!=s_folder_key){free(s_folder);s_folder=NULL;s_folder_attempted=false;}
     refresh_excerpt();
+    rp_boot_mark("excerpt");
 }
 static void on_media_lost(app_ctx_t *ctx) {
     (void)ctx;clear_cover_cache();memset(&s_current,0,sizeof(s_current));memset(s_recent,0,sizeof(s_recent));

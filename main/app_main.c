@@ -33,6 +33,7 @@
 #include "pmu_selftest.h"
 #include "soc/rtc_cntl_reg.h"
 #include "read_pico_board.h"
+#include "read_pico_crashlog.h"
 #include "read_pico_init.h"
 #include "read_pico_pmu.h"
 #include "read_pico_pmu_protocol.h"
@@ -107,8 +108,10 @@ void app_main(void) {
 
     read_pico_handle_t hw;
     if (read_pico_init(&hw) != ESP_OK) return;
+    rp_boot_mark("hw");
     if (hw.pmu_ready) restore_time_from_pmu();
     const bool vcom_ok = resolve_vcom_at_boot();
+    rp_boot_mark("vcom");
     pmu_selftest_bind(hw.sensor);
     app_sleep_bind(hw.touch, hw.sensor);
 
@@ -123,8 +126,10 @@ void app_main(void) {
     epd_hl_set_all_white(&hl);
     ui_draw_full_image(framebuffer, loading_4bpp_bin_start);
     update_display_from_white(&hl);
+    rp_boot_mark("splash");
 
     app_font_activate_system();
+    rp_boot_mark("font");
 
     if (!hw.touch_ready) {
         ESP_LOGE(TAG, "No touch controller, UI cannot run");
@@ -140,6 +145,7 @@ void app_main(void) {
     pico_ota_confirm_running();
 
     app_lock_boot_gate(&hl, hw.touch, hw.sensor);
+    rp_boot_mark("lock");
     const app_desc_t *first = app_home_page();
     pico_resume_t resume;
     if (pico_boot_take_resume(&resume)) {
@@ -163,6 +169,7 @@ void app_main(void) {
     }
     char interrupted[PICO_BOOT_PATH_MAX];
     if (pico_boot_interrupted_book(interrupted, sizeof(interrupted))) first = &app_boot_recovery;
+    rp_boot_mark("resume");
     app_loop_run(&(app_loop_config_t){
         .hl = &hl,
         .fb = framebuffer,
