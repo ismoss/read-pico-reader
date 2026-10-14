@@ -802,10 +802,15 @@ void display_panel_repair(EpdiyHighlevelState* hl) {
         for (int i = 0; i < 3; ++i) epd_push_pixels(area, DISPLAY_REPAIR_TIME, 2);
         vTaskDelay(1);
     }
-    // 面板现在是白的，历史帧必须跟着对齐，否则下一次差分刷新会以为自己已经对齐。
-    // The panel is white now and the history frame has to agree, or the next differential update
-    // believes it is already aligned.
+    // 面板现在是白的，历史帧也必须跟着对齐。置白只动历史帧（front_fb），绘制缓冲（back_fb）
+    // 里还是当前这一页，所以这里立刻整屏 GC16 把画面推回去：修复不能把用户留在一块白屏上，
+    // 而把这一下交给调用方的常规刷新并不可靠——那条路可能是局部的。
+    // The panel is white now and the history frame has to agree. Setting white only touches the
+    // history frame (front_fb); the drawing buffer (back_fb) still holds this page, so one full
+    // GC16 push brings it back. The repair must not leave the user on a blank panel, and leaving
+    // that push to the caller's ordinary refresh is unreliable -- that path may be partial.
     epd_hl_set_all_white(hl);
+    guard_draw_result(hl, update_display_full(hl));
     rails_keepalive();
     pico_online_display_end(held);
 }
