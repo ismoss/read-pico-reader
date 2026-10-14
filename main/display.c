@@ -802,15 +802,15 @@ void display_panel_repair(EpdiyHighlevelState* hl) {
         for (int i = 0; i < 3; ++i) epd_push_pixels(area, DISPLAY_REPAIR_TIME, 2);
         vTaskDelay(1);
     }
-    // 面板现在是白的，历史帧也必须跟着对齐。置白只动历史帧（front_fb），绘制缓冲（back_fb）
-    // 里还是当前这一页，所以这里立刻整屏 GC16 把画面推回去：修复不能把用户留在一块白屏上，
-    // 而把这一下交给调用方的常规刷新并不可靠——那条路可能是局部的。
-    // The panel is white now and the history frame has to agree. Setting white only touches the
-    // history frame (front_fb); the drawing buffer (back_fb) still holds this page, so one full
-    // GC16 push brings it back. The repair must not leave the user on a blank panel, and leaving
-    // that push to the caller's ordinary refresh is unreliable -- that path may be partial.
-    epd_hl_set_all_white(hl);
-    guard_draw_result(hl, update_display_full(hl));
+    // 面板刚被盲刷成白：把「面板显示的是白」这件事也写进基准，然后整屏推一次当前画面，连底栏
+    // 一起推回去。这里不能用 epd_hl_set_all_white()——它清的是绘制缓冲（页面画在 front_fb 上），
+    // 会把用户正看的那一页擦掉；修复只该动基准，画面由这一记整屏刷新重新落到面板上。
+    // The blind drive left the panel white: the baseline is told so, and one full update pushes the
+    // current frame -- navigation bar included -- back onto it. epd_hl_set_all_white() must not be
+    // used here: it clears the *drawing* buffer (pages draw into front_fb) and would wipe the page
+    // the user is looking at. The repair touches the baseline only; this full update re-lands the
+    // frame on the panel.
+    guard_draw_result(hl, update_display_from_white(hl));
     rails_keepalive();
     pico_online_display_end(held);
 }

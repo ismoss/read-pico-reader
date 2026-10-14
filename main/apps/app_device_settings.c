@@ -142,13 +142,9 @@ static bool s_sync_pending;
 static bool s_font_sync_confirm;
 static char s_font_sync_path[TTF_FONT_PATH_MAX];
 static bool s_config_confirm;
-// 屏幕修复：第一下武装一个 6 秒窗口，窗口内再点一下才开始；第二下把活儿交给 tick——整屏盲刷
-// 要几秒，不能在触摸回调里做。窗口过期后重新武装，用户去别的行逛一圈回来不会一按就闪屏。
-// Panel repair: the first tap arms a six-second window and a tap inside it starts the pass; the
-// second tap hands the work to the tick, because the blind full-screen drive takes seconds and has
-// no business running in a touch callback. An expired window re-arms, so coming back from another
-// row never flashes the panel on the first tap.
-static int64_t s_panel_repair_armed_ms;
+// 屏幕修复：点一下就开始。整屏盲刷要几秒，活儿交给 tick——不能在触摸回调里做。
+// Panel repair: one tap starts it. The blind full-screen drive takes seconds, so the work goes to the
+// tick rather than a touch callback.
 static bool s_panel_repair_pending;
 static bool s_boot_pending;
 static bool s_upgrade_confirm, s_upgrade_online, s_local_pending, s_upgrade_restart;
@@ -1455,7 +1451,7 @@ static void on_enter(app_ctx_t *ctx) {
     s_sync_pending = false;
     s_font_sync_confirm = false; s_font_sync_path[0] = 0;
     s_config_confirm = false;
-    s_panel_repair_armed_ms = 0; s_panel_repair_pending = false;
+    s_panel_repair_pending = false;
     s_boot_pending = s_local_pending = s_upgrade_restart = false;
     s_upgrade_offer_pending = s_upgrade_confirm = false;
     (void)read_pico_transfer_get_saved_wifi(s_main_wifi,&s_main_wifi_saved);
@@ -2238,19 +2234,13 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         if(row==0)upgrade_open();
         else if(row==1){s_page=SETTINGS_CONFIG;s_config_confirm=false;s_notice[0]=0;}
         else if(row==2){
-            // 屏幕在刷新中途断电会停在半帧，常规差分刷新永远盖不掉那道条纹；这里让用户点两下，
-            // 之后整屏盲刷一遍。第一下只提示，免得误触把整屏闪一次。
+            // 屏幕在刷新中途断电会停在半帧，常规差分刷新永远盖不掉那道条纹；点一下就整屏盲刷
+            // 一遍，然后自己把当前页面（含底栏）推回面板。
             // A power cut mid-refresh leaves the panel half-driven, and an ordinary differential
-            // refresh can never cover that stripe. Two taps here, then one blind full-screen pass;
-            // the first tap only warns, so a stray tap does not flash the whole panel.
-            if(ctx->now_ms < s_panel_repair_armed_ms){
-                s_panel_repair_armed_ms=0;
-                s_panel_repair_pending=true;
-                snprintf(s_notice,sizeof(s_notice),"屏幕修复中…");
-            } else {
-                s_panel_repair_armed_ms=ctx->now_ms+6000;
-                snprintf(s_notice,sizeof(s_notice),"再点按一次开始修复，整屏闪黑闪白约 3 秒");
-            }
+            // refresh can never cover that stripe. One tap runs the blind full-screen pass, which
+            // then pushes the current page -- navigation bar included -- back onto the panel.
+            s_panel_repair_pending=true;
+            snprintf(s_notice,sizeof(s_notice),"屏幕修复中…");
             return APP_REDRAW_PAGE;
         }
         else {s_boot_pending=false;s_page=SETTINGS_BOOT;}
