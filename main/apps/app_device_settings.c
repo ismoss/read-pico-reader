@@ -142,6 +142,14 @@ static bool s_sync_pending;
 static bool s_font_sync_confirm;
 static char s_font_sync_path[TTF_FONT_PATH_MAX];
 static bool s_config_confirm;
+// 屏幕修复：第一下武装一个 6 秒窗口，窗口内再点一下才开始；第二下把活儿交给 tick——整屏盲刷
+// 要几秒，不能在触摸回调里做。窗口过期后重新武装，用户去别的行逛一圈回来不会一按就闪屏。
+// Panel repair: the first tap arms a six-second window and a tap inside it starts the pass; the
+// second tap hands the work to the tick, because the blind full-screen drive takes seconds and has
+// no business running in a touch callback. An expired window re-arms, so coming back from another
+// row never flashes the panel on the first tap.
+static int64_t s_panel_repair_armed_ms;
+static bool s_panel_repair_pending;
 static bool s_boot_pending;
 static bool s_upgrade_confirm, s_upgrade_online, s_local_pending, s_upgrade_restart;
 static pico_ota_info_t s_local_update;
@@ -305,6 +313,7 @@ static int settings_main_row_height(void) {
 #define SETTINGS_WIRELESS_ROWS 3
 #define SETTINGS_DISPLAY_ROWS 6
 #define SETTINGS_PERSONAL_ROWS 4
+#define SETTINGS_MAINTENANCE_ROWS 4
 #define SETTINGS_WIRELESS_Y (180 + settings_profile_height() + 77)
 #define SETTINGS_DISPLAY_Y (SETTINGS_WIRELESS_Y + SETTINGS_WIRELESS_ROWS * SETTINGS_ROW_H + 78)
 #define SETTINGS_PERSONAL_Y (SETTINGS_DISPLAY_Y + SETTINGS_DISPLAY_ROWS * SETTINGS_ROW_H + 78)
@@ -317,7 +326,7 @@ static int settings_main_row_height(void) {
 // Main-page scroll limit: just enough to bring the last row of the last group above the nav bar,
 // with 8 px to spare.
 #define SETTINGS_SCROLL_MAX \
-    (SETTINGS_MAINTENANCE_Y + 3 * SETTINGS_ROW_H - UI_NAV_TOP + 12)
+    (SETTINGS_MAINTENANCE_Y + SETTINGS_MAINTENANCE_ROWS * SETTINGS_ROW_H - UI_NAV_TOP + 12)
 static char s_editor[96], s_editor_notice[80];
 static ui_text_edit_t s_editor_input;
 static bool s_editor_signature;
@@ -704,6 +713,7 @@ static void setting_icon(uint8_t *fb, int index, int cx, int cy) {
         UI_ICON_EYE_CLOSED,        // 14 自动休眠
         UI_ICON_SLIDERS_HORIZONTAL, // 15 主页刷新模式 / Main refresh mode
         UI_ICON_LOCK,              // 16 锁屏密码 / lock screen password
+        UI_ICON_ROTATE_CW,         // 17 屏幕修复 / panel repair
     };
     if (index < 0 || index >= (int)(sizeof(icons) / sizeof(icons[0]))) return;
     ui_draw_icon(fb, cx, cy, SETTINGS_ICON_PX, icons[index], SETTINGS_ICON_INK);
@@ -1362,11 +1372,15 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
     const int personal_icons[]={4,5,16,10};
     setting_group(fb,SETTINGS_PERSONAL_Y-49,"个性化功能",SETTINGS_PERSONAL_Y,
                   personal_icons,personal_labels,personal_values,SETTINGS_PERSONAL_ROWS);
-    const char *maintenance_labels[]={"系统升级","保存与恢复","BOOT 刷机"};
-    const char *maintenance_values[]={"OTA / TF 卡","配置","电脑刷机"};
-    const int maintenance_icons[]={12,8,13};
+    const char *maintenance_labels[]={"系统升级","保存与恢复","屏幕修复","BOOT 刷机"};
+    const char *maintenance_values[]={"OTA / TF 卡","配置","清除条纹","电脑刷机"};
+    const int maintenance_icons[]={12,8,17,13};
     setting_group(fb,SETTINGS_MAINTENANCE_Y-49,"升级和恢复",SETTINGS_MAINTENANCE_Y,
-                  maintenance_icons,maintenance_labels,maintenance_values,3);
+                  maintenance_icons,maintenance_labels,maintenance_values,SETTINGS_MAINTENANCE_ROWS);
+    // 主列表也要有一行提示位：确认、修复结果都写在这里，不然点了没有任何回音。
+    // The main list needs a notice line too: confirmation and the repair result land here, or a tap
+    // would have no answer at all.
+    if (s_notice[0]) ui_text_fixed_vc(fb, 36, 138, 20, s_notice, EPD_DRAW_ALIGN_LEFT, false);
     epd_fill_rect((EpdRect){0, 0, UI_LOCK_WIDTH, 160},
                   app_settings_main_fast_refresh() ? 0xf0 : 0xe0, fb);
     ui_nav_status(fb);
@@ -1441,6 +1455,7 @@ static void on_enter(app_ctx_t *ctx) {
     s_sync_pending = false;
     s_font_sync_confirm = false; s_font_sync_path[0] = 0;
     s_config_confirm = false;
+    s_panel_repair_armed_ms = 0; s_panel_repair_pending = false;
     s_boot_pending = s_local_pending = s_upgrade_restart = false;
     s_upgrade_offer_pending = s_upgrade_confirm = false;
     (void)read_pico_transfer_get_saved_wifi(s_main_wifi,&s_main_wifi_saved);
@@ -1479,6 +1494,14 @@ static bool ble_receive_feedback(void) {
 
 static app_redraw_t profile_editor_paint(app_ctx_t *ctx, bool field);
 static app_redraw_t on_tick(app_ctx_t *ctx) {
+    // 屏幕修复：在 tick 里做整屏盲刷（几秒），做完让本页整页重画一遍。
+    // Panel repair runs the blind full-screen pass here, then has this page repaint in full.
+    if (s_panel_repair_pending) {
+        s_panel_repair_pending = false;
+        display_panel_repair(ctx->hl);
+        snprintf(s_notice, sizeof(s_notice), "屏幕修复完成；若条纹仍在可再做一次");
+        return APP_REDRAW_PAGE;
+    }
     if (settings_scroll_page()) {
         if (ctx->consumed) return APP_REDRAW_NONE;
         if (s_follow_scroll.tracking || s_follow_scroll.swallow || s_follow_scroll.coasting) {
@@ -2210,10 +2233,26 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         else profile_editor_open(true);
         return APP_REDRAW_PAGE;
     }
-    if(y>=SETTINGS_MAINTENANCE_Y && y<SETTINGS_MAINTENANCE_Y+3*SETTINGS_ROW_H) {
+    if(y>=SETTINGS_MAINTENANCE_Y && y<SETTINGS_MAINTENANCE_Y+SETTINGS_MAINTENANCE_ROWS*SETTINGS_ROW_H) {
         row=(y-SETTINGS_MAINTENANCE_Y)/SETTINGS_ROW_H;
         if(row==0)upgrade_open();
         else if(row==1){s_page=SETTINGS_CONFIG;s_config_confirm=false;s_notice[0]=0;}
+        else if(row==2){
+            // 屏幕在刷新中途断电会停在半帧，常规差分刷新永远盖不掉那道条纹；这里让用户点两下，
+            // 之后整屏盲刷一遍。第一下只提示，免得误触把整屏闪一次。
+            // A power cut mid-refresh leaves the panel half-driven, and an ordinary differential
+            // refresh can never cover that stripe. Two taps here, then one blind full-screen pass;
+            // the first tap only warns, so a stray tap does not flash the whole panel.
+            if(ctx->now_ms < s_panel_repair_armed_ms){
+                s_panel_repair_armed_ms=0;
+                s_panel_repair_pending=true;
+                snprintf(s_notice,sizeof(s_notice),"屏幕修复中…");
+            } else {
+                s_panel_repair_armed_ms=ctx->now_ms+6000;
+                snprintf(s_notice,sizeof(s_notice),"再点按一次开始修复，整屏闪黑闪白约 3 秒");
+            }
+            return APP_REDRAW_PAGE;
+        }
         else {s_boot_pending=false;s_page=SETTINGS_BOOT;}
         return APP_REDRAW_PAGE;
     }

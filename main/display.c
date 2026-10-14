@@ -30,6 +30,8 @@
 #include "e0470_epaper_waveform.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "settings.h"
 
 #include <string.h>
@@ -759,6 +761,53 @@ enum EpdDrawError update_display_full(EpdiyHighlevelState* hl) {
     enum EpdDrawError result = update_display_full_unlocked(hl);
     pico_online_display_end(held);
     return result;
+}
+
+// 屏幕修复的遍数与单帧时长：遍数是盲刷黑/白走几轮，越多越彻底、整段也越久。
+// Panel repair passes and per-frame time: the count is how many black/white rounds the blind drive
+// walks -- more is more thorough and takes longer.
+#define DISPLAY_REPAIR_CYCLES 6
+#define DISPLAY_REPAIR_TIME 15
+// 掉电保持时长：够面板把停在半帧的像素放掉，又不至于让用户等。
+// How long the rails stay down: enough for pixels stuck mid-frame to let go, short enough to wait.
+#define DISPLAY_REPAIR_OFF_MS 400
+
+// 面板修复：整屏盲驱动，不看 framebuffer。刷新中途断电会让面板停在半帧状态，而这里所有常规
+// 刷新都是差分的（只重写与 RAM 上一帧不同的像素与相位），停在半路的那些行永远轮不到重写——
+// 现象就是怎么刷新都留着一道条纹。这条路把每一行按同一电平重新驱动几轮，最后停在白色。
+// Panel repair: a blind full-screen drive that ignores the framebuffer. A power cut in the middle of
+// a refresh leaves the panel stuck mid-frame, and every ordinary path here is differential -- it
+// rewrites only what differs from the RAM frame -- so those rows are never driven again and the
+// stripe survives every refresh. This drives every row to the same level for several rounds and ends
+// on white.
+void display_panel_repair(EpdiyHighlevelState* hl) {
+    if (!hl) return;
+    bool held = pico_online_display_begin();
+    if (s_follow_active) continuous_du_reset();
+    s_follow_active = s_full_refresh_requested = false;
+    display_main_transition_cancel();
+    // 先真掉一次电：VCOM/VGH/VGL 重新建立，停在半路的像素失去保持电压。
+    // One real power cycle first: VCOM/VGH/VGL are rebuilt and pixels stuck mid-frame lose their hold.
+    epd_poweroff();
+    vTaskDelay(pdMS_TO_TICKS(DISPLAY_REPAIR_OFF_MS));
+    use_scan_for(&E0470_WAVEFORM, MODE_GC16);
+    epd_poweron();
+    // 盲刷黑/白：与 framebuffer 无关；每轮之间让出 CPU，整段要几秒。
+    // Blind black/white drive, independent of the framebuffer; the CPU is released between rounds
+    // because the whole pass takes seconds.
+    const EpdRect area = epd_full_screen();
+    for (int cycle = 0; cycle < DISPLAY_REPAIR_CYCLES; ++cycle) {
+        for (int i = 0; i < 10; ++i) epd_push_pixels(area, DISPLAY_REPAIR_TIME, 0);
+        for (int i = 0; i < 13; ++i) epd_push_pixels(area, DISPLAY_REPAIR_TIME, 1);
+        for (int i = 0; i < 3; ++i) epd_push_pixels(area, DISPLAY_REPAIR_TIME, 2);
+        vTaskDelay(1);
+    }
+    // 面板现在是白的，历史帧必须跟着对齐，否则下一次差分刷新会以为自己已经对齐。
+    // The panel is white now and the history frame has to agree, or the next differential update
+    // believes it is already aligned.
+    epd_hl_set_all_white(hl);
+    rails_keepalive();
+    pico_online_display_end(held);
 }
 
 enum EpdDrawError update_display_reader_cleanup(EpdiyHighlevelState* hl,const EpdWaveform* text_waveform) {
