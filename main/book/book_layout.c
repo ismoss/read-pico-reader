@@ -858,14 +858,28 @@ static void draw_vertical_column(uint8_t* fb, EpdRect rect, int left, int pitch,
         if (glyphs > 1 && slack > 0) extra = slack / (glyphs - 1);
     }
     if (s_reading_line) {
-        // 阅读线在竖排里跟着列走，指的就是眼睛要跟的那一条。
-        // The reading guide follows the column in vertical setting: it marks what the eye tracks.
-        int guide_x = cell + px / 2 + s_reading_line_offset;
-        int dash = s_reading_line == 1 ? 19 : 2;
-        int period = s_reading_line == 1 ? 31 : 13;
-        for (int dy = 0; dy < available - indent; dy += period) {
-            int height = dy + dash <= available - indent ? dash : available - indent - dy;
-            if (height > 0) epd_fill_rect((EpdRect){guide_x, y + dy, 2, height}, 0x50, fb);
+        // 阅读线跟着列走，位置在列的右侧：把整页逆时针转 90° 来读这一列，横排的「字下」正落在这里。
+        // 原先画在列中线上（cell + px/2），等于穿字而过，看上去就是错乱。
+        // 上下位置滑杆在竖排里横着移动这条线；再往里就压字了，所以夹在字格右边。
+        // The guide follows the column and runs down its right side: turn the page 90° counter-clockwise
+        // to read the column as a horizontal line and the horizontal "under the glyphs" lands here. It
+        // used to sit on the column's centre line, straight through the glyphs. The offset slider moves
+        // it sideways; it is clamped to the right of the glyph cell so it can never bite into the text.
+        const int cell_left = left + (pitch - px) / 2;
+        int guide_x = left + pitch - 2 + s_reading_line_offset;
+        if (guide_x < cell_left + px + 1) guide_x = cell_left + px + 1;
+        const int dash = s_reading_line == 1 ? 19 : 2;
+        const int period = s_reading_line == 1 ? 31 : 13;
+        // 与横排对称：横排的虚线走整页宽度、从页左边起算，竖排就走整页高度、从页上边起算。
+        // 这样每列的虚实节奏完全一样，也不会因为列首缩进、居中或列长短而各画各的——原先每列
+        // 从自己的字首起算、画到自己的字尾，看着就是疏密不一、长短不齐。
+        // Symmetric with the horizontal rule: horizontally the dashes span the page width and count from
+        // its left edge, so vertically they span the page height and count from its top edge. Every
+        // column then shares one rhythm instead of each drawing its own from its own first glyph to its
+        // own last, which read as uneven spacing and uneven lengths.
+        for (int pos = rect.y; pos < rect.y + rect.height; pos += period) {
+            int height = pos + dash <= rect.y + rect.height ? dash : rect.y + rect.height - pos;
+            if (height > 0) epd_fill_rect((EpdRect){guide_x, pos, 2, height}, 0x50, fb);
         }
     }
     // 整列一次交给字体引擎：它按 run 换字体，并按竖排规则决定每字正立、抬角还是转 90°。
