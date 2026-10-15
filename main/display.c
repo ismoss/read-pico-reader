@@ -21,6 +21,7 @@
 
 #include "display.h"
 #include "ota_online.h"
+#include "continuous_du.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -763,8 +764,9 @@ enum EpdDrawError update_display_full(EpdiyHighlevelState* hl) {
 // rewrites only what differs from the RAM frame -- so those rows are never driven again and the
 // stripe survives every refresh. This drives every row to the same level for several rounds and ends
 // on white.
-void display_panel_repair(EpdiyHighlevelState* hl) {
-    if (!hl) return;
+enum EpdDrawError display_panel_repair(EpdiyHighlevelState* hl) {
+    if (!hl || !hl->front_fb || !hl->back_fb) return EPD_DRAW_INVALID_CROP;
+    LATENCY_DISPLAY_BEGIN();
     bool held = pico_online_display_begin();
     continuous_du_reset();
     s_full_refresh_requested = false;
@@ -793,9 +795,16 @@ void display_panel_repair(EpdiyHighlevelState* hl) {
     // used here: it clears the *drawing* buffer (pages draw into front_fb) and would wipe the page
     // the user is looking at. The repair touches the baseline only; this full update re-lands the
     // frame on the panel.
-    guard_draw_result(hl, update_display_from_white(hl));
+    // 直接走受锁保护的整屏白底出口，包含底栏；不能被主页裁剪拦截，也不再重复推页。
+    // Use the locked full-frame white-baseline path including navigation, without a main-page crop or duplicate page push.
+    enum EpdDrawError result = update_display_from_white_with_unlocked(hl, &E0470_WAVEFORM, MODE_GC16);
+    if (result != EPD_DRAW_SUCCESS) result = main_recover(hl, result);
+    s_main_fault = result != EPD_DRAW_SUCCESS;
+    if (s_main_fault) s_full_refresh_requested = true;
     rails_keepalive();
     pico_online_display_end(held);
+    LATENCY_DISPLAY_END();
+    return result;
 }
 
 enum EpdDrawError update_display_reader_cleanup(EpdiyHighlevelState* hl,const EpdWaveform* text_waveform) {

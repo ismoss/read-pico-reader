@@ -1366,11 +1366,11 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
     // 主列表也要有一行提示位：确认、修复结果都写在这里，不然点了没有任何回音。
     // The main list needs a notice line too: confirmation and the repair result land here, or a tap
     // would have no answer at all.
-    if (s_notice[0]) ui_text_fixed_vc(fb, 36, 138, 20, s_notice, EPD_DRAW_ALIGN_LEFT, false);
     ui_fill_rect_fast((EpdRect){0, 0, UI_LOCK_WIDTH, 160},
                   app_settings_main_fast_refresh() ? 0xf0 : 0xe0, fb);
     ui_nav_status(fb);
     ui_text(fb, 36, 91, 52, "设置", EPD_DRAW_ALIGN_LEFT, false);
+    if (s_notice[0]) ui_text_fixed_vc(fb, 36, 138, 20, s_notice, EPD_DRAW_ALIGN_LEFT, false);
     ui_nav_draw(fb, 3);
 }
 
@@ -1436,13 +1436,19 @@ static bool ble_receive_feedback(void) {
 
 static app_redraw_t profile_editor_paint(app_ctx_t *ctx, bool field);
 static app_redraw_t on_tick(app_ctx_t *ctx) {
-    // 屏幕修复：在 tick 里做整屏盲刷（几秒），做完让本页整页重画一遍。
-    // Panel repair runs the blind full-screen pass here, then has this page repaint in full.
+    // 屏幕修复：先画最终结果，再在 tick 中整屏恢复；成功后不重复推页。
+    // Paint the final notice before the tick's full restoration; do not push the page twice on success.
     if (s_panel_repair_pending) {
         s_panel_repair_pending = false;
-        display_panel_repair(ctx->hl);
+        if (s_page != SETTINGS_MAIN) return APP_REDRAW_NONE;
+        s_scroll_present_pending = false;
         snprintf(s_notice, sizeof(s_notice), "屏幕修复完成；若条纹仍在可再做一次");
-        return APP_REDRAW_PAGE;
+        render(ctx, ctx->fb);
+        if (display_panel_repair(ctx->hl) != EPD_DRAW_SUCCESS) {
+            snprintf(s_notice, sizeof(s_notice), "屏幕输出未完成，请稍后重试");
+            return APP_REDRAW_FULL;
+        }
+        return APP_REDRAW_DONE;
     }
 
     if (s_page==SETTINGS_MAIN && s_avatar_pending && !(ctx->touch && ctx->touch->touched)) {

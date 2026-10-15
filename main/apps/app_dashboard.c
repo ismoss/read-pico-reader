@@ -792,10 +792,10 @@ static void on_enter(app_ctx_t *ctx) {
         memset(&s_current,0,sizeof(s_current));memset(s_recent,0,sizeof(s_recent));s_scan_pending=!same;
         if(s_scan_pending) read_pico_sd_start_probe();
         scan_books();
-        rp_boot_mark("scan");
         if(same||error!=ESP_ERR_NOT_FINISHED)remember_scan_state(&sd);
     }
     if(!same||changed)restore_cover_cache();
+    rp_boot_mark("scan");
     s_cached_progress_revision=progress_revision;
     s_cover_next=0;
     if(app_settings_home_component()==APP_HOME_FOLDER&&(!same||changed||!s_folder_key)){uint32_t key=folder_key();

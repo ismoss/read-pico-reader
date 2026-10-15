@@ -82,7 +82,8 @@ enum EpdDrawError update_display_full(EpdiyHighlevelState* hl);
 /// 面板修复：不看 framebuffer 的整屏盲刷，专治刷新中途断电留下的条纹。
 /// Panel repair: a blind full-screen drive that ignores the framebuffer, for the stripes a power
 /// cut in the middle of a refresh leaves behind.
-void display_panel_repair(EpdiyHighlevelState* hl);
+/// 返回最终整屏输出结果；失败时调用方不能报告成功。/ Return the final full-frame result; callers must not report success on failure.
+enum EpdDrawError display_panel_repair(EpdiyHighlevelState* hl);
 /// 纯文字自动清屏后，用与普通翻页相同的白底文字波形成像。/ After pure-text cleanup, form the target using the ordinary turn's white-to-text waveform.
 enum EpdDrawError update_display_reader_cleanup(EpdiyHighlevelState* hl,const EpdWaveform* text_waveform);
 /// 图片页清除旧光学状态，再驱动完整灰阶。/ Clear the prior optical state and drive the full gray ladder for images.

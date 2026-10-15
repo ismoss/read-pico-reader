@@ -49,6 +49,9 @@ static int clocks, powerons, clears, draws, full_draws, safe_clock, prefill, las
 static bool white_baseline, correct_target_at_draw;
 static int scan_at_draw, prefill_at_draw;
 static enum EpdDrawError next_draw_error;
+static unsigned draw_errors_remaining;
+static unsigned blind_pushes, repair_delays, poweroffs;
+static bool checking_repair;
 static const EpdWaveform *waveform_at_draw;
 static enum EpdDrawError water_result;
 static int water_calls;
@@ -71,7 +74,20 @@ void read_pico_epd_set_pclk(int mhz) { ++clocks; safe_clock = mhz; }
 void read_pico_epd_use_scan(read_pico_epd_scan_t scan) { last_scan = scan; }
 void epd_lcd_set_prefill_lines(int lines) { prefill = lines; }
 void epd_poweron(void) { ++powerons; }
-void epd_poweroff(void) {}
+void epd_poweroff(void) { if (checking_repair) { assert(ota_display_depth); ++poweroffs; } }
+EpdRect epd_full_screen(void) { return (EpdRect){0,0,1216,684}; }
+void vTaskDelay(uint32_t ticks) {
+    assert(checking_repair && ota_display_depth);
+    assert((repair_delays == 0 && ticks == 400) || (repair_delays > 0 && ticks == 1));
+    ++repair_delays;
+}
+void epd_push_pixels(EpdRect area, short time, int color) {
+    assert(checking_repair && ota_display_depth && poweroffs && powerons);
+    assert(area.x == 0 && area.y == 0 && area.width == 1216 && area.height == 684 && time == 15);
+    const unsigned phase = blind_pushes % 26;
+    assert(color == (phase < 10 ? 0 : phase < 23 ? 1 : 2));
+    ++blind_pushes;
+}
 void epd_clear(void) { assert(ota_display_depth); assert(powerons > 0); ++clears; }
 int64_t esp_timer_get_time(void) { return 1000000; }
 
@@ -91,7 +107,9 @@ static enum EpdDrawError draw(EpdiyHighlevelState* hl, enum EpdDrawMode mode, in
     for (size_t i = 0; i < FB_BYTES; ++i) if (hl->back_fb[i] != 255) white_baseline = false;
     correct_target_at_draw = memcmp(hl->front_fb, target, FB_BYTES) == 0;
     memcpy(presented, hl->front_fb, FB_BYTES);
-    enum EpdDrawError err = next_draw_error; next_draw_error = EPD_DRAW_SUCCESS;
+    enum EpdDrawError err = next_draw_error;
+    if (draw_errors_remaining > 1) --draw_errors_remaining;
+    else { draw_errors_remaining = 0; next_draw_error = EPD_DRAW_SUCCESS; }
     if (err == EPD_DRAW_SUCCESS) memcpy(hl->back_fb, hl->front_fb, FB_BYTES);
     return err;
 }
@@ -225,8 +243,33 @@ int main(void) {
     assert(update_display_reader_cleanup(&hl,&E0470_WAVEFORM)==EPD_DRAW_SUCCESS);
     assert(clears==1&&draws==1&&full_draws==1&&last_mode==MODE_GL16&&white_baseline&&correct_target_at_draw);
     assert(!memcmp(front,target,FB_BYTES)&&!memcmp(back,target,FB_BYTES));
+    // 手动修复保留目标页和底栏，只做一次最终整屏输出；成功后局部更新不再被迫全刷。
+    // Manual repair preserves the target and navigation with one final full output, then allows local updates again.
+    checking_repair = true;
+    for (int failure = 0; failure < 3; ++failure) {
+        memcpy(front, target, FB_BYTES); memset(back, 0x55, FB_BYTES);
+        blind_pushes = repair_delays = poweroffs = 0;
+        draws = full_draws = clears = 0;
+        next_draw_error = failure ? EPD_DRAW_EMPTY_LINE_QUEUE : EPD_DRAW_SUCCESS;
+        draw_errors_remaining = failure;
+        display_main_transition_arm(&hl, true, true);
+        display_request_full_refresh();
+        enum EpdDrawError repaired = display_panel_repair(&hl);
+        assert(blind_pushes == 6 * 26 && repair_delays == 7 && poweroffs == 1);
+        assert(!memcmp(front, target, FB_BYTES) && hl.waveform == &E0470_WAVEFORM);
+        assert(draws == (failure ? 2 : 1) && full_draws == draws);
+        assert(correct_target_at_draw && white_baseline && !ota_display_depth);
+        assert((repaired == EPD_DRAW_SUCCESS) == (failure != 2));
+        int prior = full_draws;
+        assert(update_display_area_diff_with(&hl, &E0470_WAVEFORM, MODE_GL16,
+                                            (EpdRect){0,160,16,16}) == EPD_DRAW_SUCCESS);
+        assert(full_draws == prior + (failure == 2));
+    }
+    unsigned prior_pushes = blind_pushes;
+    assert(display_panel_repair(NULL) == EPD_DRAW_INVALID_CROP && blind_pushes == prior_pushes);
+    checking_repair = false;
     assert(!ota_display_depth);
-    puts("display underrun: front retained, white back baseline, full GC16 recovery and bulk prefill passed");
+    puts("display recovery: front retained, locked blind panel repair, single final frame, retry/failure recovery and bulk prefill passed");
 }
 
 // Continuous state is exercised separately with native-size buffers.

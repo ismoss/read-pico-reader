@@ -3,6 +3,15 @@
 按版本简述对用户可见的变化；使用方法见 [README](../README.zh-CN.md)。
 User-visible changes by release; see [README](../README.md) for usage.
 
+## 未发布 / Unreleased
+
+- 接入 PR #34：修正竖排阅读辅助线的位置和虚线节奏，补齐横线类符号旋转，并按字体原生全角步进对齐章节数字编号。
+  Integrate PR #34 for vertical reading-guide placement and dash phase, dash-like punctuation rotation and chapter-number alignment using native fullwidth metrics.
+- 接入 PR #32：RTC 轨迹记录开机各阶段耗时；首帧后停止开机标记，普通回首页不挤占记录。保留后台封面缓存加载。
+  Integrate PR #32 boot-phase RTC timing, stopping boot marks after the first frame and retaining background cover loading.
+- 接入 PR #33：设置 → 升级和恢复 → 屏幕修复，手动执行面板黑白恢复与当前页面整屏重建；结果提示随最终画面一次显示，输出失败保留恢复路径。正常阅读波形、底栏边界和分段滑动不变。
+  Integrate PR #33 manual panel repair in Settings → Upgrade and recovery, restoring the complete current page with its final notice once and retaining output-failure recovery. Normal reading waveforms, navigation bounds and discrete scrolling remain unchanged.
+
 ## 0.3.3-rc93 / 2026-10-15
 
 - 优先优化连续翻页：下一页预绘与当前页推屏重叠，连按复用已准备内容，未完成的目标接着绘制。保留正式 rc92 的阅读波形、插图、水波纹和周期清残影规则。

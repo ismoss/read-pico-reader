@@ -117,6 +117,12 @@ EPUB metadata is allocated for the actual book size. ZIP entries and chapters ea
 
 EPUB body chapters begin on a new page, keeping the title with the opening text when it fits. This also applies to recognized chapter headings within one XHTML resource. TOC links, introductory information and copyright metadata are excluded from body chapter detection; ordinary subheadings continue on the current page. Detection uses authored navigation, standalone numbered headings and body structure; books without reliable markers may still need individual compatibility fixes.
 
+## Boot diagnostics and panel repair
+
+The current source integrates PR #32–#34; release attachments remain tied to their published versions. Boot-phase timing is recorded in the existing RTC trail and shown in Overview's last-run area. Boot marks stop after the first frame. Vertical reading guides sit beside the glyph cells with a shared dash phase, chapter numbers align with ideographs, and dash-like symbols follow vertical rotation.
+
+For persistent black or white stripes after a power cut during a refresh, tap **Settings → Upgrade and recovery → Panel repair**. It performs several full-screen black/white drives and restores the current page including navigation. It runs only on an explicit tap and preserves normal reading rules, waveform tables and VCOM calibration. A failed final output reports failure and allows retry.
+
 ## Licenses and credit
 
 The [license policy](LICENSE) introduces a **personal-study, noncommercial license** only for explicitly marked new original material first published after its adoption. The custom license is source-available, not an OSI-approved open-source license. Existing Apache-2.0 grants, historical releases and contributors' rights remain intact; the [original Apache-2.0 text](licenses/Apache-2.0.txt) is preserved. Lucide icons retain **ISC**, the modified epdiy driver retains **LGPL-3.0-or-later**, and pypinyin dictionary data retains **MIT**. See [Third-party notices](THIRD_PARTY_NOTICES.md) and component directories. The new policy does not make all existing firmware noncommercial.
