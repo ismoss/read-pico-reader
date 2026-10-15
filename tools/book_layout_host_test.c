@@ -12,6 +12,8 @@
 #include "book_layout.h"
 #include "ttf_font.h"
 int test_heap_fail_after = -1;
+size_t test_heap_largest;
+static bool test_zero_width;
 static char drawn[20000];
 static bool capture_lines;
 static char captured[128][512];
@@ -71,7 +73,7 @@ int ttf_text_width_px(int px, const char* text) {
     int n = 0, width = 0;
     for (; *text; text++) if (((unsigned char)*text & 0xc0) != 0x80) {
         n++;
-        width += (unsigned char)*text >= 0x80 && test_cjk_advance ? test_cjk_advance :
+        width += test_zero_width&&*text=='~'?0:(unsigned char)*text >= 0x80 && test_cjk_advance ? test_cjk_advance :
                  *text == 'i' ? px / 2 : *text == 'W' ? px + px / 2 : px;
     }
     measured_codepoints += (size_t)n;
@@ -574,7 +576,7 @@ int main(void) {
     book_layout_set_first_line_indent(0);
     for(unsigned c=0;c<5;++c)for(int w=20;w<=80;w+=10)for(int tracking=-4;tracking<=4;tracking+=2){
         EpdRect box={40,0,w,30};
-        book_layout_set_typography(tracking);capture_lines=true;captured_count=0;drawn[0]=0;
+        book_layout_set_typography(tracking);capture_lines=true;captured_count=0;drawn[0]=0;vertical_draws=0;
         assert(book_layout_build(punct_cases[c],strlen(punct_cases[c]),box,10));
         for(size_t page=0;page<book_layout_page_count();++page)book_layout_draw_page(&fb,page,box,10);
         assert(!strcmp(drawn,punct_cases[c]));
@@ -831,6 +833,42 @@ int main(void) {
     drawn[0] = 0;
     book_layout_draw_page(&fb, 0, column_box, 10);
     assert(first_draw_x == 0);
-    book_layout_free();
-    puts("book_layout_host_test: PASS");
+    // 分行/分列预绘与一次绘制保持文字和位置一致；重排使旧游标失效。
+    // Idle slices match complete drawing text/coordinates; reflow invalidates an older cursor.
+    book_layout_set_chapter_lead(0,0);book_layout_set_runs(NULL,0);
+    const char *idle_text="甲乙丙丁天地玄黄宇宙洪荒。春夏秋冬日月盈昃。\n天地人和甲乙丙丁。";
+    for(int vertical=0;vertical<2;++vertical){
+        book_layout_set_vertical(vertical);
+        EpdRect box={3,7,100,100};
+        assert(book_layout_build(idle_text,strlen(idle_text),box,10));
+        for(size_t page=0;page<book_layout_page_count();++page){
+            capture_lines=true;captured_count=0;drawn[0]=0;
+            book_layout_draw_page(&fb,page,box,10);
+            char expected[sizeof(drawn)];strcpy(expected,drawn);
+            int vx0=first_vertical_x,vy0=first_vertical_y,vx1=last_vertical_x,vy1=last_vertical_y;
+            int expected_y[128];memcpy(expected_y,captured_y,sizeof(expected_y));unsigned lines=captured_count;
+            captured_count=0;drawn[0]=0;vertical_draws=0;book_layout_draw_cursor_t cursor={0};int result,steps=0;
+            do{unsigned before=captured_count;result=book_layout_draw_slice(&fb,page,box,10,&cursor);
+               assert(result>=0&&captured_count<=before+1&&++steps<100);}while(!result);
+            assert(!strcmp(expected,drawn)&&captured_count==lines);
+            if(vertical&&vertical_draws)assert(first_vertical_x==vx0&&first_vertical_y==vy0&&last_vertical_x==vx1&&last_vertical_y==vy1);
+            assert(!memcmp(expected_y,captured_y,lines*sizeof(int)));
+            assert(book_layout_build(idle_text,strlen(idle_text),box,10));
+            assert(book_layout_draw_slice(&fb,page,box,10,&cursor)==-1);
+        }
+    }
+    capture_lines=false;book_layout_set_vertical(false);
+    // 大章节的行缓冲不应跟整章等大；沿用同样的分页结果与限制。
+    // A large chapter's scratch line must not reserve a whole chapter; pagination rules stay intact.
+    char *large_chapter=malloc(240001);assert(large_chapter);memset(large_chapter,'a',240000);large_chapter[240000]=0;
+    test_heap_largest=0;
+    assert(book_layout_build(large_chapter,240000,(EpdRect){0,0,600,1000},10));
+    assert(book_layout_page_count()>1&&test_heap_largest<16384);book_layout_free();free(large_chapter);
+    char zero_width[6001];memset(zero_width,'~',6000);zero_width[6000]=0;test_zero_width=true;test_heap_largest=0;
+    assert(book_layout_build(zero_width,6000,(EpdRect){0,0,600,1000},10));
+    assert(test_heap_largest<=6001);drawn[0]=0;book_layout_draw_page(&fb,0,(EpdRect){0,0,600,1000},10);
+    assert(!strcmp(drawn,zero_width));book_layout_free();test_heap_fail_after=3;
+    assert(!book_layout_build(zero_width,6000,(EpdRect){0,0,600,1000},10));
+    test_heap_fail_after=-1;test_zero_width=false;book_layout_free();
+    puts("book_layout_host_test: PASS; idle rows/columns equal full rendering, stale cursor rejected and large chapter supported");
 }

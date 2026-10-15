@@ -23,7 +23,9 @@ static size_t s_len;
 static size_t* s_pages;
 static size_t s_count;
 static size_t s_capacity;
+static book_layout_draw_cursor_t *s_idle_draw;
 static char* s_line;
+static size_t s_line_capacity;
 static EpdRect s_rect;
 static int s_px;
 static unsigned s_line_percent = 150, s_paragraph_percent = 50;
@@ -272,7 +274,7 @@ void book_layout_free(void) {
     free(s_images);
     free(s_page_img_start);
     s_pages = NULL;
-    s_line = NULL;
+    s_line = NULL; s_line_capacity = 0;
     s_images = NULL;
     s_page_img_start = NULL;
     s_image_count = s_image_capacity = 0;
@@ -465,6 +467,26 @@ static size_t visible_start(size_t off, size_t limit) {
 // Preserve source offsets while wrapping; CRLF is one paragraph boundary. advance_limit is the
 // line width (the column height vertically) and hang_margin is the outer slack a hanging mark may
 // use (0 vertically: a column has no bottom margin to hang into).
+// 行缓冲按实际UTF-8长度增长，包含零宽字符的长行仍可安全扩容；失败保留原指针。
+// Grow by actual UTF-8 line bytes, including long zero-width runs; failed growth keeps the old allocation.
+static bool line_append(size_t at, const char *text, size_t bytes) {
+    if (at > s_len || bytes > s_len - at) return false;
+    size_t need = at + bytes + 1;
+    if (need > s_line_capacity) {
+        size_t capacity = s_line_capacity ? s_line_capacity : 256;
+        while (capacity < need) {
+            if (capacity > (s_len + 1) / 2) { capacity = s_len + 1; break; }
+            capacity *= 2;
+        }
+        if (capacity > s_len + 1) capacity = s_len + 1;
+        char *next = heap_caps_realloc(s_line, capacity, PSRAM_CAPS);
+        if (!next) return false;
+        s_line = next; s_line_capacity = capacity;
+    }
+    if (bytes) memcpy(s_line + at, text, bytes);
+    s_line[at + bytes] = 0;
+    return true;
+}
 static bool take_line(size_t off, int advance_limit, int hang_margin, size_t* next,
                       bool* paragraph_end, int* px, bool* heading,
                       int* line_width, int* indent, uint8_t* align,
@@ -554,8 +576,7 @@ static bool take_line(size_t off, int advance_limit, int hang_margin, size_t* ne
                 if (hang < 0) hang = 0;
                 int squeeze = glyph_count > 1 ? (glyph_count - 1) * 3 : 0;
                 if (candidate <= (int64_t)available + hang + squeeze) {
-                    memcpy(s_line + end - visible_off, glyph, n);
-                    s_line[end - visible_off + n] = 0;
+                    if (!line_append(end - visible_off, glyph, n)) return false;
                     width = candidate;
                     end += n;
                     break;
@@ -569,8 +590,7 @@ static bool take_line(size_t off, int advance_limit, int hang_margin, size_t* ne
                 // 极窄行容不下两个字时才保留悬挂，避免出现以标点开头的死循环。
                 // Only a one-glyph-wide line may hang punctuation to avoid a non-progressing wrap.
                 if (candidate <= (int64_t)available + *px * 2) {
-                    memcpy(s_line + end - visible_off, glyph, n);
-                    s_line[end - visible_off + n] = 0;
+                    if (!line_append(end - visible_off, glyph, n)) return false;
                     width = candidate;
                     end += n;
                     break;
@@ -584,8 +604,7 @@ static bool take_line(size_t off, int advance_limit, int hang_margin, size_t* ne
                     s_line[end - visible_off] = 0;
                     width = last_width;
                 } else if (candidate <= (int64_t)available + *px * 2) {
-                    memcpy(s_line + end - visible_off, glyph, n);
-                    s_line[end - visible_off + n] = 0;
+                    if (!line_append(end - visible_off, glyph, n)) return false;
                     width = candidate;
                     end += n;
                 }
@@ -597,8 +616,7 @@ static bool take_line(size_t off, int advance_limit, int hang_margin, size_t* ne
         ++glyph_count;
         last_start = end;
         last_cp = cp;
-        memcpy(s_line + end - visible_off, glyph, n);
-        s_line[end - visible_off + n] = 0;
+        if (!line_append(end - visible_off, glyph, n)) return false;
         end += n;
     }
     line_runs_build(block, visible_off, end);
@@ -718,7 +736,8 @@ bool book_layout_build_blocks(const char* utf8, size_t len, const blk_t* blocks,
     s_px = px;
     s_rect = rect;
     resolve_image_rect();
-    s_line = heap_caps_malloc(len + 1, PSRAM_CAPS);
+    s_line_capacity = len + 1 < 256 ? len + 1 : 256;
+    s_line = heap_caps_malloc(s_line_capacity, PSRAM_CAPS);
     size_t off = s_lead_skip;
     if (!s_line) goto fail;
     if (s_vertical) {
@@ -869,6 +888,9 @@ static void draw_vertical_page(uint8_t* fb, size_t page, EpdRect rect) {
         ? (int64_t)s_chapter_lead_width : 0;
     uint32_t img_at = s_page_img_start ? s_page_img_start[page] : 0;
     const uint32_t img_end = s_page_img_start ? s_page_img_start[page + 1] : 0;
+    if (s_idle_draw && s_idle_draw->started) {
+        off=s_idle_draw->offset;used=s_idle_draw->used;img_at=s_idle_draw->image_at;
+    }
     while (off < end) {
         size_t visible = skip_image_spacing(off);
         if (visible != off) { off = visible; continue; }
@@ -889,7 +911,7 @@ static void draw_vertical_page(uint8_t* fb, size_t page, EpdRect rect) {
         int px, run_height, indent, margin_before, margin_after;
         uint8_t align;
         if (!take_line(off, rect.height - lead, 0, &next, &paragraph_end, &px, &heading,
-                       &run_height, &indent, &align, &margin_before, &margin_after)) return;
+                       &run_height, &indent, &align, &margin_before, &margin_after)) { if(s_idle_draw)s_idle_draw->failed=true; return; }
         int pitch = line_height_for(px);
         int leading = used ? margin_before : 0;
         if (used + leading + pitch > rect.width) return;
@@ -906,6 +928,11 @@ static void draw_vertical_page(uint8_t* fb, size_t page, EpdRect rect) {
         used += pitch;
         if (paragraph_end) used += gap_for(pitch, heading) + margin_after;
         off = next;
+        if (s_idle_draw && off < end) {
+            s_idle_draw->offset=off;s_idle_draw->used=used;s_idle_draw->image_at=img_at;
+            s_idle_draw->started=true;s_idle_draw->complete=false;
+            return;
+        }
     }
 }
 
@@ -928,6 +955,9 @@ void book_layout_draw_page(uint8_t* fb, size_t page, EpdRect rect, int px) {
     // turn instead of looking each one up.
     uint32_t img_at = s_page_img_start ? s_page_img_start[page] : 0;
     const uint32_t img_end = s_page_img_start ? s_page_img_start[page + 1] : 0;
+    if (s_idle_draw && s_idle_draw->started) {
+        off=s_idle_draw->offset;used=s_idle_draw->used;img_at=s_idle_draw->image_at;
+    }
     while (off < end) {
         size_t visible = skip_image_spacing(off);
         if (visible != off) { off = visible; continue; }
@@ -947,7 +977,7 @@ void book_layout_draw_page(uint8_t* fb, size_t page, EpdRect rect, int px) {
         int line_px, line_width, indent, margin_before, margin_after;
         uint8_t align;
         if (!take_line(off, s_rect.width, s_rect.x, &next, &paragraph_end, &line_px, &heading,
-                       &line_width, &indent, &align, &margin_before, &margin_after)) return;
+                       &line_width, &indent, &align, &margin_before, &margin_after)) { if(s_idle_draw)s_idle_draw->failed=true; return; }
         int line_height = line_height_for(line_px);
         int leading = used ? margin_before : 0;
         if (used + leading + line_height > rect.height) return;
@@ -1000,5 +1030,23 @@ void book_layout_draw_page(uint8_t* fb, size_t page, EpdRect rect, int px) {
         used += line_height;
         if (paragraph_end) used += gap_for(line_height, heading) + margin_after;
         off = next;
+        if (s_idle_draw && off < end) {
+            s_idle_draw->offset=off;s_idle_draw->used=used;s_idle_draw->image_at=img_at;
+            s_idle_draw->started=true;s_idle_draw->complete=false;
+            return;
+        }
     }
+}
+
+int book_layout_draw_slice(uint8_t *fb,size_t page,EpdRect rect,int px,book_layout_draw_cursor_t *cursor) {
+    if(!cursor||!fb||s_idle_draw||page>=s_count||px!=s_px||rect.width!=s_rect.width||rect.height!=s_rect.height)return -1;
+    if(!cursor->generation){cursor->generation=s_generation;cursor->page=page;}
+    if(cursor->generation!=s_generation||cursor->page!=page||cursor->failed)return -1;
+    if(cursor->complete)return 1;
+    cursor->complete=true;
+    s_idle_draw=cursor;
+    book_layout_draw_page(fb,page,rect,px);
+    s_idle_draw=NULL;
+    ttf_draw_set_runs(NULL,0);ttf_font_select(TTF_FONT_SLOT_SYSTEM);
+    return cursor->failed?-1:cursor->complete?1:0;
 }

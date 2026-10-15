@@ -47,13 +47,17 @@
 static const char* TAG = "read_pico";
 extern const app_desc_t app_boot_recovery;
 
-// 主机上电会丢失系统时间；PMU 在主机断电后继续走时。先取实时值再恢复，
-// 不使用启动时缓存的快照，以免将已经经过的开机耗时丢掉。
+// 软复位保留有效的 S3 RTC；断电才用 PMU 的实时秒和毫秒恢复。
+// Retain a valid S3 RTC across soft reset; restore fresh PMU seconds and milliseconds after power loss.
 static void restore_time_from_pmu(void) {
+    struct timeval current;
+    if (gettimeofday(&current, NULL) == 0 && current.tv_sec >= 1704067200 &&
+        current.tv_sec <= 4102444799U) return;
     if (read_pico_pmu_cmd(PMU_CMD_TIME_GET, NULL, 0) != ESP_OK) return;
     const pmu_snapshot_t *pmu = read_pico_pmu_get();
-    if (!pmu || !pmu->time_synced || pmu->unix_sec < 1704067200 || pmu->unix_sec > 4102444799U) return;
-    struct timeval tv = {.tv_sec = (time_t)pmu->unix_sec, .tv_usec = 0};
+    if (!pmu || !pmu->time_ok || !pmu->time_synced || pmu->unix_millis >= 1000 ||
+        pmu->unix_sec < 1704067200 || pmu->unix_sec > 4102444799U) return;
+    struct timeval tv = {.tv_sec = (time_t)pmu->unix_sec, .tv_usec = pmu->unix_millis * 1000};
     if (settimeofday(&tv, NULL) == 0) ESP_LOGI(TAG, "system clock restored from PMU");
 }
 

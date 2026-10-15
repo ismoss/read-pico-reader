@@ -32,7 +32,10 @@ void* heap_caps_aligned_alloc(size_t a,size_t b,unsigned c) {(void)a;(void)b;(vo
 void heap_caps_free(void* p) {(void)p;assert(false);}
 const EpdWaveform* display_main_gray_waveform(void) {return &E0470_WAVEFORM;}
 const EpdWaveform* display_main_shelf_exit_waveform(void) {return &E0470_WAVEFORM;}
-const EpdWaveform* display_main_water_waveform(void) {return &E0470_WAVEFORM;}
+static const EpdWaveform soft_gray = {4};
+const EpdWaveform* display_reader_text_waveform(void) {return &E0470_WAVEFORM;}
+const EpdWaveform* display_main_water_waveform(void) {return &soft_gray;}
+const EpdWaveform* display_main_normal_waveform(void) { return display_main_water_waveform(); }
 const EpdWaveform* display_main_bw_waveform(void) {return &E0470_WAVEFORM;}
 const EpdWaveform* display_main_acrylic_waveform(void) {return &E0470_WAVEFORM;}
 const EpdWaveform* display_main_acrylic_clean_waveform(void) {return &E0470_WAVEFORM;}
@@ -44,6 +47,8 @@ const EpdWaveform E0470_WAVEFORM = {0}, E0470_FOLLOW_WAVEFORM = {1}, E0470_GRAY8
 static uint8_t target[FB_BYTES], presented[FB_BYTES];
 static int clocks, powerons, clears, draws, full_draws, safe_clock, prefill, last_mode, last_scan;
 static bool white_baseline, correct_target_at_draw;
+static int scan_at_draw, prefill_at_draw;
+static enum EpdDrawError next_draw_error;
 static const EpdWaveform *waveform_at_draw;
 static enum EpdDrawError water_result;
 static int water_calls;
@@ -81,12 +86,14 @@ static enum EpdDrawError draw(EpdiyHighlevelState* hl, enum EpdDrawMode mode, in
     full_draws += full;
     last_mode = mode;
     waveform_at_draw = hl->waveform;
+    scan_at_draw = last_scan; prefill_at_draw = prefill;
     white_baseline = true;
     for (size_t i = 0; i < FB_BYTES; ++i) if (hl->back_fb[i] != 255) white_baseline = false;
     correct_target_at_draw = memcmp(hl->front_fb, target, FB_BYTES) == 0;
     memcpy(presented, hl->front_fb, FB_BYTES);
-    memcpy(hl->back_fb, hl->front_fb, FB_BYTES);
-    return EPD_DRAW_SUCCESS;
+    enum EpdDrawError err = next_draw_error; next_draw_error = EPD_DRAW_SUCCESS;
+    if (err == EPD_DRAW_SUCCESS) memcpy(hl->back_fb, hl->front_fb, FB_BYTES);
+    return err;
 }
 enum EpdDrawError epd_hl_update_screen(EpdiyHighlevelState* hl, enum EpdDrawMode mode, int temperature) {
     return draw(hl, mode, temperature, false);
@@ -145,17 +152,17 @@ int main(void) {
     assert(update_display_mode_diff(&hl, MODE_GL16) == EPD_DRAW_SUCCESS);
     assert(last_mode == MODE_GC16);
 
-    // 普通系统页用完整灰阶表，每三次整理一遍全像素，达到阈值时才 GC16。
-    // Ordinary pages use the full gray ladder, settle every third page, and run GC16 only at the threshold.
+    // 普通子页面一次输出柔和灰阶，第三次不驱动整页，达到原阈值仍用原表GC16。
+    // Ordinary subpages use one soft-gray difference without third-page full output, retaining original-table GC16 at the threshold.
     for (int i = 0; i < APP_UI_FAST_GC16_EVERY - 1; ++i) {
         int prior_full = full_draws;
         assert(update_display_fast_page(&hl) == EPD_DRAW_SUCCESS);
         assert(last_mode == MODE_GL16 && last_scan == READ_PICO_EPD_SCAN_FULL);
-        assert(waveform_at_draw == &E0470_WAVEFORM);
-        assert(full_draws - prior_full == ((i + 1) % APP_UI_FAST_GL16_SETTLE_EVERY == 0));
+        assert(waveform_at_draw == &soft_gray && hl.waveform == &E0470_WAVEFORM);
+        assert(full_draws == prior_full);
     }
     assert(update_display_fast_page(&hl) == EPD_DRAW_SUCCESS);
-    assert(last_mode == MODE_GC16 && last_scan == READ_PICO_EPD_SCAN_FULL && full_draws > 0);
+    assert(last_mode == MODE_GC16 && waveform_at_draw == &E0470_WAVEFORM && last_scan == READ_PICO_EPD_SCAN_FULL && full_draws > 0);
 
     // Image pages clear the optical state and use the full grayscale waveform.
     memcpy(front, target, FB_BYTES);
@@ -165,6 +172,20 @@ int main(void) {
     assert(clears == 1 && draws == 1 && white_baseline && correct_target_at_draw);
     assert(last_mode == MODE_GC16 && waveform_at_draw == &E0470_FULL_WAVEFORM &&
            hl.waveform == &E0470_WAVEFORM);
+
+    // 撤回跟手滚动后，解锁的下一帧仍须全刷一次，随后恢复局部差分。
+    // Removing follow scrolling must retain exactly one full update on the next wake frame, then resume local differences.
+    int before_wake_full = full_draws;
+    display_request_full_refresh();
+    assert(update_display_area_diff_with(&hl, &E0470_WAVEFORM, MODE_GL16,
+                                        (EpdRect){0,160,684,928}) == EPD_DRAW_SUCCESS);
+    assert(full_draws == before_wake_full + 1 && last_mode == MODE_GC16);
+    assert(update_display_area_diff_with(&hl, &E0470_WAVEFORM, MODE_GL16,
+                                        (EpdRect){0,160,684,928}) == EPD_DRAW_SUCCESS);
+    assert(full_draws == before_wake_full + 1 && last_mode == MODE_GL16);
+    display_request_full_refresh();
+    assert(update_display_fast_page(&hl) == EPD_DRAW_SUCCESS);
+    assert(full_draws == before_wake_full + 2 && last_mode == MODE_GC16);
 
     clocks = powerons = clears = draws = full_draws = last_mode = 0;
     guard_draw_result(&hl, EPD_DRAW_SUCCESS);
