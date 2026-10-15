@@ -46,7 +46,10 @@ static bool probe_image(void *ctx, int image, int *width, int *height) {
     return true;
 }
 int test_guide_segments;
+int test_guide_first_x;
 int test_guide_first_y;
+int test_guide_second_y;
+int test_guide_last_y;
 int test_guide_height;
 uint8_t test_guide_gray;
 // 宿主假字体：一个可配置就绪位的槽表 + 一个可配置的当前槽，用来验证按 run 换字体。
@@ -553,6 +556,38 @@ int main(void) {
     assert(test_guide_first_y == 80);
     book_layout_set_spacing(150, 50);
     book_layout_set_reading_line(0);
+    // 竖排的阅读线走在列的右侧，不再压着字：把整页逆时针转 90° 来读这一列，横排的「字下」正是这里。
+    // 原先画在列中线上（字格左缘 + 半个字宽），等于穿字而过。
+    // In vertical setting the guide runs down the column's right side instead of through the glyphs:
+    // turning the page 90° counter-clockwise puts the horizontal "under the glyphs" here. It used to
+    // sit on the column's centre line, half a glyph width into the cell.
+    book_layout_set_vertical(true);
+    book_layout_set_reading_line(1);
+    book_layout_set_first_line_indent(2);
+    r = (EpdRect){10, 20, 400, 120};
+    assert(book_layout_build("甲乙丙丁", strlen("甲乙丙丁"), r, 40));
+    test_guide_segments = 0; test_guide_first_x = -1; vertical_draws = 0;
+    book_layout_draw_page(&fb, 0, r, 40);
+    assert(test_guide_segments > 1 && vertical_draws > 0);
+    assert(test_guide_first_x >= first_vertical_x + 40 && test_guide_height > 2);
+    // 与横排对称：虚线从整页上边起算、走整页高度，所以第一段落在页顶，段距正好一个周期，
+    // 与列首缩进无关——原先每列从自己的字首起算，缩进一变相位就变，看着疏密不一。
+    // Symmetric with the horizontal rule: the dashes count from the page's top edge and span its
+    // height, so the first segment sits at the page top and the next is exactly one period later,
+    // whatever the column's indent. Counting from each column's own start shifted the phase with it.
+    assert(test_guide_first_y == r.y && test_guide_second_y - test_guide_first_y == 31);
+    assert(test_guide_last_y < r.y + r.height);
+    book_layout_set_first_line_indent(0);
+    // 上下位置滑杆在竖排里横着移动阅读线；调到最里也必须留在字格右边，不许压字。
+    // The offset slider moves the guide sideways in vertical setting; even at its innermost it must
+    // stay right of the glyph cell instead of biting into the text.
+    book_layout_set_reading_line_offset(-8);
+    test_guide_segments = 0; test_guide_first_x = -1;
+    book_layout_draw_page(&fb, 0, r, 40);
+    assert(test_guide_segments > 0 && test_guide_first_x >= first_vertical_x + 41);
+    book_layout_set_reading_line_offset(0);
+    book_layout_set_reading_line(0);
+    book_layout_set_vertical(false);
     // 右标点可在安全留白内悬挂，下一页必须仍从正文开始。/ Hang a closer safely without starting the next page with punctuation.
     book_layout_set_first_line_indent(0);
     r = (EpdRect){40, 0, 40, 15};
