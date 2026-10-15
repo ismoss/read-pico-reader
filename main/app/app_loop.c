@@ -54,6 +54,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "read_pico_board.h"
+#include "read_pico_crashlog.h"
 #include "read_pico_pmu.h"
 #include "read_pico_transfer.h"
 #include "read_pico_sd.h"
@@ -497,11 +498,14 @@ void app_loop_run(const app_loop_config_t* config) {
     // The SD probe starts during board setup and is usually ready by the first product frame.
     // Retry here so the very first bookshelf paint already has a full CJK system face.
     try_load_saved_sd_font(false);
+    rp_boot_mark("sdfont");
     if (current->on_enter != NULL) current->on_enter(&ctx);
+    rp_boot_mark("enter");
     poll_media(&ctx, current, &media_mounted, &media_invalidated);
     // 首帧必须整屏 GC16：fb 里还是 app_main 画的开机图，DU 盖不掉。
     // First frame must be full GC16: fb still holds the splash; DU cannot cover it.
     app_present(&ctx, current, APP_REDRAW_FULL);
+    rp_boot_mark("frame");
     pico_boot_ready();
     ESP_LOGI(TAG, "UI ready on %s", current->title);
     // 上次崩溃的现场（异常类型与触发地址）：有的话打一遍，串口和屏幕各有一份。

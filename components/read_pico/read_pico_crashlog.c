@@ -74,3 +74,7 @@ void rp_crash_log_clear(void) {
     s_written = 0;
     portEXIT_CRITICAL(&s_lock);
 }
+
+void rp_boot_mark(const char *name) {
+    rp_crash_log("boot %s %ums", name ? name : "?", (unsigned)(esp_timer_get_time() / 1000));
+}
