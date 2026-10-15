@@ -1,12 +1,14 @@
 # kiikoread
 
+> **Licensing:** New original material explicitly marked with the [Personal Study License](licenses/kiikoread-Personal-Study-1.0.txt) permits personal study and prohibits commercial use without separate written permission. **This policy does not relicense rc93 or earlier code/binaries, remove existing Apache-2.0 rights, or override third-party licenses.** See [LICENSE](LICENSE) for the exact scope.
+
 The public project name is **kiikoread**. The website calls the device an ink-screen reader; the GitHub URL and legacy update/backup filenames remain compatible. Firmware UI branding also uses kiikoread. The bright-white website includes screen previews, features, version selection, web USB flashing, Bin downloads and an [online user manual](flash/manual.html). Stage it with `python3 tools/stage_public_flash.py _site`; both GitHub Pages and Cloudflare Pages can serve `_site`. The PDF can be regenerated from `docs/user-manual.zh-CN.json` with `tools/build_user_manual.py --font /path/to/a/static-CJK.ttf` (Python ReportLab required).
 Official firmware binaries are stored in [GitHub Releases](https://github.com/wegooo-cell/read-pico-reader/releases). The verified site staging step retrieves the matching assets; do not publish the raw flash directory. Device OTA checks `https://kiikoread.com/update.json` first, with the existing GitHub Pages feed as a fallback. Stage the primary site with `python3 tools/stage_public_flash.py _site --ota-origin https://kiikoread.com`; keep the default origin for GitHub Pages.
 
 
 [简体中文](README.zh-CN.md) · [日本語](README.ja-JP.md) · [Third-party notices](THIRD_PARTY_NOTICES.md)
 
-An independent, open-source reading firmware for the **MindReset RDP-G01-W** ESP32-S3 e-paper board. It is based on [MindReset's official demo firmware](https://github.com/MindReset/read_pico_firmware), but is **not an official MindReset release**.
+An independent reading firmware with publicly available source for the **MindReset RDP-G01-W** ESP32-S3 e-paper board. It is based on [MindReset's official demo firmware](https://github.com/MindReset/read_pico_firmware), but is **not an official MindReset release**. Licenses apply by scope as described above.
 
 The current interface has Home, Bookshelf, Files, and Settings. It reads EPUB and TXT books from a TF card, remembers reading progress, and supports Wi-Fi, hotspot, or USB file transfer. The online flasher installs the same firmware image as the local `flash/` bundle.
 
@@ -117,7 +119,7 @@ EPUB body chapters begin on a new page, keeping the title with the opening text 
 
 ## Licenses and credit
 
-The fork retains the upstream **Apache-2.0** license and notices. The UI icon set comes from **Lucide** under its **ISC** notice. The modified epdiy driver uses **LGPL-3.0-or-later**, and pypinyin dictionary data uses **MIT**. See [Third-party notices](THIRD_PARTY_NOTICES.md) and component directories for the exact scope; a component license does not change the license of the entire firmware.
+The [license policy](LICENSE) introduces a **personal-study, noncommercial license** only for explicitly marked new original material first published after its adoption. The custom license is source-available, not an OSI-approved open-source license. Existing Apache-2.0 grants, historical releases and contributors' rights remain intact; the [original Apache-2.0 text](licenses/Apache-2.0.txt) is preserved. Lucide icons retain **ISC**, the modified epdiy driver retains **LGPL-3.0-or-later**, and pypinyin dictionary data retains **MIT**. See [Third-party notices](THIRD_PARTY_NOTICES.md) and component directories. The new policy does not make all existing firmware noncommercial.
 
 Please report firmware bugs in this repository, not in the MindReset upstream issue tracker. Hardware purchasing and repair remain matters for the [official support channels](https://dot.mindreset.tech/docs/contact).
 
