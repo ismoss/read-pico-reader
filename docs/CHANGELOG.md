@@ -3,7 +3,7 @@
 按版本简述对用户可见的变化；使用方法见 [README](../README.zh-CN.md)。
 User-visible changes by release; see [README](../README.md) for usage.
 
-## 未发布 / Unreleased
+## 0.3.3-rc94 / 2026-10-16
 
 - 阅读手动与周期全刷恢复 rc90 的原表 GC16 目标页输出，取消纯文字全刷前的独立擦白和后续文字补刷；保留普通翻页预绘、插图与水波纹设置。
   Restore rc90's original-table GC16 target-frame output for manual and periodic reader refresh, removing the separate white clear and text pass while retaining ordinary prefetch, images and ripple settings.
