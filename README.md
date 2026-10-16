@@ -12,9 +12,9 @@ An independent reading firmware with publicly available source for the **MindRes
 
 The current interface has Home, Bookshelf, Files, and Settings. It reads EPUB and TXT books from a TF card, remembers reading progress, and supports Wi-Fi, hotspot, or USB file transfer. The online flasher installs the same firmware image as the local `flash/` bundle.
 
-## Current release: rc94
+## Current release: rc95
 
-This release restores rc90's manual and periodic reader full refresh, removing the extra white clear and text pass. It includes PR #32 boot timing, PR #33 manual panel repair and PR #34 vertical-reading alignment fixes, while retaining rapid turns, processed cover caches and existing settings. USB, TF and OTA share one build; historical releases remain available. See the [changelog](docs/CHANGELOG.md).
+This release releases pixel drive after unchanged or failed output and retries transient control-write failures, addressing a path that can darken idle white backgrounds. It retains the existing HV burst timeout, rc90 reader full refresh, rapid-turn prefetch, waveforms and voltage settings. Web, TF and OTA use one verified build; historical downloads remain available. See the [changelog](docs/CHANGELOG.md).
 
 ### Settings, storage and lock fixes
 
