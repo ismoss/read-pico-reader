@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""中文：验证正式rc92阅读刷新回退及真实推屏路由。/ English: Verify official rc92 reader rollback and actual presenter routing.
+"""中文：验证 rc90 阅读全刷与保留的 rc92 普通翻页路由。/ English: Verify rc90 reader full refresh and preserved rc92 ordinary-turn routing.
 SPDX-License-Identifier: Apache-2.0
 """
 from pathlib import Path
@@ -7,21 +7,33 @@ import subprocess,tempfile
 from home_cover_cache_host_test import function
 root=Path(__file__).resolve().parents[1]
 release='4bd2b9e808c214c7606cb4c31e606af146d48bce'
+full_release='v0.3.3-rc90'
 with tempfile.TemporaryDirectory(dir='/private/tmp') as folder:
     original=Path(folder)/'book.c'
     original.write_bytes(subprocess.check_output(['git','show',release+':main/apps/app_book.c'],cwd=root))
     for name in ('present','turn_page','reader_area','reader_fullscreen_progress_area','reader_clock_tick','reader_manual_refresh'):
         current=function(name,root/'main/apps/app_book.c');baseline=function(name,original)
         if name=='present':
+            # 只允许撤回自动清屏的两段输出，其他普通翻页路由仍与正式基线相同。
+            # Only remove the two-stage automatic cleanup; retain the release baseline's other turn paths.
+            begin=baseline.index('    else if(s_reader_cleanup&&s_reader_turn_pending')
+            end=baseline.index('    else if (redraw == APP_REDRAW_FULL || s_reader_cleanup)',begin)
+            baseline=baseline[:begin]+baseline[end:]
             current=current.replace("        !(redraw == APP_REDRAW_AREA && (s_shelf_feedback_pending || s_cover_batch_present_pending))) {\n        prepare_covers(ctx);\n        gather_cover_entry(ctx);\n    }", "        !(redraw == APP_REDRAW_AREA && (s_shelf_feedback_pending || s_cover_batch_present_pending))) prepare_covers(ctx);")
             current=current.replace('    reader_prefetch_end(prep);',
                                     '    if (prep) xSemaphoreTake(s_prep_done, portMAX_DELAY);')
         assert current==baseline,name
+    original.write_bytes(subprocess.check_output(['git','show',full_release+':main/display.c'],cwd=root))
+    current=function('update_display_full_unlocked',root/'main/display.c')
+    for line in ('    s_full_refresh_requested = false;\n','    display_main_transition_cancel();\n','    epd_hl_waveform(hl, &E0470_WAVEFORM);\n'):
+        current=current.replace(line,'')
+    assert current==function('update_display_full_unlocked',original)
 for rel in ('main/display_reader_waveform.c','main/display_reader_waveform.h'):
     assert (root/rel).read_bytes()==subprocess.check_output(['git','show',release+':'+rel],cwd=root),rel
 assert not subprocess.check_output(['git','diff',release,'--','components/e0470_page_turn','components/e0470_epaper_waveform'],cwd=root)
 assert 'update_display_reader_gc16' not in (root/'main/display.c').read_text()
-print('PASS: reader refresh branches, turn/regions, manual cleanup, clock and waveform match official rc92 (bounded overlapped-prefetch hook excepted); panel/ripple components unchanged',flush=True)
+assert 'update_display_reader_cleanup' not in (root/'main/display.c').read_text()
+print('PASS: full refresh matches rc90 original GC16; ordinary rc92 turn regions, clock, prefetch, reader waveform and panel/ripple components preserved',flush=True)
 unit=r'''
 #include <assert.h>
 #include <stdbool.h>
@@ -70,7 +82,6 @@ static void guard_draw_result(void *hl,enum EpdDrawError err){(void)hl;(void)err
 static int e0470_page_turn_tick_us(void){return 11090;}
 static void e0470_page_turn_set_tick_us(int t){assert(t==11090);}
 #define display_main_transition_shelf_page() ((void)0)
-#define update_display_reader_cleanup(...) push(11)
 #define update_display_full(...) push(12)
 #define update_display_area_diff_with(...) push(13)
 #define update_display_area_full_with(...) push(14)
@@ -98,7 +109,7 @@ int main(void){
  }
  for(int full=0;full<2;++full){
   reset();s_reader_fullscreen=full;s_reader_cleanup=true;
-  assert(present(&ctx,APP_REDRAW_AREA));assert(calls==1&&selected==11&&s_reader_text_frame);
+  assert(present(&ctx,APP_REDRAW_AREA));assert(calls==1&&selected==12&&s_reader_text_frame);
   assert(!s_reader_cleanup&&!s_reader_turn_pending);
  }
  reset();s_reader_turn_pending=false;present(&ctx,APP_REDRAW_FULL);assert(calls==1&&selected==12&&rendered==1);
@@ -115,7 +126,7 @@ int main(void){
  s_reader_clock_painted_minute=321;
  present(&ctx,APP_REDRAW_AREA);assert(calls==1&&selected==13&&s_reader_clock_minute==321&&!s_reader_clock_pending);
  reset();ctx.request_app=true;present(&ctx,APP_REDRAW_AREA);assert(calls==0);ctx.request_app=false;
- puts("PASS: official GL16 text/body and independent footer, periodic text cleanup, manual full, chrome redraw, ripple, image, minute clock and cancellation routes; failed frames stay uncommitted");
+ puts("PASS: manual/periodic original GC16 each use one full output and no footer replay; ordinary turns, ripple, images, clock and cancellation unchanged");
 }
 '''
 with tempfile.TemporaryDirectory(prefix='kiikoread-reader-release-',dir='/private/tmp') as folder:

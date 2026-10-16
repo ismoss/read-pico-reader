@@ -5,6 +5,8 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## 未发布 / Unreleased
 
+- 阅读手动与周期全刷恢复 rc90 的原表 GC16 目标页输出，取消纯文字全刷前的独立擦白和后续文字补刷；保留普通翻页预绘、插图与水波纹设置。
+  Restore rc90's original-table GC16 target-frame output for manual and periodic reader refresh, removing the separate white clear and text pass while retaining ordinary prefetch, images and ripple settings.
 - 接入 PR #34：修正竖排阅读辅助线的位置和虚线节奏，补齐横线类符号旋转，并按字体原生全角步进对齐章节数字编号。
   Integrate PR #34 for vertical reading-guide placement and dash phase, dash-like punctuation rotation and chapter-number alignment using native fullwidth metrics.
 - 接入 PR #32：RTC 轨迹记录开机各阶段耗时；首帧后停止开机标记，普通回首页不挤占记录。保留后台封面缓存加载。

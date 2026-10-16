@@ -12,6 +12,8 @@
  * 晃动默认关；横向左晃上一页、右晃下一页，触摸与回弹不触发；离页恢复加速度配置并休眠。render只绘图。
  * 预渲染与同步推屏重叠、按行可停；推屏返回前交还字体与章节资源。
  * 普通翻页只刷新正文与页脚；手动或周期清残影整屏全刷。
+ * 用户修订：阅读手动与周期全刷恢复 rc90 的原表 GC16 目标页输出，不先擦白再补文字。
+ * User revision: restore rc90's original-table GC16 target-page output for manual and periodic refresh, without a white pre-clear and text pass.
  * 用户修订：正文中间双击固定切换全屏，单击左右各半或上1/3下2/3翻页，不受按键配置影响。
  * 三键单击及中键长按可自定义，提供翻页/工具栏及首页/全屏/工具栏两套推荐；中键长按默认返回主页，阅读页不画右下角菜单图标。
  * 用户授权基础管理：长按书架先看完整详情，清进度与删文件分别确认；失败保留待重试记录，不自动回收其他书进度。
@@ -3135,12 +3137,6 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
         redraw != APP_REDRAW_FULL && !s_reader_cleanup
         ? update_display_mode_diff(ctx->hl, MODE_GL16)
         : update_display_with(ctx->hl, &E0470_FULL_WAVEFORM, MODE_GC16);
-    else if(s_reader_cleanup&&s_reader_turn_pending&&s_view==READING&&
-        s_reader_panel==READER_PANEL_NONE&&!s_toolbar&&!s_clear_confirm) {
-        // 纯文字自动清屏沿用后续普通页的文字梯子，避免清屏页单独变浅。
-        // Use the ordinary text ladder after pure-text cleanup, avoiding a different pale cleanup page.
-        err=update_display_reader_cleanup(ctx->hl,display_reader_text_waveform());
-    }
     else if (redraw == APP_REDRAW_FULL || s_reader_cleanup) err = update_display_full(ctx->hl);
     else if (redraw == APP_REDRAW_AREA && s_view == SHELF && s_shelf_feedback_pending) {
         // 抽出与复位只驱动发生变化的像素，避免整张封面被反复压黑。
