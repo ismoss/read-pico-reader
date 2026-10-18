@@ -32,6 +32,17 @@ void* heap_caps_aligned_alloc(size_t a,size_t b,unsigned c) {(void)a;(void)b;(vo
 void heap_caps_free(void* p) {(void)p;assert(false);}
 const EpdWaveform* display_main_gray_waveform(void) {return &E0470_WAVEFORM;}
 const EpdWaveform* display_main_shelf_exit_waveform(void) {return &E0470_WAVEFORM;}
+// 本组不注册灰阶内容带；若误入分区呈现，立即失败。/ This suite registers no gray bands; fail on an unexpected regional presentation.
+const EpdWaveform* display_main_shelf_waveform(enum EpdDrawMode mode) {
+    (void)mode; assert(false); return NULL;
+}
+enum EpdDrawError e0470_update_regions(EpdiyHighlevelState* hl, EpdRect area,
+    EpdRect strong_area, const EpdWaveform* soft_waveform,
+    const EpdWaveform* strong_waveform, enum EpdDrawMode strong_mode) {
+    (void)hl; (void)area; (void)strong_area; (void)soft_waveform;
+    (void)strong_waveform; (void)strong_mode;
+    assert(false); return EPD_DRAW_OTHER_ERROR;
+}
 static const EpdWaveform soft_gray = {4};
 static const EpdWaveform reader_soft = {5};
 const EpdWaveform* display_reader_text_waveform(void) {return &reader_soft;}
