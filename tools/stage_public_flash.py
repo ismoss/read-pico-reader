@@ -32,7 +32,7 @@ class LocalLinks(HTMLParser):
 
 def stage(output: Path, ota_origin: str | None = None) -> None:
     output.mkdir(parents=True, exist_ok=True)
-    for name in ("index.html", "notices.html", "manual.html", "site.css", "site.js", "installer-bridge.js",
+    for name in ("index.html", "notices.html", "manual.html", "site.css", "site.js", "installer-bridge.js", "flasher-integrity.js", "_headers",
                  "manifest.json", "toc-preview.png", "firmware.bin",
                  "bootloader.bin", "partitions.bin", "ota_data_initial.bin", "Pico-update.bin", "update.json"):
         if (FLASH / name).is_file(): shutil.copy2(FLASH / name, output / name)

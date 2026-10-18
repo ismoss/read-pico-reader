@@ -31,6 +31,11 @@ def package(build: Path, output: Path):
     parts={'firmware.bin':build/'Read_Pico.bin','bootloader.bin':build/'bootloader/bootloader.bin',
            'partitions.bin':build/'partition_table/partition-table.bin','ota_data_initial.bin':build/'ota_data_initial.bin'}
     for name,path in parts.items():shutil.copy2(path,output/name)
+    # 清单携带本次构建的校验值，网页下载后再核对内部版本，安装器不使用未验证缓存。
+    # Bind this build's hashes into the manifest; the web flasher also verifies the embedded version before installation.
+    for part in manifest['builds'][0]['parts']:
+        payload=(output/part['path']).read_bytes()
+        part.update(size=len(payload),sha256=hashlib.sha256(payload).hexdigest())
     shutil.copy2(build/'Read_Pico.bin',output/upgrade_name)
     shutil.copy2(build/'Read_Pico.bin',output/'Pico-update.bin')
     release={'schema':1,'version':version,'project':'Read_Pico','board':'RDP-G01-W','layout':'pico-dual-4m-v1',

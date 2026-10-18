@@ -6,6 +6,8 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## 0.3.3-rc97 / 2026-10-18
 
+- 刷机页修复通用Bin地址的旧缓存风险：按固定版本下载，逐一校验四个文件的大小、SHA-256和应用内部版本，验证后再将独立快照交给安装器。文件不匹配时不打开刷写连接；TF下载也使用固定版本地址。固件镜像保持原rc97不变。
+  The web flasher downloads version-pinned files, verifies all four sizes/hashes and the embedded app version, then supplies an independent verified snapshot to the installer. Mismatches stop before opening a write connection; TF downloads use immutable version URLs. Firmware bytes remain unchanged.
 - 修复锁屏设置读取失败被缓存整个开机周期、导致未设置密码的设备也显示四位密码的问题。读取失败或记录损坏时直接进入系统，不再用密码界面阻拦启动；不创建默认密码、不清空原记录。能正常读取的已设密码仍需验证；存储异常期间密码保护暂时不生效，恢复后可重新读取。
   Failed or malformed lock-setting reads no longer block startup or create default credentials. Readable enabled PINs still require verification; protection is temporarily bypassed during storage faults, without erasing the saved record, and subsequent checks can retry.
 - 开机在大缓冲与字体加载前读取小型锁屏设置，减少资源紧张造成的读取异常；只有成功读取才缓存结果。设置不可读时，密码设置页显示暂不可用，禁止覆盖旧密码。
