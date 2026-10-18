@@ -10,6 +10,8 @@
  * Latest user revision: titles reuse the page's active face: system on Home, reader in books, directly rasterized at the original size.
  * 不为标题切换或重复加载字库；内建缺字回退保留原生位图尺寸，截短保持完整内容的字体来源。
  * Never switch or duplicate fonts for titles; built-in missing-glyph fallback retains native bitmap sizes and the full text fixes the face during truncation.
+ * 用户修复：目录标题复用相同路径，抗锯齿边缘混合至当前行底色，不留下白边。
+ * User fix: directory titles share this path and blend antialiasing into their row background without white fringes.
  */
 
 #include "ui_kit.h"
@@ -403,22 +405,28 @@ int ui_text_title_fit(char *text, int preferred_px, int width, const char *font_
     return px;
 }
 
-void ui_text_title_vc(uint8_t *fb, int x, int center_y, int px, const char *text,
-                      const char *font_sample, enum EpdFontFlags align) {
+void ui_text_title_background_vc(uint8_t *fb, int x, int center_y, int px, const char *text,
+                                 const char *font_sample, enum EpdFontFlags align, uint8_t background) {
     if (!fb || !text || !*text) return;
     int above = 0, below = 0;
+    uint8_t back = background >> 4;
     if (!title_uses_active_font(font_sample ? font_sample : text) &&
         ui_font_has_text(font_sample ? font_sample : text)) {
         ui_font_measure_line_px(px, text, &above, &below);
         ui_font_draw_text_px(fb, x, center_y + (above - below) / 2, px, text, align,
-                             UI_INK_BLACK, UI_INK_WHITE, false);
+                             UI_INK_BLACK, back, false);
     } else {
         bool prior=ttf_get_antialias();ttf_set_antialias(true);
         ttf_measure_line_px(px, text, &above, &below);
         ttf_draw_text_px(fb, x, center_y + (above - below) / 2, px, text,
-                         align, UI_INK_BLACK, UI_INK_WHITE);
+                         align, UI_INK_BLACK, back);
         ttf_set_antialias(prior);
     }
+}
+
+void ui_text_title_vc(uint8_t *fb, int x, int center_y, int px, const char *text,
+                      const char *font_sample, enum EpdFontFlags align) {
+    ui_text_title_background_vc(fb, x, center_y, px, text, font_sample, align, UI_GRAY_WHITE);
 }
 
 void ui_text_bw(

@@ -835,8 +835,8 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
     ui_nav_status(fb);
     if (s_page == SETTINGS_LOCK_PIN) {
         back_header(fb, "锁屏密码");
-        row(fb, 266, "四位数字密码", lock_pin_enabled() ? "已开启" : "已关闭");
-        if (!lock_pin_available()) ui_text_vc(fb, 342, 408, 24, "凭据读取失败，请重启后重试", EPD_DRAW_ALIGN_CENTER, false);
+        row(fb, 266, "四位数字密码", !lock_pin_available() ? "暂不可用" : lock_pin_enabled() ? "已开启" : "已关闭");
+        if (!lock_pin_available()) ui_text_vc(fb, 342, 408, 24, "锁屏设置暂不可用", EPD_DRAW_ALIGN_CENTER, false);
         else if (lock_pin_enabled()) {
             row(fb, 406, "修改密码", "验证原密码  ›");
             row(fb, 512, "关闭密码", "验证原密码  ›");

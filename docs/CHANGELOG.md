@@ -4,6 +4,19 @@
 User-visible changes by release; see [README](../README.md) for usage.
 
 
+## 0.3.3-rc97 / 2026-10-18
+
+- 修复锁屏设置读取失败被缓存整个开机周期、导致未设置密码的设备也显示四位密码的问题。读取失败或记录损坏时直接进入系统，不再用密码界面阻拦启动；不创建默认密码、不清空原记录。能正常读取的已设密码仍需验证；存储异常期间密码保护暂时不生效，恢复后可重新读取。
+  Failed or malformed lock-setting reads no longer block startup or create default credentials. Readable enabled PINs still require verification; protection is temporarily bypassed during storage faults, without erasing the saved record, and subsequent checks can retry.
+- 开机在大缓冲与字体加载前读取小型锁屏设置，减少资源紧张造成的读取异常；只有成功读取才缓存结果。设置不可读时，密码设置页显示暂不可用，禁止覆盖旧密码。
+  Read the small lock setting before large buffers/fonts and cache only conclusive results. Unavailable settings cannot overwrite saved credentials.
+- 修复字间距点按仍沿用旧上限、反复跳到-11px的问题，点按与拖动统一为-15至+15px，每次1px；重排失败恢复原间距和阅读位置，不保存错误值。段距两端按钮按现有11档逐级调整，可到100%。
+  Tracking taps and drags share the complete -15 to +15px range in 1px steps. Failed reflow restores the original spacing and position without saving an incorrect value. Paragraph endpoint buttons follow all 11 existing stops through 100%.
+- 目录书名与章节名统一使用标题绘制路径，沿用当前系统字体与整行字体来源，直接按目标字号生成抗锯齿；内建补充点阵保持原生大小，避免放大后模糊和笔画不均。当前章节的灰底正确混合字形边缘，不留下白边；正文抗锯齿设置保持。
+  Directory book/chapter names share the title path with the active system face, stable whole-line font selection and native-size AA. Keep bitmap supplements at their native size, blend selected-row edges into gray and preserve the body's AA setting.
+- 延续rc96的功能、分区与数据格式，保留用户配置、原密码记录和阅读进度。
+  Retain rc96 features, partition/data compatibility, user settings, saved credentials and reading progress.
+
 ## 0.3.3-rc96 / 2026-10-18
 
 - 设置页题头与列表外围改为纯白。普通模式进入设置及周期整理复用书架的同轮分区刷新：状态栏/题头柔和，列表白色仅向白擦除，保留内容灰阶；普通列表滑动使用柔和差分，手动全刷及原离散滚动保持。

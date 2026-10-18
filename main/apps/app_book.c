@@ -32,6 +32,8 @@
  * User revision: read the page's finished caches before its first frame; cold generation is bounded, but cover artwork is revealed together.
  * 用户修订：字号和间距重排只保存最终进度，字号使用现有闲置灰阶整理。
  * 用户修订：阅读设置滑杆可拖动并在松手后重排；字体选择可纵向翻页；统计入口显示真实明细与近30天数据。
+ * 用户修复：间距滑杆点按和拖动共用完整档位，字间距每次1px，段距按显示档位递进。
+ * User fix: spacing taps and drags share the full ladders; tracking steps by 1px and paragraph spacing follows the displayed stops.
  * 用户修订：前后均为纯文字的普通翻页采用柔和 GL16 差分，仅白底灰边提前少量回浅，不改字形或灰度目标；插图、混排、周期全刷及水波纹保留原规则。
  * User revision: soften ordinary pure-text GL16 turns by advancing a few white-to-gray settling pulses; preserve glyph targets, images, mixed pages, cleanup and ripple.
  * 用户修订：目录由独立模块整页绘制与命中；目录标题清理换行并限制为单行，翻页不再沿用书架的局部刷新。
@@ -4585,7 +4587,7 @@ static app_redraw_t apply_reader_typography(app_ctx_t* ctx, int tracking_index) 
                                        body_rect_for_tracking(tracking_index), s_px);
     if (ok) s_page = book_layout_page_for_offset(off);
     else {
-        book_layout_set_typography((old_index - 2) * 2);
+        book_layout_set_typography(old_index + APP_BOOK_TRACK_MIN);
         (void)book_layout_build_blocks(s_text, s_text_len, s_blocks, s_block_count, body_rect(), s_px);
     }
     unlock_draw();
@@ -4903,11 +4905,20 @@ static void reader_slider_begin(int slider, int x) {
         *value = reader_margin_input(rect, x, *value, s_px, (app_settings_book_tracking() + APP_BOOK_TRACK_MIN));
         return;
     }
+    if (slider == 3) {
+        int level = app_settings_book_paragraph_level((uint8_t)*value);
+        if (x < rect.x + 64) --level;
+        else if (x >= rect.x + rect.width - 64) ++level;
+        else level = slider_index(rect, x, APP_BOOK_PARAGRAPH_COUNT);
+        if (level < 0) level = 0;
+        if (level >= APP_BOOK_PARAGRAPH_COUNT) level = APP_BOOK_PARAGRAPH_COUNT - 1;
+        *value = app_settings_book_paragraph_value((uint8_t)level);
+        return;
+    }
     int min = slider == 0 ? BOOK_PX_MIN : slider == 2 ? 110 : 0;
-    int max = slider == 0 ? BOOK_PX_MAX : slider == 2 ? 150 : slider == 3 ? 75 : 4;
-    int step = slider == 3 ? 25 : 1;
-    if (x < rect.x + 64) *value -= step;
-    else if (x >= rect.x + rect.width - 64) *value += step;
+    int max = slider == 0 ? BOOK_PX_MAX : slider == 2 ? 150 : APP_BOOK_TRACK_COUNT - 1;
+    if (x < rect.x + 64) --*value;
+    else if (x >= rect.x + rect.width - 64) ++*value;
     else reader_slider_map(slider, x);
     if (*value < min) *value = min;
     if (*value > max) *value = max;

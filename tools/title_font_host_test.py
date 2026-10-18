@@ -70,6 +70,7 @@ typedef union {max_align_t align;size_t bytes;} allocation_t;
 static size_t live,peak;
 static unsigned opens,active_fd,max_fd,painted,ui_scale=100;
 unsigned app_settings_system_font_size(void){return ui_scale;}
+uint8_t app_settings_system_contrast(void){return 100;}
 void *heap_caps_malloc(size_t n,int caps){(void)caps;allocation_t *p=malloc(sizeof(*p)+n);assert(p);p->bytes=n;live+=n;if(live>peak)peak=live;return p+1;}
 void *heap_caps_calloc(size_t n,size_t s,int caps){void *p=heap_caps_malloc(n*s,caps);memset(p,0,n*s);return p;}
 void heap_caps_free(void *p){if(!p)return;allocation_t *a=(allocation_t *)p-1;live-=a->bytes;free(a);}
@@ -122,6 +123,24 @@ int main(int argc,char **argv){
    assert(!memcmp(actual,pixels,sizeof(pixels))&&opens==initial_opens&&active_fd==1);
   }
   ui_scale=100;ui_text_set_system_scale(!face);
+  // 目录标题同一活动字库原生绘制，混合白/选中灰底，临时AA不能改变正文开关。
+  // Directory titles rasterize in the same active face on white/selected gray, restoring body AA afterward.
+  for(ui_scale=100;ui_scale<=200;ui_scale+=100)for(int background=0xc0;background<=0xff;background+=0x3f){
+   ui_text_set_system_scale(true);ui_text_set_system_font(!face);ttf_set_stroke_adjust(0);ttf_set_antialias(false);
+   uint8_t back=background>>4;EpdRect box={20,30,300,100};
+   memset(pixels,back,sizeof(pixels));record_coverage=true;painted=0;
+   toc_title(pixels,box,30,text,(uint8_t)background);
+   assert(painted&&!ttf_get_antialias()&&opens==initial_opens&&active_fd==1);
+   uint8_t actual[sizeof(pixels)];memcpy(actual,pixels,sizeof(pixels));
+   int px=ui_text_effective_px(30),above,below;char shown[64];strcpy(shown,text);
+   px=ui_text_title_fit(shown,px,box.width,text);ttf_measure_line_px(px,shown,&above,&below);
+   memset(pixels,back,sizeof(pixels));ttf_set_antialias(true);
+   ttf_draw_text_px(pixels,box.x,box.y+box.height/2+(above-below)/2,px,shown,EPD_DRAW_ALIGN_LEFT,0,back);
+   assert(!memcmp(actual,pixels,sizeof(pixels)));
+   unsigned edges=0;for(unsigned n=0;n<sizeof(pixels);++n){assert(pixels[n]<=back);edges+=pixels[n]>0&&pixels[n]<back;}
+   assert(edges);
+  }
+  ui_scale=100;ui_text_set_system_scale(!face);
   // Static imported faces must respond too, without changing advances or native normal strokes.
   int native_width=ttf_text_width_px(48,text),axis=ttf_get_weight();
   uint8_t native_mask[300*100],weighted[300*100];
@@ -169,6 +188,8 @@ int main(int argc,char **argv){
 }
 '''
     helper='static void copy_text(char *to,size_t cap,const char *from){snprintf(to,cap,"%s",from);}'+'\n'+function('draw_reading_font_name',ROOT/'main/apps/app_book.c')+'\n'
+    for name in ('one_line','toc_title'):
+        helper += function(name,ROOT/'main/apps/book_toc.c')+'\n'
     unit=unit.replace('int main(int argc,char **argv){',helper+'int main(int argc,char **argv){')
     (work / 'test.c').write_text(unit)
     flags = ['cc', '-std=gnu11', '-Wall', '-Wextra', '-Werror', '-Wno-unused-function',

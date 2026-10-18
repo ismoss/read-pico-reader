@@ -1,12 +1,12 @@
 {
   "schema": 1,
-  "version": "0.3.3-rc96",
+  "version": "0.3.3-rc97",
   "project": "Read_Pico",
   "board": "RDP-G01-W",
   "layout": "pico-dual-4m-v1",
   "minimum_base_version": "0.3.3-rc72",
-  "url": "https://wegooo-cell.github.io/read-pico-reader/Pico-update-0.3.3-rc96.bin",
-  "size": 4173392,
-  "sha256": "e0eaa966bd3cea3a03ee83fa6f310febf2a96186758dbba9367468714c1c1e0a",
-  "notes": "1. 书架与设置同步自然刷新，减少留白黑闪\n2. 液态玻璃快捷菜单，蓝牙开关与全刷响应优化\n3. 阅读字号18–90px、间距微调及透明书封\n4. 修复启动记录空间不足与缓存兼容问题"
+  "url": "https://wegooo-cell.github.io/read-pico-reader/Pico-update-0.3.3-rc97.bin",
+  "size": 4173744,
+  "sha256": "163ef3e8b4138fc6b9641aef2f84b112b5b025cf0929a1554cbaa04bde785fca",
+  "notes": "1. 锁屏设置读取失败时直接进入系统，不拦截启动\n2. 修复字间距反复回跳至-11px，点按和拖动均支持±15px\n3. 修复段距按钮及目录章节名粗细不一、抗锯齿问题"
 }

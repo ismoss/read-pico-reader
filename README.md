@@ -12,9 +12,9 @@ An independent reading firmware with publicly available source for the **MindRes
 
 The current interface has Home, Bookshelf, Files, and Settings. It reads EPUB and TXT books from a TF card, remembers reading progress, and supports Wi-Fi, hotspot, or USB file transfer. The online flasher installs the same firmware image as the local `flash/` bundle.
 
-## Current release: rc96
+## Current release: rc97
 
-This release adds simultaneous, gentler shelf and Settings transitions, liquid-glass quick controls, Bluetooth toggle/reconnect fixes and faster full-refresh response. Reader controls include 18–90px sizing, finer spacing, held indent adjustment and transparent PNG lock covers. Compact startup checkpoints recover safely from low NVS space and ignore unsupported cache entries. Web, TF and OTA use one verified build. See the [changelog](docs/CHANGELOG.md).
+Lock-setting read failures no longer block startup or create default credentials. Readable enabled PINs still require verification; storage faults temporarily bypass protection without erasing the saved record. This release also fixes tracking jumping to -11px, unifies tap/drag bounds at ±15px restores all paragraph-spacing stops, and improves directory title clarity. Settings and reading progress are retained. See the [changelog](docs/CHANGELOG.md).
 
 ### Settings, storage and lock fixes
 
