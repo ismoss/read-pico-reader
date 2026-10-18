@@ -114,6 +114,8 @@ void ui_text_box(uint8_t *fb, EpdRect box, int px, const char *text,
                  enum EpdFontFlags align, bool inverted);
 /// 灰阶图片在绘制时增强明暗差，原始缓存保持不变。/ Increase image contrast at draw time without altering cached pixels.
 uint8_t ui_contrast_gray(uint8_t gray);
+/// 按逻辑旋转坐标读取当前帧，返回0..15灰阶；调用方保证坐标有效。/ Read the rotated frame at valid logical coordinates, returning gray level 0..15.
+uint8_t ui_read_pixel(const uint8_t *framebuffer,int x,int y);
 /// 将已画图片区域转为稳定黑白点阵，仅由本地主页面测试调用。/ Convert a painted image region to stable black/white dots; used only by the local main-page trial.
 void ui_image_bw_rect(uint8_t* fb, EpdRect rect);
 /// 亚克力最终合成区转换为稳定的一像素细点阵，裁剪到屏幕；调用者限定快刷书架。/ Convert the final acrylic composition to stable one-pixel dots, clipped to the screen; callers restrict this to fast shelves.
@@ -180,6 +182,15 @@ void ui_blit_bmp(
 void ui_draw_icon(
     uint8_t* framebuffer, int cx, int cy, int size, ui_icon_t icon, uint8_t gray
 );
+
+/// 书架与文件目录共用四向分页栏；矩形止于导航触摸区之上，无圆圈或反馈底框。
+/// Shared shelf/file pager, ending above the navigation touch strip, without circles or backing boxes.
+enum { UI_PAGER_NONE=-1, UI_PAGER_FIRST, UI_PAGER_PREVIOUS, UI_PAGER_NEXT, UI_PAGER_LAST };
+EpdRect ui_pager_area(void);
+EpdRect ui_pager_rect(int action);
+int ui_pager_hit(int x,int y);
+int ui_pager_target(int action,int page,int pages);
+void ui_pager_draw(uint8_t *fb,const char *label,int page,int pages,bool key_mode,int pressed);
 
 void ui_draw_round_rect(
     uint8_t* framebuffer, EpdRect rect, int radius, uint8_t color

@@ -49,6 +49,30 @@ int main(void) {
         }
     }
     assert(changed > 0 && !memcmp(saved, old->luts, sizeof(saved)));
+    // 水波纹现在复用这套已验证文字序列：相同灰阶全保持，不能改字形目标、普通翻页或原表。
+    // Ripple now shares these proven text phases: equal grays hold, retaining glyph targets, ordinary turns and vendor tables.
+    const EpdWaveformPhases* raw=e0470_waveform_phases(&E0470_WAVEFORM,MODE_GL16);
+    unsigned held=0,edge_runs=0;
+    for(int to=0;to<16;++to) {
+        int old_run=0,new_run=0,old_max=0,new_max=0,old_same=0;
+        int raw_counts[4]={0},soft_counts[4]={0};
+        for(int f=0;f<raw->phases;++f) {
+            int a=e0470_phase_action(raw,f,to,15),b=e0470_phase_action(soft,f,to,15);
+            ++raw_counts[a];++soft_counts[b];
+            old_run=a==1?old_run+1:0;new_run=b==1?new_run+1:0;
+            if(old_run>old_max)old_max=old_run;
+            if(new_run>new_max)new_max=new_run;
+            old_same+=e0470_phase_action(raw,f,to,to)!=0;
+            assert(e0470_phase_action(soft,f,to,to)==0);
+        }
+        held+=old_same>0;
+        if(to>0&&to<15) {
+            assert(!memcmp(raw_counts,soft_counts,sizeof(raw_counts)));
+            assert(new_max<=old_max);edge_runs+=new_max<old_max;
+        }
+    }
+    assert(held==16&&edge_runs>=10);
+    puts("PASS: reader ripple holds all 16 unchanged grays and reduces at least ten gray-edge dark runs; existing text profile, targets and 37 phases unchanged");
     puts("PASS: all 256 pairs, endpoints, holds, first/final actions, pulse counts, 37-frame timing and original LUT retained; optical validation pending");
     return 0;
 }

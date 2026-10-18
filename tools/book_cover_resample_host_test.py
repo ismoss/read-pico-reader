@@ -43,21 +43,26 @@ int main(int argc,char **argv){
  }
  FILE *f=fopen(argv[1],"rb");assert(f);fseek(f,0,SEEK_END);long size=ftell(f);rewind(f);
  uint8_t *data=malloc(size);assert(fread(data,1,size,f)==(size_t)size);fclose(f);
- uint8_t pixels[80];memset(pixels,0xaa,sizeof(pixels));assert(png_gray_input(data,size,NULL,8,8,pixels));assert(!live);
+ uint8_t pixels[80];memset(pixels,0xaa,sizeof(pixels));assert(png_gray_input(data,size,NULL,8,8,pixels,NULL));assert(!live);
  assert(pixels[0]==0&&pixels[63]==240&&pixels[27]>80&&pixels[27]<140);
  for(int i=64;i<80;i++)assert(pixels[i]==0xaa);
- assert(png_gray_input(data,size,NULL,2,2,pixels));assert(!live&&pixels[0]==40&&pixels[3]==200);
- assert(png_gray_input(data,size,NULL,1,1,pixels));assert(!live);
- for(int i=0;i<5;i++){fail_after=i;assert(!png_gray_input(data,size,NULL,8,8,pixels));assert(!live);}
+ assert(png_gray_input(data,size,NULL,2,2,pixels,NULL));assert(!live&&pixels[0]==40&&pixels[3]==200);
+ assert(png_gray_input(data,size,NULL,1,1,pixels,NULL));assert(!live);
+ for(int i=0;i<5;i++){fail_after=i;assert(!png_gray_input(data,size,NULL,8,8,pixels,NULL));assert(!live);}
  fail_after=-1;
  // IDAT 截断发生在分配映射及两行缓存之后，验证 longjmp 释放路径。
  // IDAT truncation occurs after map/row allocation, exercising longjmp cleanup.
- assert(!png_gray_input(data,45,NULL,8,8,pixels));assert(!live);
- f=fopen(argv[1],"rb");assert(png_gray_input(NULL,size,f,8,8,pixels));fclose(f);assert(!live);
+ assert(!png_gray_input(data,45,NULL,8,8,pixels,NULL));assert(!live);
+ f=fopen(argv[1],"rb");assert(png_gray_input(NULL,size,f,8,8,pixels,NULL));fclose(f);assert(!live);
+ uint8_t masks[80];memset(masks,0xaa,sizeof(masks));
+ assert(png_gray_input(data,size,NULL,8,8,pixels,masks));assert(!live);
+ for(int i=0;i<64;++i)assert(masks[i]==255);
+ for(int i=64;i<80;++i)assert(masks[i]==0xaa);
+ for(int i=0;i<7;++i){fail_after=i;assert(!png_gray_input(data,size,NULL,8,8,pixels,masks));assert(!live);}fail_after=-1;
  free(data);
  f=fopen(argv[2],"rb");assert(f);fseek(f,0,SEEK_END);size=ftell(f);rewind(f);
  uint8_t *native=malloc(684u*1216u+16);memset(native,0xaa,684u*1216u+16);
- assert(png_gray_input(NULL,size,f,684,1216,native));fclose(f);assert(!live);
+ assert(png_gray_input(NULL,size,f,684,1216,native,NULL));fclose(f);assert(!live);
  for(unsigned y=0;y<1216;++y)for(unsigned x=0;x<684;++x){
   unsigned gray=y<608?((x+y)&1?220:255):(x%256);
   assert(native[y*684+x]==gray);
@@ -74,7 +79,9 @@ with tempfile.TemporaryDirectory() as tmp:
     native_raw=b''.join(b'\0'+b''.join(bytes([220 if (x+y)&1 else 255]*3+[255]) if y<608 else bytes([x%256]*3+[255]) for x in range(684)) for y in range(1216))
     native_png=b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',struct.pack('>IIBBBBB',684,1216,8,6,0,0,0))+chunk(b'IDAT',zlib.compress(native_raw))+chunk(b'IEND',b'')
     (tmp/'native.png').write_bytes(native_png)
-    vendor=root/'managed_components/espressif__libpng/libpng';assert vendor.exists(),'Build IDF once to resolve libpng'
+    vendor=root/'managed_components/espressif__libpng/libpng'
+    if not vendor.exists():vendor=Path('/private/tmp/kiikoread-rc90-lock-build-20261011/managed_components/espressif__libpng/libpng')
+    assert vendor.exists(),'Build IDF once to resolve libpng'
     (tmp/'pnglibconf.h').write_bytes((vendor/'scripts/pnglibconf.h.prebuilt').read_bytes())
     names='png pngerror pngget pngmem pngpread pngread pngrio pngrtran pngrutil pngset pngtrans pngwrite pngwio pngwtran pngwutil'.split()
     subprocess.run(['cc','-std=gnu11','-O2','-w','-fsanitize=address,undefined','-DPNG_ARM_NEON_OPT=0','-DPNG_INTEL_SSE_OPT=0','-I'+str(tmp),'-I'+str(vendor),str(tmp/'test.c')]+[str(vendor/(n+'.c')) for n in names]+['-lz','-lm','-o',str(tmp/'test')],check=True)

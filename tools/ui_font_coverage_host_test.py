@@ -97,3 +97,9 @@ for label in labels:
         missing[label] = absent
 assert not missing, f"System UI labels fall back to the reading font: {missing}"
 print(f"PASS: {len(labels)} real reader-setting and keyboard labels have complete system UI glyphs")
+
+# 这三个控件字必须来自同一TTF轮廓，不能依赖24px补充位图。
+# These control glyphs must use the same TTF outlines instead of the 24px supplement.
+hanzi_codepoints.clear()
+assert all(has_glyph(ord(ch)) for ch in "抗锯齿"), "antialias label lacks native UI outlines"
+print("PASS: antialias label uses native outline glyphs")

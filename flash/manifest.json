@@ -1,6 +1,6 @@
 {
   "name": "kiikoread",
-  "version": "0.3.3-rc95",
+  "version": "0.3.3-rc96",
   "new_install_prompt_erase": true,
   "builds": [
     {
@@ -28,10 +28,10 @@
   ],
   "pico_ota": {
     "layout": "pico-dual-4m-v1",
-    "base_version": "0.3.3-rc95",
+    "base_version": "0.3.3-rc96",
     "minimum_base_version": "0.3.3-rc72",
     "online_ota_base_version": "0.3.3-rc79",
     "rollback": true
   },
-  "updated_at": "2026-10-16T09:50:12+08:00"
+  "updated_at": "2026-10-18T19:17:49+08:00"
 }

@@ -63,3 +63,6 @@ void book_cover_store_generated(const char *path,const char *title,const char *a
 /// 异步结果仅在来源尺寸/修改时间仍匹配时持久化，防止换书后固化旧像素。
 /// Persist asynchronous pixels only under their original source identity, never a replaced book's key.
 void book_cover_fast_cache_write_checked(const char *path,const char *title,const char *author,book_fast_cover_key_t key,const uint8_t *pixels,bool edge,int64_t size,int64_t modified);
+
+/// PNG预乘灰度及alpha；输出缓冲各width*height字节。/ Premultiplied PNG gray and alpha; each output buffer holds width*height bytes.
+bool book_png_file_layer(const char *path,unsigned width,unsigned height,uint8_t *gray,uint8_t *alpha);

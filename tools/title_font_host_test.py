@@ -7,6 +7,7 @@ import struct
 import subprocess
 import tempfile
 from pathlib import Path
+from home_cover_cache_host_test import function
 
 ROOT = Path(__file__).resolve().parents[1]
 font = (ROOT / 'main/assets/builtin.ttf').read_bytes()
@@ -67,7 +68,8 @@ static inline size_t heap_caps_get_largest_free_block(int caps){(void)caps;retur
 #include <unistd.h>
 typedef union {max_align_t align;size_t bytes;} allocation_t;
 static size_t live,peak;
-static unsigned opens,active_fd,max_fd,painted;
+static unsigned opens,active_fd,max_fd,painted,ui_scale=100;
+unsigned app_settings_system_font_size(void){return ui_scale;}
 void *heap_caps_malloc(size_t n,int caps){(void)caps;allocation_t *p=malloc(sizeof(*p)+n);assert(p);p->bytes=n;live+=n;if(live>peak)peak=live;return p+1;}
 void *heap_caps_calloc(size_t n,size_t s,int caps){void *p=heap_caps_malloc(n*s,caps);memset(p,0,n*s);return p;}
 void heap_caps_free(void *p){if(!p)return;allocation_t *a=(allocation_t *)p-1;live-=a->bytes;free(a);}
@@ -79,6 +81,7 @@ bool ui_font_has_text(const char *s){(void)s;return true;}
 int ui_font_title_px(int px,const char *s){(void)s;return px;}
 int ui_font_text_width_px(int px,const char *s){(void)px;(void)s;assert(0);return 0;}
 void ui_font_measure_line_px(int px,const char *s,int *above,int *below){(void)px;(void)s;(void)above;(void)below;assert(0);}
+void ui_font_draw_text_px(uint8_t *fb,int x,int y,int px,const char *s,enum EpdFontFlags a,uint8_t fg,uint8_t bg,bool bw){(void)fb;(void)x;(void)y;(void)px;(void)s;(void)a;(void)fg;(void)bg;(void)bw;assert(0);}
 void ui_font_draw_title_px(uint8_t *fb,int x,int y,int px,const char *s,enum EpdFontFlags a){(void)fb;(void)x;(void)y;(void)px;(void)s;(void)a;assert(0);}
 static uint8_t pixels[400*200];
 static bool record_coverage;
@@ -96,15 +99,29 @@ int main(int argc,char **argv){
    assert(ui_text_title_fit(title,px,300,text)==px&&!strcmp(title,text));
    int above,below;ttf_measure_line_px(px,text,&above,&below);
    assert((unsigned)(above+below)>old_height);old_height=above+below;
-   memset(pixels,0,sizeof(pixels));painted=0;
+   record_coverage=true;memset(pixels,15,sizeof(pixels));painted=0;
    ui_text_title_vc(pixels,200,80,px,title,text,EPD_DRAW_ALIGN_CENTER);assert(painted>0);
-   uint8_t expected[sizeof(pixels)];memset(expected,0,sizeof(expected));
-   ttf_draw_text_px_bw(expected,200,80+(above-below)/2,px,title,EPD_DRAW_ALIGN_CENTER,0,15);
+   uint8_t expected[sizeof(pixels)];memset(expected,15,sizeof(expected));
+   ttf_draw_text_px(expected,200,80+(above-below)/2,px,title,EPD_DRAW_ALIGN_CENTER,0,15);
    assert(!memcmp(pixels,expected,sizeof(pixels)));
    size_t warm=live;
    for(unsigned n=0;n<15;++n)ui_text_title_vc(pixels,200,80,px,title,text,EPD_DRAW_ALIGN_CENTER);
    assert(live==warm&&opens==initial_opens&&active_fd==1&&!strcmp(ttf_font_path(),argv[face+1]));
   }
+  // 设置字体名称复用实际活动字库；AA开关恢复，字号适配而不换字库。
+  // The settings name reuses the real face, restores AA and fits UI sizes without opening another font.
+  for(ui_scale=100;ui_scale<=200;ui_scale+=50){
+   ui_text_set_system_scale(true);ttf_set_antialias(false);
+   EpdRect box={30,30,190,80};memset(pixels,15,sizeof(pixels));painted=0;
+   draw_reading_font_name(pixels,box,text);assert(painted&&!ttf_get_antialias()&&ttf_font_selected()==0);
+   uint8_t actual[sizeof(pixels)];memcpy(actual,pixels,sizeof(pixels));
+   int px=ui_text_effective_px(27),above,below;char fitted[64];strcpy(fitted,text);
+   while(ttf_text_width_px(px,fitted)>box.width){size_t n=strlen(fitted)-1;while(n&&((unsigned char)fitted[n]&0xc0)==0x80)--n;fitted[n]=0;}
+   ttf_measure_line_px(px,fitted,&above,&below);ttf_set_antialias(true);memset(pixels,15,sizeof(pixels));
+   ttf_draw_text_px(pixels,box.x,box.y+box.height/2+(above-below)/2,px,fitted,EPD_DRAW_ALIGN_LEFT,0,15);
+   assert(!memcmp(actual,pixels,sizeof(pixels))&&opens==initial_opens&&active_fd==1);
+  }
+  ui_scale=100;ui_text_set_system_scale(!face);
   // Static imported faces must respond too, without changing advances or native normal strokes.
   int native_width=ttf_text_width_px(48,text),axis=ttf_get_weight();
   uint8_t native_mask[300*100],weighted[300*100];
@@ -151,6 +168,8 @@ int main(int argc,char **argv){
  puts("PASS: actual imported system/reader TTF at 32/40/48px, direct raster identity, five stroke levels with native normal identity and fixed advances, single file/face, bounded warm cache and no duplicate font load");
 }
 '''
+    helper='static void copy_text(char *to,size_t cap,const char *from){snprintf(to,cap,"%s",from);}'+'\n'+function('draw_reading_font_name',ROOT/'main/apps/app_book.c')+'\n'
+    unit=unit.replace('int main(int argc,char **argv){',helper+'int main(int argc,char **argv){')
     (work / 'test.c').write_text(unit)
     flags = ['cc', '-std=gnu11', '-Wall', '-Wextra', '-Werror', '-Wno-unused-function',
              '-Wno-unused-variable', '-fsanitize=address,undefined', '-ffunction-sections', '-fdata-sections',

@@ -17,6 +17,11 @@
  * 用户修订：书架顶部文字、框线与封面/亚克力一起使用水波纹，不再拆分顶部差分刷新；底栏仍固定。
  * User revision: shelf headers, frames, covers and acrylic share one ripple instead of a separate header differential; navigation remains fixed.
 
+ * 用户修订：普通书架上下文字区和中间书架区同一轮逐相输出，外侧柔和、封面/材质保留校准灰阶，留白仅向白擦除；不串行呈现分区。仅横条可变，底栏图标固定，保留统一故障恢复。
+ * User revision: ordinary shelf chrome and art share each scan phase, with soft outer text, calibrated covers/furniture and directional whitespace erasure; never reveal regions serially. Only the marker may change within frozen navigation; retain common fault recovery.
+ * 用户修订：纯文字水波纹复用柔和文字序列，保持未变灰边、减轻先粗后浅；8带/11090us、最终灰阶、主页水波纹和故障恢复保持。
+ * User revision: pure-text ripple reuses soft text phases to hold unchanged grays and reduce dark-edge transients; retain eight bands/11090us, target grays, main ripple and fault recovery.
+
  */
 
 #include "display.h"
@@ -289,7 +294,7 @@ static bool main_begin(EpdiyHighlevelState* hl, enum EpdDrawError* result) {
     // The BW/exit tables hold every equal pair. Include only the changing marker
     // in this scan; frozen divider/labels/icons receive no drive. This removes
     // an additional comparison and eight-frame serial marker update.
-    const bool marker_with_body=fast&&changed&&!cache&&!gray_fallback;
+    bool marker_with_body=fast&&changed&&!cache&&!gray_fallback;
     EpdRect body_area=main_body_area();
     if(marker_with_body)body_area.height=UI_NAV_MARKER_SCAN_END;
     if (cache) main_band_copy(hl, cache, false);
@@ -308,17 +313,29 @@ static bool main_begin(EpdiyHighlevelState* hl, enum EpdDrawError* result) {
             body_full = true;
         }
     }
+    const bool shelf_regions=normal&&changed&&s_main_band_count&&(changing_page||body_full);
+    if(shelf_regions){marker_with_body=true;body_area.height=UI_NAV_MARKER_SCAN_END;}
     use_scan_for(body_wave, body_mode);
     epd_poweron();
     epd_hl_waveform(hl, body_wave);
     int64_t start = esp_timer_get_time();
     // 快刷/水波纹不攒强刷次数；普通的周期整理也不能进入底栏。
     // Fast/water accrue no forced-cleanup debt; ordinary periodic settling also excludes navigation.
-    if(normal&&changing_page&&changed&&s_main_band_count&&!body_full){
-        // 题头、封面和亚克力合并为同一轮校准GL16，不再按上下区域顺序输出。
-        // Present header, covers and acrylic in one calibrated GL16 scan, without serial upper/lower updates.
-        epd_hl_waveform(hl,&E0470_WAVEFORM);use_scan_for(&E0470_WAVEFORM,MODE_GL16);
-        *result=epd_hl_update_area_full(hl,MODE_GL16,25,body_area);
+    if(shelf_regions){
+        // 同一帧逐列选择柔和/校准表，上下和中间一起开始，不显示串行的三段旧图。
+        // Select soft/calibrated LUTs by columns in the same frame so chrome and art start together without three serial old-image regions.
+        EpdRect last=s_main_bands[s_main_band_count-1];
+        int top=s_main_bands[0].y&~31,bottom=(last.y+last.height+31)&~31;
+        if(bottom>UI_NAV_REFRESH_END)bottom=UI_NAV_REFRESH_END;
+        *result=e0470_update_regions(hl,body_area,(EpdRect){0,top,body_area.width,bottom-top},
+            display_main_normal_waveform(),display_main_shelf_waveform(body_full?MODE_GC16:MODE_GL16),
+            body_full?MODE_GC16:MODE_GL16);
+        if(*result==EPD_DRAW_NO_PHASES_AVAILABLE){
+            // 低内存仍一次输出整张目标；不退回分段等待或更改真实back。
+            // Low memory still presents the whole target once, without serial waiting or a fabricated baseline.
+            epd_hl_waveform(hl,display_main_normal_waveform());
+            *result=epd_hl_update_area(hl,MODE_GL16,25,body_area);
+        }
     } else if (water && changing_page && changed) {
         // 水波纹直接输出最终灰阶图，不先刷黑白、不追加整页灰阶；失败由统一恢复处理。
         // Water outputs the final gray target directly, without a BW prepass or a second whole-page gray update; common recovery handles failure.
@@ -626,7 +643,10 @@ static enum EpdDrawError update_display_water_turn_unlocked(EpdiyHighlevelState*
     read_pico_epd_use_scan(READ_PICO_EPD_SCAN_FAST);
     epd_lcd_set_prefill_lines(s_bulk_io ? 127 : 64);
     epd_poweron();
-    enum EpdDrawError result = e0470_page_turn(hl, area, dir);
+    // 通用GL16连相同灰边也会重新压黑；文字序列保持等灰并提前少量回浅，直接用于条带LUT。
+    // Generic GL16 re-drives even equal gray edges; text phases hold them and advance a few settling pulses in the band LUT.
+    enum EpdDrawError result = e0470_page_turn_with_waveform_compact(hl, area, dir,
+        display_reader_text_waveform(), E0470_TURN_FAST_BANDS);
     use_scan_for(&E0470_WAVEFORM, MODE_GL16);
     rails_keepalive();
     if (result == EPD_DRAW_SUCCESS) return result;
@@ -866,6 +886,28 @@ enum EpdDrawError update_display_area_diff_with(
     bool held = pico_online_display_begin();
     enum EpdDrawError result = display_needs_full()
         ? update_display_full_unlocked(hl) : update_display_area_diff_with_unlocked(hl, waveform, mode, area);
+    pico_online_display_end(held);
+    LATENCY_DISPLAY_END();
+    return result;
+}
+
+enum EpdDrawError update_display_click_feedback(EpdiyHighlevelState* hl,EpdRect area) {
+    LATENCY_DISPLAY_BEGIN();
+    bool held=pico_online_display_begin();
+    // 控件只扫自身；显示成功后还原未消费的主页许可，不缓存或回放页面像素。
+    // Scan only the control, then restore the unused main permission without caching or replaying page pixels.
+    const void* owner=s_main_armed;
+    bool shelf=s_main_shelf_page,exit=s_main_shelf_exit,changing=s_main_changing_page;
+    EpdRect bands[3];memcpy(bands,s_main_bands,sizeof(bands));
+    unsigned count=s_main_band_count;
+    bool full=display_needs_full(),restore=owner&&!s_main_fault&&!full;
+    display_main_transition_disarm();
+    enum EpdDrawError result=full?update_display_full_unlocked(hl):
+        update_display_area_diff_with_unlocked(hl,&E0470_FOLLOW_WAVEFORM,MODE_DU,area);
+    if(restore&&result==EPD_DRAW_SUCCESS&&!s_main_fault) {
+        s_main_armed=owner;s_main_shelf_page=shelf;s_main_shelf_exit=exit;
+        s_main_changing_page=changing;s_main_band_count=count;memcpy(s_main_bands,bands,sizeof(bands));
+    }
     pico_online_display_end(held);
     LATENCY_DISPLAY_END();
     return result;

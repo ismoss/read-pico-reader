@@ -291,16 +291,16 @@ void book_layout_set_spacing(unsigned line_percent, unsigned paragraph_percent) 
     s_paragraph_percent = paragraph_percent <= 100 ? paragraph_percent : 50;
 }
 void book_layout_set_typography(int tracking_px) {
-    s_tracking_px = tracking_px >= -4 && tracking_px <= 4 && tracking_px % 2 == 0 ? tracking_px : 0;
+    s_tracking_px = tracking_px >= -15 && tracking_px <= 15 ? tracking_px : 0;
 }
 void book_layout_set_first_line_indent(unsigned em) {
     s_first_line_indent_em = em <= 3 ? em : 2;
 }
 void book_layout_set_first_line_indent_adjust(int px) {
-    s_first_line_indent_adjust_px = px >= -20 && px <= 20 ? px : 0;
+    s_first_line_indent_adjust_px = px >= -100 && px <= 100 ? px : 0;
 }
 EpdRect book_layout_balanced_rect(EpdRect outer, int px, int tracking_px) {
-    if (px <= 0 || outer.width < px || tracking_px < -4 || tracking_px > 4) return outer;
+    if (px <= 0 || outer.width < px || tracking_px < -15 || tracking_px > 15) return outer;
     int step = px + tracking_px;
     if (step <= 0) return outer;
     int columns = 1 + (outer.width - px) / step;
@@ -504,8 +504,9 @@ static bool take_line(size_t off, int advance_limit, int hang_margin, size_t* ne
         // 缩进按当前字体真实全角字宽和字间距计算，不把行高当字宽。
         // Indent by actual full-width advances plus tracking, not by the font's line height.
         slot_select_for(off);
-        int advance = ttf_text_width_px(*px, "　");
-        if (advance <= 0) advance = ttf_text_width_px(*px, "一");
+        // 全角空格在部分字体中不是一个汉字宽，使用正文汉字的实际推进量。
+        // Some faces have a narrow ideographic space; use an actual CJK advance instead.
+        int advance = ttf_text_width_px(*px, "一");
         if (advance <= 0) advance = *px;
         advance += s_tracking_px;
         if (advance < 1) advance = 1;

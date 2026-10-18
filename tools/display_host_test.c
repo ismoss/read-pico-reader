@@ -33,7 +33,8 @@ void heap_caps_free(void* p) {(void)p;assert(false);}
 const EpdWaveform* display_main_gray_waveform(void) {return &E0470_WAVEFORM;}
 const EpdWaveform* display_main_shelf_exit_waveform(void) {return &E0470_WAVEFORM;}
 static const EpdWaveform soft_gray = {4};
-const EpdWaveform* display_reader_text_waveform(void) {return &E0470_WAVEFORM;}
+static const EpdWaveform reader_soft = {5};
+const EpdWaveform* display_reader_text_waveform(void) {return &reader_soft;}
 const EpdWaveform* display_main_water_waveform(void) {return &soft_gray;}
 const EpdWaveform* display_main_normal_waveform(void) { return display_main_water_waveform(); }
 const EpdWaveform* display_main_bw_waveform(void) {return &E0470_WAVEFORM;}
@@ -60,17 +61,17 @@ static enum EpdDrawError water_result;
 static int water_calls;
 static EpdRect last_area;
 
-enum EpdDrawError e0470_page_turn(EpdiyHighlevelState* hl, EpdRect area, e0470_turn_dir_t dir) {
-    assert(ota_display_depth);
-    assert(hl && area.width > 0 && dir == E0470_TURN_RTL);
-    ++water_calls;
-    assert(last_scan == READ_PICO_EPD_SCAN_FAST);
-    return water_result;
+enum EpdDrawError e0470_page_turn(EpdiyHighlevelState* hl,EpdRect area,e0470_turn_dir_t dir) {
+    (void)hl;(void)area;(void)dir;
+    assert(false);return EPD_DRAW_OTHER_ERROR;
 }
-enum EpdDrawError e0470_page_turn_with_waveform_compact(EpdiyHighlevelState* hl, EpdRect area,
-    e0470_turn_dir_t dir, const EpdWaveform* waveform, unsigned bands) {
-    (void)hl; (void)area; (void)dir; (void)waveform; (void)bands;
-    assert(false); return EPD_DRAW_OTHER_ERROR;
+enum EpdDrawError e0470_page_turn_with_waveform_compact(EpdiyHighlevelState* hl,EpdRect area,
+    e0470_turn_dir_t dir,const EpdWaveform* waveform,unsigned bands) {
+    assert(ota_display_depth);
+    assert(hl&&area.width>0&&dir==E0470_TURN_RTL);
+    assert(waveform==&reader_soft&&bands==E0470_TURN_FAST_BANDS);
+    ++water_calls;assert(last_scan==READ_PICO_EPD_SCAN_FAST);
+    return water_result;
 }
 
 void read_pico_epd_set_pclk(int mhz) { ++clocks; safe_clock = mhz; }
@@ -245,6 +246,11 @@ int main(void) {
     memcpy(front, target, FB_BYTES);
     memset(back, 0x55, FB_BYTES);
     water_calls = draws = clears = 0;
+    water_result = EPD_DRAW_SUCCESS;
+    assert(update_display_water_turn(&hl,(EpdRect){0,0,16,16},E0470_TURN_RTL)==EPD_DRAW_SUCCESS);
+    assert(water_calls==1&&!draws&&!clears&&last_scan==READ_PICO_EPD_SCAN_FULL);
+    assert(turn_tick_us==21000&&!ota_display_depth);
+    water_calls=0;
     water_result = EPD_DRAW_NO_PHASES_AVAILABLE;
     assert(update_display_water_turn(&hl, (EpdRect){0, 0, 16, 16}, E0470_TURN_RTL) == EPD_DRAW_SUCCESS);
     assert(water_calls == 1 && draws == 1 && !clears && last_mode == MODE_GL16);

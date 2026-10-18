@@ -283,7 +283,7 @@ static void png_read_mem(png_structp png, png_bytep dst, png_size_t count) {
     input->pos += count;
 }
 static bool png_gray_input(const uint8_t *data, size_t size, FILE *file, unsigned out_width,
-                     unsigned out_height, uint8_t *out) {
+                     unsigned out_height, uint8_t *out, uint8_t *alpha) {
     png_structp png = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
     if (!png) return false;
     png_infop info = png_create_info_struct(png);
@@ -298,13 +298,15 @@ static bool png_gray_input(const uint8_t *data, size_t size, FILE *file, unsigne
     // freeing an uninitialised pointer there would crash.
     scale_step_t *volatile xmap = NULL, *volatile ymap = NULL;
     uint8_t *volatile rows[2] = {NULL, NULL};
+    uint8_t *volatile masks[2] = {NULL, NULL};
     png_input_t input = {data, size, 0, file};
     bool ok = false;
     if (setjmp(png_jmpbuf(png))) goto done;
     png_set_read_fn(png, &input, png_read_mem);
     png_read_info(png, info);
     png_uint_32 width = png_get_image_width(png, info), height = png_get_image_height(png, info);
-    if (!width || !height || width > 8192 || height > 8192) goto done;
+    if (!width || !height || width > 8192 || height > 8192 ||
+        png_get_interlace_type(png, info) != PNG_INTERLACE_NONE) goto done;
     int color = png_get_color_type(png, info), depth = png_get_bit_depth(png, info);
     if (depth == 16) png_set_strip_16(png);
     if (color == PNG_COLOR_TYPE_PALETTE) png_set_palette_to_rgb(png);
@@ -328,8 +330,9 @@ static bool png_gray_input(const uint8_t *data, size_t size, FILE *file, unsigne
         ymap = scale_map(out_height, crop.height);
         rows[0] = cover_alloc(crop.width);
         rows[1] = cover_alloc(crop.width);
+        if (alpha) { masks[0] = cover_alloc(crop.width); masks[1] = cover_alloc(crop.width); }
     }
-    if (xmap && ymap && rows[0] && rows[1]) {
+    if (xmap && ymap && rows[0] && rows[1] && (!alpha || (masks[0] && masks[1]))) {
         for (png_uint_32 y = 0; y < height; ++y) {
             png_read_row(png, row, NULL);
             decode_yield((unsigned)y);
@@ -339,7 +342,9 @@ static bool png_gray_input(const uint8_t *data, size_t size, FILE *file, unsigne
             for (unsigned x = 0; x < crop.width; ++x) {
                 const uint8_t *p = row + (size_t)(crop.x + x) * 4;
                 const uint8_t gray = luminance(p[0], p[1], p[2]);
-                cur[x] = (uint8_t)(((unsigned)gray * p[3] + 255u * (255u - p[3])) / 255u);
+                // 透明层保留预乘灰度与独立alpha，避免缩放后出现白边。/ Preserve premultiplied gray and alpha for layers, avoiding white scaling fringes.
+                cur[x] = (uint8_t)(((unsigned)gray * p[3] + (alpha ? 0 : 255u * (255u - p[3])) + 127u) / 255u);
+                if (alpha) masks[wy & 1][x] = p[3];
             }
             // 两行都齐了的目标行可以一次输出完：同一源行可能对应多个目标行（放大时）。
             // Every destination row whose two source rows are now present can be emitted: one source
@@ -353,6 +358,8 @@ static bool png_gray_input(const uint8_t *data, size_t size, FILE *file, unsigne
                     const int sx = xmap[x].at, fx = xmap[x].frac;
                     const int sx1 = scale_next(sx, crop.width);
                     out[next_y * out_width + x] = bilinear4(r0[sx], r0[sx1], r1[sx], r1[sx1], fx, fy);
+                    if (alpha) alpha[next_y * out_width + x] = bilinear4(masks[sy & 1][sx], masks[sy & 1][sx1],
+                        masks[sy1 & 1][sx], masks[sy1 & 1][sx1], fx, fy);
                 }
                 ++next_y;
             }
@@ -364,6 +371,7 @@ done:
     free(ymap);
     free(rows[0]);
     free(rows[1]);
+    free((void *)masks[0]); free((void *)masks[1]);
     free((void *)row);
     png_destroy_read_struct(&png, &info, NULL);
     return ok;
@@ -379,7 +387,7 @@ bool book_image_grayscale(const uint8_t *data, size_t size, bool png,
     if (!data || !size || !out || !out_width || !out_height ||
         out_width > 1216 || out_height > 1216 || (size_t)out_width * out_height > 684u * 1216u)
         return false;
-    return png ? png_gray_input(data, size, NULL, out_width, out_height, out)
+    return png ? png_gray_input(data, size, NULL, out_width, out_height, out, NULL)
                : jpeg_gray(data, size, out_width, out_height, out);
 }
 
@@ -748,7 +756,7 @@ bool book_image_file_grayscale(const char *path, bool png, unsigned width, unsig
     FILE *file = fopen(path, "rb");
     if (!file) return false;
     bool ok = false;
-    if (png) ok = png_gray_input(NULL, (size_t)st.st_size, file, width, height, out);
+    if (png) ok = png_gray_input(NULL, (size_t)st.st_size, file, width, height, out, NULL);
     else {
         uint8_t sof = 0;
         unsigned source_w = 0, source_h = 0;
@@ -804,4 +812,16 @@ void book_cover_fast_cache_write(const char *p,const char *t,const char *a,book_
 }
 void book_cover_fast_cache_write_checked(const char *p,const char *t,const char *a,book_fast_cover_key_t key,const uint8_t *pixels,bool edge,int64_t size,int64_t modified) {
     fast_cache_write(p,t,a,key,pixels,edge,size,modified);
+}
+
+// 与壁纸解码共用行窗口，不保留整张源RGBA图。/ Reuse wallpaper row windows without retaining full-source RGBA.
+bool book_png_file_layer(const char *path, unsigned width, unsigned height, uint8_t *gray, uint8_t *alpha) {
+    struct stat st;
+    if (!path || !gray || !alpha || !width || !height || width > 684 || height > 1216 ||
+        stat(path, &st) || st.st_size <= 0 || (uint64_t)st.st_size > BOOK_IMAGE_FILE_MAX) return false;
+    FILE *file = fopen(path, "rb");
+    if (!file) return false;
+    bool ok = png_gray_input(NULL, (size_t)st.st_size, file, width, height, gray, alpha);
+    fclose(file);
+    return ok;
 }

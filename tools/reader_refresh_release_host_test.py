@@ -14,12 +14,19 @@ with tempfile.TemporaryDirectory(dir='/private/tmp') as folder:
     for name in ('present','turn_page','reader_area','reader_fullscreen_progress_area','reader_clock_tick','reader_manual_refresh'):
         current=function(name,root/'main/apps/app_book.c');baseline=function(name,original)
         if name=='present':
+            current=current.replace('    if(reader_indent_present(ctx,redraw))return true;\n','')
             # 只允许撤回自动清屏的两段输出，其他普通翻页路由仍与正式基线相同。
             # Only remove the two-stage automatic cleanup; retain the release baseline's other turn paths.
             begin=baseline.index('    else if(s_reader_cleanup&&s_reader_turn_pending')
             end=baseline.index('    else if (redraw == APP_REDRAW_FULL || s_reader_cleanup)',begin)
             baseline=baseline[:begin]+baseline[end:]
             current=current.replace("        !(redraw == APP_REDRAW_AREA && (s_shelf_feedback_pending || s_cover_batch_present_pending))) {\n        prepare_covers(ctx);\n        gather_cover_entry(ctx);\n    }", "        !(redraw == APP_REDRAW_AREA && (s_shelf_feedback_pending || s_cover_batch_present_pending))) prepare_covers(ctx);")
+            begin=current.index('    if(s_shelf_key_paint_pending &&')
+            end=current.index('    if (s_reader_clock_pending)',begin)
+            current=current[:begin]+current[end:]
+            begin=current.index('    else if (s_reader_cleanup && redraw != APP_REDRAW_FULL)')
+            end=current.index('    else if (redraw == APP_REDRAW_FULL) err = update_display_full(ctx->hl);',begin)
+            current=current[:begin]+'    else if (redraw == APP_REDRAW_FULL || s_reader_cleanup) err = update_display_full(ctx->hl);'+current[end+len('    else if (redraw == APP_REDRAW_FULL) err = update_display_full(ctx->hl);'):]
             current=current.replace('    reader_prefetch_end(prep);',
                                     '    if (prep) xSemaphoreTake(s_prep_done, portMAX_DELAY);')
         assert current==baseline,name
@@ -91,6 +98,8 @@ static void e0470_page_turn_set_tick_us(int t){assert(t==11090);}
 #define update_display_water_turn(...) push(18)
 #define update_display_fast_page(...) push(19)
 '''
+unit+='static bool s_shelf_key_paint_pending;\n'
+unit+='static bool reader_indent_present(app_ctx_t *ctx,app_redraw_t redraw){(void)ctx;(void)redraw;return false;}\n'
 unit+=function('present',root/'main/apps/app_book.c')
 unit+=r'''
 static void reset(void){
@@ -109,7 +118,7 @@ int main(void){
  }
  for(int full=0;full<2;++full){
   reset();s_reader_fullscreen=full;s_reader_cleanup=true;
-  assert(present(&ctx,APP_REDRAW_AREA));assert(calls==1&&selected==12&&s_reader_text_frame);
+  assert(present(&ctx,APP_REDRAW_AREA));assert(calls==1&&selected==14&&s_reader_text_frame);
   assert(!s_reader_cleanup&&!s_reader_turn_pending);
  }
  reset();s_reader_turn_pending=false;present(&ctx,APP_REDRAW_FULL);assert(calls==1&&selected==12&&rendered==1);
@@ -125,8 +134,10 @@ int main(void){
  reset();s_reader_clock_pending=true;s_reader_fullscreen=false;s_reader_turn_pending=false;
  s_reader_clock_painted_minute=321;
  present(&ctx,APP_REDRAW_AREA);assert(calls==1&&selected==13&&s_reader_clock_minute==321&&!s_reader_clock_pending);
+ reset();s_view=s_presented_view=SHELF;s_shelf_key_paint_pending=true;
+ present(&ctx,APP_REDRAW_AREA);assert(calls==1&&selected==13&&!s_shelf_key_paint_pending&&!prepares);
  reset();ctx.request_app=true;present(&ctx,APP_REDRAW_AREA);assert(calls==0);ctx.request_app=false;
- puts("PASS: manual/periodic original GC16 each use one full output and no footer replay; ordinary turns, ripple, images, clock and cancellation unchanged");
+ puts("PASS: manual rc90/periodic complete GC16 each use one full output and no footer replay; ordinary turns, ripple, images, clock and cancellation unchanged");
 }
 '''
 with tempfile.TemporaryDirectory(prefix='kiikoread-reader-release-',dir='/private/tmp') as folder:

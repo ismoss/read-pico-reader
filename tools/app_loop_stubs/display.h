@@ -3,3 +3,5 @@
 #include "common.h"
 
 void display_request_full_refresh(void);
+
+enum EpdDrawError update_display_click_feedback(EpdiyHighlevelState* hl,EpdRect area);

@@ -3,6 +3,75 @@
 按版本简述对用户可见的变化；使用方法见 [README](../README.zh-CN.md)。
 User-visible changes by release; see [README](../README.md) for usage.
 
+
+## 0.3.3-rc96 / 2026-10-18
+
+- 设置页题头与列表外围改为纯白。普通模式进入设置及周期整理复用书架的同轮分区刷新：状态栏/题头柔和，列表白色仅向白擦除，保留内容灰阶；普通列表滑动使用柔和差分，手动全刷及原离散滚动保持。
+  Keep settings chrome and list whitespace white. Ordinary entry/periodic cleanup share the shelf's simultaneous scan: soft status/title, directional white-list erasure and retained content grays. Use soft ordinary list differences while retaining manual full refresh and discrete scrolling.
+
+- 启动记录改为按路径实际长度保存，兼容旧记录；NVS不足时只回收本模块旧检查点再尝试写入，保留设置、配对、书签与进度。普通版忽略不支持的缓存恢复入口，真实TXT/EPUB仍需成功记录后才允许开书，断电/解析失败保护继续生效。
+  Store compact startup records by actual path length with legacy migration. On low NVS space reclaim only the old checkpoint; preserve settings, bonds, bookmarks and progress. Ignore unsupported cache recovery entries while requiring a successful checkpoint before TXT/EPUB parsing.
+
+- 书架留白改为纯白；普通切页白像素仅向白擦除，封面/材质其余十五级保留校准序列，同步输出与手动全刷不变。
+  Keep shelf whitespace white and whiten it directionally during ordinary transitions. Retain calibrated art grays, simultaneous output and manual full-refresh quality.
+
+- 快捷蓝牙按钮支持未连接时再次关闭，并取消未启动的最近设备连接请求；快捷全刷直接输出当前合成画面，省去底页重绘和玻璃重新计算。
+  Toggle quick Bluetooth off even before connection and cancel an unstarted recent-peer request. Quick full refresh presents the composed frame directly without re-rendering the underlay or regenerating glass.
+
+- 普通书架改为同步分区输出：题头、封面/材质、分页与选中横条在同一轮逐相呈现，取消先刷上下再刷中间的三段等待；外侧保留柔和刷新，中间保留原校准灰阶及周期清理，临时PSRAM仅2048B，失败统一恢复。
+  Present ordinary shelf chrome, calibrated artwork, pagination and the selection marker in shared scan phases instead of three serial regions. Retain soft outer output, calibrated middle phases and periodic cleanup, with 2048 temporary PSRAM bytes and common failure recovery.
+
+- 阅读字号扩展为18–90px、每档1px，设置/备份/逐书进度统一范围；普通模式进入书架时，强灰阶整理只限封面与书架材质区域，状态栏、题头和分页采用柔和差分刷新。
+  Extend reader type size to 18–90px in one-pixel steps across controls, settings, backups and per-book progress. Ordinary shelf entry confines strong grayscale settling to cover/furniture art; status, title and pagination use soft differential output.
+
+- 下拉快捷菜单按下即给圆内局部反馈；Wi-Fi和蓝牙状态仅刷新对应圆键及必要的状态栏，不重画底页或重复生成玻璃。四圆键缓存关闭即释放。蓝牙按钮开启蓝牙并异步连接最近成功使用的翻页器，保留网络内存保护、重试退避和设置页关闭入口。
+  Acknowledge quick-control presses locally; update Wi-Fi/Bluetooth keys and the necessary status strip without repainting the page or regenerating glass. Release four small key caches on close. Bluetooth enables and asynchronously reconnects the most recently successful turner, retaining network-memory guards, retry backoff and the Settings off switch.
+
+- 顶部下拉快捷菜单及四个圆键采用与密码锁屏一致的液态玻璃，保留清晰底图和状态栏；三个主页模式统一灰阶，临时PSRAM绘完即释放，内存不足退回清晰实心控件。
+  Share PIN-style liquid glass with the top quick panel and its four controls, keeping artwork/status crisp and grayscale in all main modes. Free temporary PSRAM after painting, with legible solid controls on low memory.
+
+- 刷回普通版时，书架、首页续读和启动恢复会忽略其他书源的缓存清单，仅接收TXT/EPUB；保留原缓存与进度，避免不可读条目占用入口。
+  When returning to the standard firmware, ignore other-source manifests in shelf history, Home continuation and startup requests; retain caches and progress while admitting TXT/EPUB only.
+
+- 参考 MokuReader，为关机滑条、重启/取消圆钮和密码锁屏数字圆键增加液态玻璃效果；保留清晰页面底图，玻璃内加入模糊、边缘折射和亮边。滑动/输入只恢复局部4位灰阶缓存，关闭释放，内存不足退回实心控件。
+  Adapt MokuReader liquid glass for power controls and PIN keys, retaining sharp background artwork with blur/refraction/highlights inside the controls. Input restores local packed grayscale snapshots without reblurring; close releases caches and low memory falls back to solid controls.
+
+- 段距扩展为11档，25%位于中间；字间距扩展为−15..+15px、每档1px，0px居中。旧设置与备份按实际间距迁移，旧+16px收敛为+15px。
+  Center 25% among eleven paragraph-gap stops and 0px among 31 tracking stops (−15..+15px). Migrate saved spacing by physical value, clamping legacy +16px to +15px.
+
+- 非全屏阅读题头的收藏图标统一使用 AnimateIcons Bookmark / Bookmark Plus，已收藏显示加号书签，保留原收藏逻辑、触控范围与局部刷新。
+  Use AnimateIcons Bookmark/Bookmark Plus for unsaved/saved header favorites while preserving favorite storage, hit targets and local presentation.
+  修复图标生成器遗漏 SVG 线段数字坐标属性的问题，确保收藏后的加号实际显示。
+  Preserve numeric SVG line attributes so the saved favorite's plus is visible in the generated artwork.
+
+- 全部圆形返回键统一使用 AnimateIcons Circle Chevron Left，包括系统子页与阅读面板；按压保留原位和圆内反馈。
+  System and reader-sheet circular backs share AnimateIcons Circle Chevron Left, retaining their positions and interior press tint.
+- 底栏四图标恢复按下放大、随后回位；当前页、待切页和加载中的点击均有独立局部反馈，快速连点同一图标可重触发。
+  Restore footer enlargement/settle on every contact, including active/pending/loading pages and rapid repeated taps, with local feedback independent of navigation.
+
+- 阅读纯文字水波纹改用文字专用灰阶序列，保持未变化的抗锯齿边缘，并减轻灰色笔画先加深再回浅的过渡；保留最终字形、8条带、11090us节拍及原有全刷/插图/失败恢复。
+  Text-only ripple shares the existing softened text phases, holding unchanged antialias pixels and reducing dark-edge transients while preserving glyph targets, eight bands/11090us, cleanup, image and recovery paths.
+
+- 首行缩进微调支持长按加减，保持每步1px，松手后统一重排并保存；增加按钮下沿触控容错，排版空白不再误触“返回字体设置”，滑出、多指、锁屏与切页取消连续调整。
+  Hold the indent adjustment buttons for 1px repeats, reflow/save once on release, tolerate lower-edge taps and keep layout gaps inert; leaving, multitouch, lock or navigation cancels repetition.
+
+- 分页栏采用 AnimateIcons 的 Left/Right/First/Last 轮廓，首末页改为止点竖线；书架与文件管理分页栏上移，目录列表保留独立点击区域。
+  Share AnimateIcons chevrons and first/last stop bars, raise shelf/file pagination and keep directory rows separate from paging targets.
+- TF 目录移除“设为书籍目录”和“设为字体目录”；统一读取 books/fonts，旧设置与备份按固定目录使用，移动/改名/删除仍可用。
+  Remove custom media-root actions and retain fixed books/fonts roots across legacy settings/restores, while preserving ordinary file management.
+
+- 文件管理与书架共用“最前 / 上一页 / 下一页 / 最后”分页栏，书架保留书籍数量和页码；箭头加大，按键分页轮廓加粗，按压仅局部刷新。
+
+- 阅读边距恢复九个真实像素档位，横排、竖排均保留中间值；首行缩进按正文汉字宽度计算，微调扩展至 ±100 px，并兼容旧配置。
+- 字间距扩展至 −15～+15 px，每档 1 px，0 px 居中；旧设置与备份按实际间距迁移，旧 +16 px 就近收敛为 +15 px。
+- 主页面左右按键切换页面，中键长按全刷；书架中键短按进入或退出分页控制，沿分页箭头轮廓描边并提供局部按压反馈，可随时切页中断。
+- 阅读字体名称直接使用所选阅读字体预览；补齐“抗锯齿”的原生轮廓字形，界面标签不受正文抗锯齿开关影响。
+- 字重微调继续每档 1/16 px，改用轮廓距离扩张，减少额外的灰色边缘。
+- 自动全刷使用完整灰阶定稿的一次输出；手动全刷保留 rc90 路径。
+- 深睡恢复复用已验证的实际锁屏帧，减少开机推屏和重复字体装载；旧缓存、缺卡或校验失败沿用安全启动路径。
+- 锁屏新增透明 PNG 书封，以锁屏前的当前页面为底，保留 PNG 原画布比例和透明度，加入轻微悬浮阴影。推荐 684 × 1216 px，文件放入 TF 卡 pictures 目录。
+- 白底 PNG 自动去掉与画布边缘连通的白色背景，保留封闭图案内部白色；已有透明度的 PNG 沿用原始透明通道。
+
 ## 0.3.3-rc95 / 2026-10-16
 
 - 修复无变化差分或异常返回后像素驱动可能保持开启的问题：结束时统一释放驱动，短暂 I2C 失败有界重试，避免静止白底持续受驱动；不增加刷新或改变波形、电压与画质。

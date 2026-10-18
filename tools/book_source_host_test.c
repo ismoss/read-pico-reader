@@ -76,6 +76,10 @@ int main(int argc, char **argv) {
     assert(book_open("/tmp/missing.unknown") == ESP_ERR_NOT_SUPPORTED);
     assert(book_chapter_count() == 0);
     for (int a = 1; a < argc; ++a) {
+        // 不支持的旧清单失败后，下一本正常书仍可解析；循环覆盖句柄/书源恢复。
+        // An unsupported old manifest must not poison the next real book or leak source state.
+        assert(book_open("/sdcard/.cache/catalog.wread") == ESP_ERR_NOT_SUPPORTED);
+        assert(book_open("/sdcard/.cache/catolog.weread") == ESP_ERR_NOT_SUPPORTED);
         assert(book_open(argv[a]) == ESP_OK); assert(book_chapter_count() > 0);
         bool epub = strstr(argv[a], ".epub") != NULL;
         assert(book_kind() == (epub ? BOOK_KIND_EPUB : BOOK_KIND_TXT));

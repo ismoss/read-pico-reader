@@ -5,7 +5,7 @@
 (() => {
   const screens = {
     home: {label: "首页", styles: [
-      {label: "最近阅读书夹", asset: "home-rc95-folder", caption: "rc95 首页：阅读时长、目标圆环与资料卡头像，续读卡片搭配最近三本书和月阅读记录。"},
+      {label: "最近阅读书夹", asset: "home-rc95-folder", caption: "rc96 首页：阅读时长、目标圆环与资料卡头像，续读卡片搭配最近三本书和月阅读记录。"},
       {label: "经典时钟", asset: "home-rc95-clock", caption: "经典时钟与月阅读记录并排，续读卡片保留书摘、作者和阅读进度。"},
       {label: "圆形月相", asset: "home-rc95-moon", caption: "圆形月相刻度时钟，搭配右侧月历；首页组件可在设备上切换。"},
       {label: "亚克力圆钟", asset: "home-rc95-kehai", caption: "磨砂表盘、长短指针与圆点秒针，沿用正式版的亚克力圆钟样式。"},

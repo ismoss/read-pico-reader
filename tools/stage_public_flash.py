@@ -42,6 +42,8 @@ def stage(output: Path, ota_origin: str | None = None) -> None:
     # 中文：只复制仓库中的公开说明书（正文、检索索引、图解、PDF）。
     # English: Copy the curated public manual, never its local rendering/debug workspace.
     shutil.copytree(FLASH / "manual", output / "manual", dirs_exist_ok=True)
+    if (FLASH / "new-features").is_dir():
+        shutil.copytree(FLASH / "new-features", output / "new-features", dirs_exist_ok=True)
     version = json.loads((FLASH / "manifest.json").read_text())["version"]
     versioned = FLASH / f"Pico-update-{version}.bin"
     if versioned.is_file(): shutil.copy2(versioned, output / versioned.name)
@@ -82,6 +84,7 @@ def stage(output: Path, ota_origin: str | None = None) -> None:
         ROOT / "components/read_pico_search/LICENSE.pypinyin": "PYPINYIN-MIT.txt",
         ROOT / "main/assets/OFL-Noto.txt": "OFL-Noto.txt",
         ROOT / "licenses/CrossMux-MIT.txt": "CROSSMUX-MIT.txt",
+        ROOT / "licenses/AnimateIcons-MIT.txt": "AnimateIcons-MIT.txt",
         ROOT / "licenses/FreeInk-SDK-MIT.txt": "FREEINK-SDK-MIT.txt",
     }
     (output / "licenses").mkdir(exist_ok=True)

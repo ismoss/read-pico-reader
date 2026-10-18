@@ -33,7 +33,16 @@ enum EpdFontFlags {EPD_DRAW_ALIGN_LEFT,EPD_DRAW_ALIGN_CENTER,EPD_DRAW_ALIGN_RIGH
 #define BOOK_PX_MIN 24
 #define BOOK_PX_MAX 60
 enum {UI_ICON_CHEVRON_RIGHT,UI_ICON_ROTATE_CW};
+#define TTF_FONT_NAME_MAX 64
+#define TTF_FONT_SLOT_SYSTEM 0
 static unsigned scale=100,face;
+static int selected_slot=2;
+static bool antialias;
+static bool ttf_get_antialias(void){return antialias;}
+static void ttf_set_antialias(bool on){antialias=on;}
+static int ttf_font_select(int slot){int keep=selected_slot;selected_slot=slot;return keep;}
+static int ttf_text_width_px(int px,const char *text);
+
 static bool scaling=true,s_system_ttf;
 static unsigned glyphs;
 static EpdRect last_box;
@@ -54,7 +63,15 @@ static void ui_text_fixed_vc(uint8_t *fb,int x,int cy,int px,const char *text,en
  assert(baseline-above>=last_box.y&&baseline+below<=last_box.y+last_box.height);
  assert(!strchr(text,'\n'));++glyphs;
 }
+static int ttf_text_width_px(int px,const char *text){return ui_text_fixed_width_px(px,text);}
+static void ttf_draw_text_px(uint8_t *fb,int x,int baseline,int px,const char *text,enum EpdFontFlags a,int fg,int bg){
+ (void)fb;(void)a;assert(antialias&&selected_slot==0&&fg==0&&bg==15);
+ int above,below;ttf_measure_line_px(px,text,&above,&below);
+ assert(x>=last_box.x&&x+ttf_text_width_px(px,text)<=last_box.x+last_box.width);
+ assert(baseline-above>=last_box.y&&baseline+below<=last_box.y+last_box.height);++glyphs;
+}
 static void epd_fill_rect(EpdRect r,int color,uint8_t *fb){(void)r;(void)color;(void)fb;}
+static void ui_fill_rect_fast(EpdRect r,int color,uint8_t *fb){epd_fill_rect(r,color,fb);}
 static void epd_fill_circle(int x,int y,int radius,int color,uint8_t *fb){(void)x;(void)y;(void)radius;(void)color;(void)fb;}
 static void epd_draw_circle(int x,int y,int radius,int color,uint8_t *fb){epd_fill_circle(x,y,radius,color,fb);}
 static void ui_fill_round_rect(uint8_t *fb,EpdRect r,int radius,int color){(void)fb;(void)radius;(void)color;assert(r.x>=0&&r.x+r.width<=684&&r.y>=0);}
@@ -82,8 +99,15 @@ static void ui_text_box(uint8_t *fb,EpdRect box,int px,const char *text,enum Epd
  assert(box.width>0&&box.height>0);last_box=box;actual_text_box(fb,box,px,text,align,inv);
 }
 '''
+unit+=function('draw_reading_font_name',book).replace('static void draw_reading_font_name(', 'static void actual_reading_font_name(')+'\n'
+unit+=r'''
+static void draw_reading_font_name(uint8_t *fb,EpdRect box,const char *text){
+ last_box=box;int old_slot=selected_slot;bool old_aa=antialias;
+ actual_reading_font_name(fb,box,text);assert(selected_slot==old_slot&&antialias==old_aa);
+}
+'''
 unit+=function('draw_sheet',book)+'\n'
-for name in ('fit_fixed_text','reader_ui_extra','reader_font_top','reader_font_card','reader_slider_rect',
+for name in ('reader_ui_extra','reader_font_top','reader_font_card','reader_slider_rect',
              'draw_pill_slider','draw_font_pair','reading_setting_rect','reading_settings_top',
              'reading_toggle_rect','draw_reading_switch','draw_reading_card','draw_reading_toggle'):
     unit+=function(name,book)+'\n'
@@ -98,7 +122,7 @@ unit+=r'''
 static bool overlap(EpdRect a,EpdRect b){return a.x<b.x+b.width&&b.x<a.x+a.width&&a.y<b.y+b.height&&b.y<a.y+a.height;}
 int main(void){uint8_t fb[1]={0};
  for(face=0;face<3;++face)for(scale=100;scale<=200;scale+=10){
-   draw_font_settings(fb);draw_reading_settings(fb);
+   draw_font_settings(fb);assert(!antialias&&selected_slot==2);draw_reading_settings(fb);
    for(int i=0;i<6;++i){EpdRect a=reader_font_card(i);assert(a.y>=reader_font_top()+100&&a.y+a.height<1141);for(int j=0;j<i;++j)assert(!overlap(a,reader_font_card(j)));}
    EpdRect slider=reader_slider_rect(0);assert(slider.y>reader_font_top()+100&&slider.y+slider.height<reader_font_card(0).y);
    for(int i=0;i<8;++i){EpdRect a=reading_setting_rect(i);assert(a.y>=reading_settings_top()+100&&a.y+a.height<1141);for(int j=0;j<i;++j)assert(!overlap(a,reading_setting_rect(j)));}

@@ -18,6 +18,9 @@
 #include "app_loop.h"
 #include "app_content_open.h"
 #include "boot_state.h"
+#include "lock_screen.h"
+#include "lock_pin.h"
+#include "ttf_font.h"
 #include "book_store.h"
 #include "esp_system.h"
 #include "read_pico_sd.h"
@@ -98,6 +101,17 @@ static bool images_match_panel(void) {
     return false;
 }
 
+// 缓存验证失败时继续原开机路径，不假设未知屏幕已经全白。
+// A rejected cache keeps the original startup path; never assume an unknown panel is white.
+static bool restore_retained_lock(EpdiyHighlevelState *hl,uint8_t *framebuffer) {
+    read_pico_sd_info_t info;
+    for(unsigned wait=0;wait<150 && read_pico_sd_get_info(&info)==ESP_ERR_NOT_FINISHED;++wait)
+        vTaskDelay(pdMS_TO_TICKS(20));
+    if(!lock_screen_restore(framebuffer))return false;
+    memcpy(hl->back_fb,framebuffer,(size_t)epd_width()*epd_height()/2);
+    return true;
+}
+
 void app_main(void) {
     // 共享 TF 卡期间复位后，先把内部 PHY 交回串口，再清理已用完的 BOOT 请求。
     // Reclaim Serial/JTAG after a reset during card sharing, then clear the served BOOT request.
@@ -124,15 +138,26 @@ void app_main(void) {
     EpdiyHighlevelState hl = hw.hl;
     uint8_t* framebuffer = hw.framebuffer;
 
-    epd_poweron();
-    read_pico_i2c_census_take();
-    epd_clear();
-    epd_hl_set_all_white(&hl);
-    ui_draw_full_image(framebuffer, loading_4bpp_bin_start);
-    update_display_from_white(&hl);
+    // 深睡保留屏幕已有画面：验证缓存后同时恢复前后帧，省去清白和开机图两次推屏。
+    // Deep sleep retains the panel image: validate its cache and restore both references, skipping white erase and splash output.
+    const bool resuming = pico_boot_has_resume();
+    bool restored_lock = false;
+    if(resuming && vcom_ok && !lock_pin_enabled() && pico_boot_resume_frame_cached()) {
+        restored_lock=restore_retained_lock(&hl,framebuffer);
+    }
+    if(!restored_lock) {
+        epd_poweron();
+        if(!resuming)read_pico_i2c_census_take();
+        epd_clear();
+        epd_hl_set_all_white(&hl);
+        ui_draw_full_image(framebuffer,loading_4bpp_bin_start);
+        update_display_from_white(&hl);
+    }
     rp_boot_mark("splash");
-
-    app_font_activate_system();
+    // 直接续读不先加载整份系统字体；密码验证仍先使用所选系统字体。
+    // Direct reader resume skips loading the whole system face first; PIN authentication still uses the selected UI face.
+    if(!resuming || lock_pin_enabled())app_font_activate_system();
+    else (void)ttf_font_open_builtin();
     rp_boot_mark("font");
 
     if (!hw.touch_ready) {
@@ -151,7 +176,7 @@ void app_main(void) {
     app_lock_boot_gate(&hl, hw.touch, hw.sensor);
     rp_boot_mark("lock");
     const app_desc_t *first = app_home_page();
-    pico_resume_t resume;
+    pico_resume_t resume = {0};
     if (pico_boot_take_resume(&resume)) {
         if (!resume.reader) first = app_at(resume.tab);
         else {
@@ -173,6 +198,10 @@ void app_main(void) {
     }
     char interrupted[PICO_BOOT_PATH_MAX];
     if (pico_boot_interrupted_book(interrupted, sizeof(interrupted))) first = &app_boot_recovery;
+    if(resuming && !lock_pin_enabled()) {
+        if(first==app_at(1) && resume.reader)app_font_activate_reading();
+        else app_font_activate_system();
+    }
     rp_boot_mark("resume");
     app_loop_run(&(app_loop_config_t){
         .hl = &hl,

@@ -101,6 +101,8 @@ enum EpdDrawError update_display_area_with(
 /// 动画定稿只驱动真实差异，不强制把区域内所有 GL16 像素重刷。
 /// Animation settle drives real differences only instead of forcing every GL16 pixel in the area.
 /// 在指定区域驱动全部像素，用于局部定稿和清残影。/ Drive all pixels within an area for local settling and ghost cleanup.
+/// 控件局部反馈暂存后续主页刷新入口，不提前消耗其裁剪、灰阶和底栏保护。/ Local control feedback preserves the pending main crop, gray policy and footer protection.
+enum EpdDrawError update_display_click_feedback(EpdiyHighlevelState* hl,EpdRect area);
 enum EpdDrawError update_display_area_full_with(
     EpdiyHighlevelState* hl, const EpdWaveform* waveform, enum EpdDrawMode mode,
     EpdRect area
@@ -110,7 +112,8 @@ enum EpdDrawError update_display_area_diff_with(
     EpdRect area
 );
 /// 阅读页可选的真实错相 GL16 翻页；缺相位时回退现有 GL16，失败时恢复基准帧。
-/// Optional staggered GL16 reader turn; fall back on missing phases and recover the baseline after failure.
+/// 纯文字水波纹复用柔和文字灰边，8带节拍不变；缺相回退GL16，扫描失败重建真实基准。
+/// Staggered text phases retain eight-band pacing, hold unchanged grays and soften edge transients; missing phases fall back and failures rebuild the baseline.
 enum EpdDrawError update_display_water_turn(EpdiyHighlevelState* hl, EpdRect area,
                                              e0470_turn_dir_t dir);
 /// 动画中间帧使用灰阶波形，但不累计周期清屏计数；动画最终帧走普通刷新出口。

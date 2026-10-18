@@ -15,6 +15,7 @@
  */
 
 #include "settings.h"
+#include "book/book_font_size.h"
 
 #include <stdio.h>
 #include <stddef.h>
@@ -22,6 +23,7 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <string.h>
+#include <strings.h>
 
 #include "esp_log.h"
 #include "nvs.h"
@@ -48,6 +50,7 @@
 #define NVS_KEY_SYS_CONTRAST "sys_contrast"
 #define NVS_KEY_LOCK_STYLE "lock_ui"
 #define NVS_KEY_WALLPAPER "wallpaper"
+#define NVS_KEY_BOOKMARK "lock_png"
 #define NVS_KEY_WAKE "lwake"
 #define NVS_KEY_BOOT "lboot"
 #define NVS_KEY_PICKUP "pickup"
@@ -99,6 +102,7 @@ static uint8_t s_system_size = 120;
 static uint8_t s_system_contrast = 100;
 static uint8_t s_lock_style;
 static char s_wallpaper[288];
+static char s_bookmark[288];
 static uint8_t s_last_wake;
 static uint8_t s_last_boot;
 static bool s_pickup_wake;
@@ -128,13 +132,13 @@ static bool s_book_fonts = true;
 // Vertical setting defaults off: only readers who want it turn it on, and horizontal type is
 // untouched.
 static bool s_book_vertical;
-static uint8_t s_book_tracking = 2, s_book_reading_line, s_book_rule_offset = 4;
+static uint8_t s_book_tracking = -APP_BOOK_TRACK_MIN, s_book_reading_line, s_book_rule_offset = 4;
 static uint8_t s_book_indent = 2;
 static uint8_t s_book_indent_adjust = 20;
 static uint8_t s_auto_lock_minutes;
 static uint8_t s_shelf_style = 2;
-static char s_books_dir[MEDIA_DIR_MAX] = "/sdcard/books";
-static char s_fonts_dir[MEDIA_DIR_MAX] = "/sdcard/fonts";
+static const char s_books_dir[MEDIA_DIR_MAX] = "/sdcard/books";
+static const char s_fonts_dir[MEDIA_DIR_MAX] = "/sdcard/fonts";
 static void nvs_put_u8(const char* key, uint8_t value);
 
 static bool valid_media_dir(const char* path) {
@@ -155,20 +159,8 @@ static bool valid_media_dir(const char* path) {
     return true;
 }
 
-static bool set_media_dir(char *dst, const char *key, const char *path) {
-    if (!valid_media_dir(path)) return false;
-    nvs_handle_t h;
-    if (nvs_open(NVS_NS, NVS_READWRITE, &h) != ESP_OK) return false;
-    esp_err_t err = nvs_set_str(h, key, path);
-    if (err == ESP_OK) err = nvs_commit(h);
-    nvs_close(h);
-    if (err != ESP_OK) return false;
-    strlcpy(dst, path, MEDIA_DIR_MAX);
-    return true;
-}
-
 static uint8_t valid_book_px(uint8_t px) {
-    return px >= 36 && px <= 72 ? px : 48;
+    return px >= BOOK_READER_PX_MIN && px <= BOOK_READER_PX_MAX ? px : 48;
 }
 
 void app_settings_init(void) {
@@ -230,11 +222,13 @@ void app_settings_init(void) {
         system_contrast >= 100 && system_contrast <= 140 && system_contrast % 10 == 0)
         s_system_contrast = system_contrast;
     uint8_t lock_style = 0;
-    if (nvs_get_u8(h, NVS_KEY_LOCK_STYLE, &lock_style) == ESP_OK && lock_style <= 2)
+    if (nvs_get_u8(h, NVS_KEY_LOCK_STYLE, &lock_style) == ESP_OK && lock_style <= 3)
         s_lock_style = lock_style;
     size_t wallpaper_len = sizeof(s_wallpaper);
     if (nvs_get_str(h, NVS_KEY_WALLPAPER, s_wallpaper, &wallpaper_len) != ESP_OK ||
         strncmp(s_wallpaper, "/sdcard/", 8)) s_wallpaper[0] = 0;
+    size_t bookmark_len = sizeof(s_bookmark);
+    if (nvs_get_str(h,NVS_KEY_BOOKMARK,s_bookmark,&bookmark_len)!=ESP_OK || strncmp(s_bookmark,"/sdcard/",8)) s_bookmark[0]=0;
     uint8_t wake = 0;
     if (nvs_get_u8(h, NVS_KEY_WAKE, &wake) == ESP_OK) s_last_wake = wake;
     uint8_t boot = 0;
@@ -289,23 +283,30 @@ void app_settings_init(void) {
     if (nvs_get_u8(h, NVS_KEY_SHELF_RECENT, &recent_sort) == ESP_OK) s_shelf_recent_sort = recent_sort == 1;
     if (nvs_get_u8(h, NVS_KEY_BOOK_FONTS, &book_fonts) == ESP_OK) s_book_fonts = book_fonts == 1;
     if (nvs_get_u8(h, NVS_KEY_BOOK_VERTICAL, &book_vertical) == ESP_OK) s_book_vertical = book_vertical == 1;
+    s_book_tracking = -APP_BOOK_TRACK_MIN;
     uint8_t tracking = 2, reading_line = 0, rule_offset = 4, indent = 2, indent_adjust = 20;
-    if (nvs_get_u8(h, NVS_KEY_BOOK_TRACK, &tracking) == ESP_OK && tracking <= 4)
-        s_book_tracking = tracking;
+    if (nvs_get_u8(h, NVS_KEY_BOOK_TRACK, &tracking) == ESP_OK) {
+        if(tracking<=4)s_book_tracking=(uint8_t)((int)tracking*2-4-APP_BOOK_TRACK_MIN);
+        else if(tracking>=128 && tracking<=148) {
+            int px=(int)tracking-128-4;
+            if(px>APP_BOOK_TRACK_MAX)px=APP_BOOK_TRACK_MAX;
+            s_book_tracking=(uint8_t)(px-APP_BOOK_TRACK_MIN);
+        } else if(tracking>=192 && tracking<192+APP_BOOK_TRACK_COUNT)s_book_tracking=tracking-192;
+    }
     if (nvs_get_u8(h, NVS_KEY_BOOK_RULE, &reading_line) == ESP_OK && reading_line <= 2)
         s_book_reading_line = reading_line;
     if (nvs_get_u8(h, NVS_KEY_BOOK_RULE_OFFSET, &rule_offset) == ESP_OK && rule_offset <= 8)
         s_book_rule_offset = rule_offset;
     if (nvs_get_u8(h, NVS_KEY_BOOK_INDENT, &indent) == ESP_OK && indent <= 3)
         s_book_indent = indent;
-    s_book_indent_adjust = nvs_get_u8(h, NVS_KEY_BOOK_INDENT_ADJUST, &indent_adjust) == ESP_OK && indent_adjust <= 40
+    s_book_indent_adjust = nvs_get_u8(h, NVS_KEY_BOOK_INDENT_ADJUST, &indent_adjust) == ESP_OK && indent_adjust <= 200
         ? indent_adjust : 20;
     uint8_t line = 130, para = 50, margin = 24;
     if (nvs_get_u8(h, NVS_KEY_BOOK_LINE, &line) == ESP_OK) {
         if (line >= 110 && line <= 150) s_book_line = line;
         else if (line == 180) s_book_line = 150;
     }
-    if (nvs_get_u8(h, NVS_KEY_BOOK_PARA, &para) == ESP_OK && para <= 75 && para % 25 == 0) s_book_para = para;
+    if (nvs_get_u8(h, NVS_KEY_BOOK_PARA, &para) == ESP_OK && app_settings_book_paragraph_value(app_settings_book_paragraph_level(para)) == para) s_book_para = para;
     if (nvs_get_u8(h, NVS_KEY_BOOK_MARGIN, &margin) == ESP_OK && margin <= 60)
         s_book_margin = margin > 48 ? 48 : margin;
     uint8_t shelf_style = 2;
@@ -315,13 +316,7 @@ void app_settings_init(void) {
     bool migrate_shelf = nvs_get_u8(h, NVS_KEY_SHELF_V22, &shelf_v22) != ESP_OK || shelf_v22 != 1;
     bool retired_shelf = shelf_style == 3 || shelf_style == 4;
     if (migrate_shelf) s_shelf_style = 2;
-    char folder[MEDIA_DIR_MAX];
-    size_t folder_len = sizeof(folder);
-    if (nvs_get_str(h, NVS_KEY_BOOKS_DIR, folder, &folder_len) == ESP_OK && valid_media_dir(folder))
-        strlcpy(s_books_dir, folder, sizeof(s_books_dir));
-    folder_len = sizeof(folder);
-    if (nvs_get_str(h, NVS_KEY_FONTS_DIR, folder, &folder_len) == ESP_OK && valid_media_dir(folder))
-        strlcpy(s_fonts_dir, folder, sizeof(s_fonts_dir));
+    // 固定媒体根目录；忽略旧版自定义目录键。/ Fixed media roots ignore retired custom-directory keys.
     nvs_close(h);
     if ((migrate_shelf || retired_shelf) && nvs_open(NVS_NS, NVS_READWRITE, &h) == ESP_OK) {
         // 首次刷入此版只切换书架外观；随后尊重用户手动选择。/ Set acrylic once on upgrade, then preserve manual choices.
@@ -481,9 +476,21 @@ void app_settings_set_system_contrast(uint8_t percent) {
 }
 uint8_t app_settings_lock_style(void) { return s_lock_style; }
 void app_settings_set_lock_style(uint8_t style) {
-    if (style > 2 || style == s_lock_style) return;
+    if (style > 3 || style == s_lock_style) return;
     s_lock_style = style;
     nvs_put_u8(NVS_KEY_LOCK_STYLE, style);
+}
+const char* app_settings_bookmark_path(void) { return s_bookmark; }
+void app_settings_set_bookmark_path(const char *path) {
+    const char *ext=path?strrchr(path,'.'):NULL;
+    if(!path || (path[0] && (strncmp(path,"/sdcard/",8)||!ext||strcasecmp(ext,".png"))) ||
+        strnlen(path,sizeof(s_bookmark))>=sizeof(s_bookmark)) return;
+    nvs_handle_t h;
+    if(nvs_open(NVS_NS,NVS_READWRITE,&h)!=ESP_OK)return;
+    esp_err_t err=nvs_set_str(h,NVS_KEY_BOOKMARK,path);
+    if(err==ESP_OK)err=nvs_commit(h);
+    nvs_close(h);
+    if(err==ESP_OK)strlcpy(s_bookmark,path,sizeof(s_bookmark));
 }
 const char* app_settings_wallpaper_path(void) { return s_wallpaper; }
 void app_settings_set_wallpaper_path(const char* path) {
@@ -713,9 +720,9 @@ void app_settings_set_shelf_recent_sort(bool on) {
 }
 uint8_t app_settings_book_tracking(void) { return s_book_tracking; }
 void app_settings_set_book_tracking(uint8_t index) {
-    if (index > 4 || index == s_book_tracking) return;
+    if (index >= APP_BOOK_TRACK_COUNT || index == s_book_tracking) return;
     s_book_tracking = index;
-    nvs_put_u8(NVS_KEY_BOOK_TRACK, index);
+    nvs_put_u8(NVS_KEY_BOOK_TRACK, 192+index);
 }
 uint8_t app_settings_book_indent(void) { return s_book_indent; }
 void app_settings_set_book_indent(uint8_t em) {
@@ -723,10 +730,11 @@ void app_settings_set_book_indent(uint8_t em) {
     s_book_indent = em;
     nvs_put_u8(NVS_KEY_BOOK_INDENT, em);
 }
-int8_t app_settings_book_indent_adjust(void) { return (int8_t)s_book_indent_adjust - 20; }
+int8_t app_settings_book_indent_adjust(void) { return s_book_indent_adjust <= 120 ? (int8_t)((int)s_book_indent_adjust - 20) : (int8_t)(100 - (int)s_book_indent_adjust); }
 void app_settings_set_book_indent_adjust(int8_t px) {
-    if (px < -20 || px > 20 || px == app_settings_book_indent_adjust()) return;
-    s_book_indent_adjust = (uint8_t)(px + 20);
+    if (px < -100 || px > 100 || px == app_settings_book_indent_adjust()) return;
+    // 0..40保留旧配置语义，扩展负值使用121..200。/ Preserve legacy 0..40 encoding; extended negatives use 121..200.
+    s_book_indent_adjust = (uint8_t)(px >= -20 ? px + 20 : 100 - px);
     nvs_put_u8(NVS_KEY_BOOK_INDENT_ADJUST, s_book_indent_adjust);
 }
 uint8_t app_settings_book_reading_line(void) { return s_book_reading_line; }
@@ -756,9 +764,24 @@ void app_settings_set_book_margin(uint8_t px) {
     s_book_margin = px;
     nvs_put_u8(NVS_KEY_BOOK_MARGIN, px);
 }
+// 非线性段距保留旧档位，并将25%置于几何中点。/ Nonlinear gaps retain legacy stops with 25% at the geometric midpoint.
+uint8_t app_settings_book_paragraph_value(uint8_t level) {
+    static const uint8_t values[APP_BOOK_PARAGRAPH_COUNT]={0,5,10,15,20,25,30,40,50,75,100};
+    return values[level<APP_BOOK_PARAGRAPH_COUNT?level:APP_BOOK_PARAGRAPH_COUNT-1];
+}
+uint8_t app_settings_book_paragraph_level(uint8_t percent) {
+    uint8_t best=0;
+    unsigned distance=255;
+    for(uint8_t i=0;i<APP_BOOK_PARAGRAPH_COUNT;++i) {
+        int delta=(int)app_settings_book_paragraph_value(i)-(int)percent;
+        unsigned d=(unsigned)(delta<0?-delta:delta);
+        if(d<distance){distance=d;best=i;}
+    }
+    return best;
+}
 uint8_t app_settings_book_paragraph_spacing(void) { return s_book_para; }
 void app_settings_set_book_paragraph_spacing(uint8_t percent) {
-    if (percent > 75 || percent % 25) return;
+    if (app_settings_book_paragraph_value(app_settings_book_paragraph_level(percent)) != percent) return;
     if (s_book_para == percent) return;
     s_book_para = percent;
     nvs_put_u8(NVS_KEY_BOOK_PARA, percent);
@@ -773,13 +796,6 @@ void app_settings_set_shelf_style(uint8_t style) {
 }
 const char* app_settings_books_dir(void) { return s_books_dir; }
 const char* app_settings_fonts_dir(void) { return s_fonts_dir; }
-bool app_settings_set_books_dir(const char* path) {
-    return set_media_dir(s_books_dir, NVS_KEY_BOOKS_DIR, path);
-}
-bool app_settings_set_fonts_dir(const char* path) {
-    return set_media_dir(s_fonts_dir, NVS_KEY_FONTS_DIR, path);
-}
-
 #ifndef APP_SETTINGS_BACKUP_ROOT
 #define APP_SETTINGS_BACKUP_ROOT "/sdcard"
 #endif
@@ -845,7 +861,7 @@ static uint32_t backup_indent_adjust_checksum(const settings_backup_indent_adjus
 static bool backup_indent_adjust_valid(const settings_backup_indent_adjust_t *adjust) {
     uint32_t stored = 0;
     for (unsigned i = 0; i < 4; ++i) stored |= (uint32_t)adjust->checksum[i] << (8 * i);
-    return adjust->encoded <= 40 && stored == backup_indent_adjust_checksum(adjust);
+    return adjust->encoded <= 200 && stored == backup_indent_adjust_checksum(adjust);
 }
 // v13 adds a checked reading-weight block; older backups restore native strokes.
 typedef struct { uint8_t encoded, checksum[4]; } settings_backup_weight_t;
@@ -882,7 +898,7 @@ static bool backup_home_valid(const settings_backup_home_t *v) {
 static unsigned backup_version(const settings_backup_v1_t *backup) {
     if (memcmp(backup->magic, "PICOSET", 7)) return 0;
     unsigned char c = backup->magic[7];
-    return c >= '1' && c <= '9' ? c - '0' : c == 'A' ? 10 : c == 'B' ? 11 : c == 'C' ? 12 : c == 'D' ? 13 : c == 'E' ? 14 : c == 'F' ? 15 : c == 'G' ? 16 : c == 'H' ? 17 : 0;
+    return c >= '1' && c <= '9' ? c - '0' : c == 'A' ? 10 : c == 'B' ? 11 : c == 'C' ? 12 : c == 'D' ? 13 : c == 'E' ? 14 : c == 'F' ? 15 : c == 'G' ? 16 : c == 'H' ? 17 : c == 'I' ? 18 : c == 'J' ? 19 : c == 'K' ? 20 : 0;
 }
 
 static void backup_erase_secret(void *ptr, size_t size) {
@@ -962,7 +978,7 @@ static bool backup_card_ready(void) {
 esp_err_t app_settings_backup_save(void) {
     if (!backup_card_ready()) return ESP_ERR_INVALID_STATE;
     settings_backup_v1_t backup = {0};
-    memcpy(backup.magic, "PICOSETH", sizeof(backup.magic));
+    memcpy(backup.magic, "PICOSETK", sizeof(backup.magic));
     uint8_t *f = backup.flags;
     f[BK_SLEEP] = s_sleep;
     f[BK_PICKUP] = s_pickup_wake;
@@ -1047,6 +1063,11 @@ esp_err_t app_settings_backup_save(void) {
     uint32_t home_hash = backup_home_checksum(&home);
     for (unsigned i = 0; i < 4; ++i) home.checksum[i] = home_hash >> (8*i);
     if (ok) ok = fwrite(&home, 1, sizeof(home), file) == sizeof(home);
+    settings_backup_background_t bookmark = {0};
+    strlcpy(bookmark.path,s_bookmark,sizeof(bookmark.path));
+    uint32_t bookmark_hash=backup_background_checksum(&bookmark);
+    for(unsigned i=0;i<4;++i)bookmark.checksum[i]=bookmark_hash>>(8*i);
+    if(ok)ok=fwrite(&bookmark,1,sizeof(bookmark),file)==sizeof(bookmark);
     backup_erase_secret(&wifi, sizeof(wifi));
     if (ok) ok = book_history_backup_write(file) == ESP_OK;
     if (ok) ok = fflush(file) == 0;
@@ -1088,15 +1109,17 @@ static bool backup_valid(const settings_backup_v1_t *backup) {
     if (f[BK_SLEEP] > APP_SLEEP_OFF || f[BK_PICKUP] > 1 ||
         f[BK_SYS_SIZE] < 100 || f[BK_SYS_SIZE] > 200 || f[BK_SYS_SIZE] % 10 ||
         f[BK_SYS_CONTRAST] < 100 || f[BK_SYS_CONTRAST] > 140 || f[BK_SYS_CONTRAST] % 10 ||
-        f[BK_LOCK] > 2 || f[BK_BOOK_PX] < 36 || f[BK_BOOK_PX] > 72 ||
+        f[BK_LOCK] > 3 || f[BK_BOOK_PX] < BOOK_READER_PX_MIN || f[BK_BOOK_PX] > BOOK_READER_PX_MAX ||
         f[BK_SHAKE] > 1 || (f[BK_FULL_PAGES] != 0 && f[BK_FULL_PAGES] != 5 &&
                             f[BK_FULL_PAGES] != 10 && f[BK_FULL_PAGES] != 15 &&
                             f[BK_FULL_PAGES] != 30) ||
         f[BK_TURN] > 1 || f[BK_POWER_TURN] > 1 || f[BK_IMMERSIVE] > 1 ||
-        f[BK_TRACKING] > 4 || f[BK_READING_LINE] > 2 ||
+        f[BK_TRACKING] > (backup_version(backup)>=20 ? APP_BOOK_TRACK_COUNT-1 : backup_version(backup)==19 ? 20 : 4) || f[BK_READING_LINE] > 2 ||
         f[BK_LINE_SPACING] < 110 || f[BK_LINE_SPACING] > 150 ||
         f[BK_MARGIN] > 60 ||
-        f[BK_PARAGRAPH] > 75 || f[BK_PARAGRAPH] % 25 ||
+        (backup_version(backup)>=20 ?
+         app_settings_book_paragraph_value(app_settings_book_paragraph_level(f[BK_PARAGRAPH])) != f[BK_PARAGRAPH] :
+         f[BK_PARAGRAPH] > 75 || f[BK_PARAGRAPH] % 25) ||
         f[BK_SHELF] < 1 || f[BK_SHELF] > 5) return false;
     if (strnlen(backup->books_dir, sizeof(backup->books_dir)) == sizeof(backup->books_dir) ||
         strnlen(backup->fonts_dir, sizeof(backup->fonts_dir)) == sizeof(backup->fonts_dir)) return false;
@@ -1128,7 +1151,7 @@ esp_err_t app_settings_backup_restore(void) {
     settings_backup_keys_t keys = {.actions = {APP_READER_KEY_PREV, APP_READER_KEY_TOOLS, APP_READER_KEY_NEXT}};
     settings_backup_wifi_t wifi = {0};
     bool has_wifi = false;
-    settings_backup_background_t background = {0};
+    settings_backup_background_t background = {0}, bookmark = {0};
     settings_backup_home_t home = {.component=APP_HOME_FOLDER, .minutes=30};
     app_main_refresh_mode_t main_refresh = APP_MAIN_REFRESH_NORMAL;
     if (ok && !memcmp(backup.magic, "PICOSET2", 8)) {
@@ -1191,6 +1214,8 @@ esp_err_t app_settings_backup_restore(void) {
     if (ok && version >= 14) ok = fread(&background, 1, sizeof(background), file) == sizeof(background) &&
         backup_background_valid(&background) && backup_path_valid(background.path, sizeof(background.path));
     if (ok && version >= 16) ok = fread(&home, 1, sizeof(home), file) == sizeof(home) && backup_home_valid(&home);
+    if(ok && version>=18)ok=fread(&bookmark,1,sizeof(bookmark),file)==sizeof(bookmark)&&
+        backup_background_valid(&bookmark)&&backup_path_valid(bookmark.path,sizeof(bookmark.path));
     bool has_history = ok && version >= 6;
     if (has_history) {
         history_position = ftell(file);
@@ -1202,6 +1227,11 @@ esp_err_t app_settings_backup_restore(void) {
         return ESP_ERR_INVALID_RESPONSE;
     }
 
+    if(version<20) {
+        int px=version<19?(int)backup.flags[BK_TRACKING]*2-4:(int)backup.flags[BK_TRACKING]-4;
+        if(px>APP_BOOK_TRACK_MAX)px=APP_BOOK_TRACK_MAX;
+        backup.flags[BK_TRACKING]=(uint8_t)(px-APP_BOOK_TRACK_MIN);
+    }
     backup.flags[BK_MARGIN] = backup.flags[BK_MARGIN] > 48 ? 48 : backup.flags[BK_MARGIN];
     if (version < 15) backup.flags[BK_SHAKE] = 0; // 旧晃动标志不改变AA。/ Old shake flags never affect AA.
     // 已删除组件的备份仍可恢复，其余字段不受影响。/ Restore retired widget backups without rejecting other preferences.
@@ -1219,8 +1249,8 @@ esp_err_t app_settings_backup_restore(void) {
     // Accept retired IDs from old backups and restore the default acrylic style.
     if (backup.flags[BK_SHELF] == 3 || backup.flags[BK_SHELF] == 4) backup.flags[BK_SHELF] = 2;
     if (profile.avatar[0] && !backup_file_exists(profile.avatar, false)) profile.avatar[0] = 0;
-    if (!backup_file_exists(backup.books_dir, true)) strlcpy(backup.books_dir, "/sdcard/books", sizeof(backup.books_dir));
-    if (!backup_file_exists(backup.fonts_dir, true)) strlcpy(backup.fonts_dir, "/sdcard/fonts", sizeof(backup.fonts_dir));
+    strlcpy(backup.books_dir, "/sdcard/books", sizeof(backup.books_dir));
+    strlcpy(backup.fonts_dir, "/sdcard/fonts", sizeof(backup.fonts_dir));
 
     nvs_handle_t h;
     esp_err_t err = nvs_open(NVS_NS, NVS_READWRITE, &h);
@@ -1257,7 +1287,7 @@ esp_err_t app_settings_backup_restore(void) {
     BACKUP_SET_U8(NVS_KEY_READER_TURN, BK_TURN);
     BACKUP_SET_U8(NVS_KEY_POWER_TURN, BK_POWER_TURN);
     BACKUP_SET_U8(NVS_KEY_IMMERSIVE, BK_IMMERSIVE);
-    BACKUP_SET_U8(NVS_KEY_BOOK_TRACK, BK_TRACKING);
+    if(err==ESP_OK)err=nvs_set_u8(h,NVS_KEY_BOOK_TRACK,192+backup.flags[BK_TRACKING]);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_INDENT, indent);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_INDENT_ADJUST, adjust.encoded);
     int fine_weight=weight.encoded<=4?((int)weight.encoded-2)*APP_BOOK_WEIGHT_SUBSTEPS:(int)weight.encoded-128-APP_BOOK_WEIGHT_FINE_MAX;
@@ -1276,6 +1306,10 @@ esp_err_t app_settings_backup_restore(void) {
     BACKUP_SET_STR(NVS_KEY_BOOK_BACKGROUND, background.path);
     BACKUP_SET_STR(NVS_KEY_FONT, backup.font);
     BACKUP_SET_STR(NVS_KEY_SYS_FONT, backup.system_font);
+    if(bookmark.path[0] && !backup_file_exists(bookmark.path,false))bookmark.path[0]=0;
+    if(!bookmark.path[0] && backup.flags[BK_LOCK]==3)backup.flags[BK_LOCK]=0;
+    BACKUP_SET_STR(NVS_KEY_BOOKMARK, bookmark.path);
+    if(err==ESP_OK)err=nvs_set_u8(h,NVS_KEY_LOCK_STYLE,backup.flags[BK_LOCK]);
     BACKUP_SET_STR(NVS_KEY_WALLPAPER, backup.wallpaper);
     BACKUP_SET_STR(NVS_KEY_BOOKS_DIR, backup.books_dir);
     BACKUP_SET_STR(NVS_KEY_FONTS_DIR, backup.fonts_dir);
@@ -1329,8 +1363,7 @@ esp_err_t app_settings_backup_restore(void) {
     strlcpy(s_font, backup.font, sizeof(s_font));
     strlcpy(s_system_font, backup.system_font, sizeof(s_system_font));
     strlcpy(s_wallpaper, backup.wallpaper, sizeof(s_wallpaper));
-    strlcpy(s_books_dir, backup.books_dir, sizeof(s_books_dir));
-    strlcpy(s_fonts_dir, backup.fonts_dir, sizeof(s_fonts_dir));
+    strlcpy(s_bookmark,bookmark.path,sizeof(s_bookmark));
     if (has_history) {
         file = fopen(source, "rb");
         if (!file) { backup_erase_secret(&wifi, sizeof(wifi)); return ESP_FAIL; }

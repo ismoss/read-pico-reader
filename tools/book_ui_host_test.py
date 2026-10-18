@@ -360,8 +360,8 @@ static char test_wrapped[512];
 #define BOOK_MARGIN_MIN 0
 #define BOOK_MARGIN_MAX 48
 #define BOOK_MARGIN_CHOICES 9
-#define BOOK_PX_MIN 36
-#define BOOK_PX_MAX 72
+#define BOOK_PX_MIN 18
+#define BOOK_PX_MAX 90
 #define EPD_DRAW_ALIGN_LEFT 0
 static int ui_content_width(void){return 604;}
 static int ttf_text_width_px(int px,const char* text){int width=0;for(;*text;text++)if(((unsigned char)*text&0xc0)!=0x80)width+=px;return width;}
@@ -467,14 +467,14 @@ int main(void) {
     int wide=reader_margin_input(margin_slider,325,36,48,0);
     assert(reader_margin_width(0,48,0)>reader_margin_width(24,48,0));
     assert(reader_margin_width(narrow,48,0)>reader_margin_width(36,48,0));
-    assert(wide==36&&reader_margin_width(wide,48,0)==reader_margin_width(36,48,0));
-    assert(reader_margin_level_for(24,72,0)==1&&reader_margin_for_level(1,24,72,0)==24);
+    assert(wide==48&&reader_margin_width(wide,48,0)<reader_margin_width(36,48,0));
+    assert(reader_margin_level_for(24,72,0)==4&&reader_margin_for_level(4,24,72,0)==24);
     // 每个字体/字间距下，只展示实际宽度不同的档位，任意旧边距只读保留。
     // All fonts/tracking values expose distinct visible widths and retain existing margins on a read.
-    for(int px=36;px<=72;++px)for(int tracking=-4;tracking<=4;tracking+=2){
+    for(int px=18;px<=90;++px)for(int tracking=-4;tracking<=4;tracking+=2){
         int widths[BOOK_MARGIN_CHOICES],values[BOOK_MARGIN_CHOICES];
         int count=reader_margin_levels(px,tracking,widths,values);
-        assert(count>=2&&count<=BOOK_MARGIN_CHOICES&&values[0]==0&&values[count-1]==48);
+        assert(count==BOOK_MARGIN_CHOICES&&values[0]==0&&values[count-1]==48);
         for(int i=0;i<count;++i){
             assert(widths[i]==reader_margin_width(values[i],px,tracking));
             if(i)assert(widths[i-1]>widths[i]&&values[i-1]<values[i]);

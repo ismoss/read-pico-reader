@@ -36,7 +36,7 @@ def package(build: Path, output: Path):
     release={'schema':1,'version':version,'project':'Read_Pico','board':'RDP-G01-W','layout':'pico-dual-4m-v1',
         'minimum_base_version':'0.3.3-rc72','url':f'https://wegooo-cell.github.io/read-pico-reader/{upgrade_name}',
         'size':len(data),'sha256':hashlib.sha256(data).hexdigest(),
-        'notes':'1. 完善刷新后的驱动关闭，改善静置白底发灰\n2. 增加通信异常时的关闭重试\n3. 保留rc90阅读全刷与连续翻页优化'}
+        'notes':'1. 书架与设置同步自然刷新，减少留白黑闪\n2. 液态玻璃快捷菜单，蓝牙开关与全刷响应优化\n3. 阅读字号18–90px、间距微调及透明书封\n4. 修复启动记录空间不足与缓存兼容问题'}
     (output/'manifest.json').write_text(json.dumps(manifest,ensure_ascii=False,indent=2)+'\n')
     (output/'update.json').write_text(json.dumps(release,ensure_ascii=False,indent=2)+'\n')
     check(output)

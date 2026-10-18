@@ -39,6 +39,7 @@
 #include "app_font_context.h"
 #include "book_cover.h"
 #include "book_lock_collage.h"
+#include "book_lock_bookmark.h"
 #include "book_ticket.h"
 #include "display.h"
 #include "e0470_epaper_waveform.h"
@@ -457,8 +458,10 @@ void enter_lock_and_sleep(
     uint8_t* framebuffer = epd_hl_get_framebuffer(hl);
     // 主动拼贴在白底圆锁上准备最终画面；其他入口仍保留旧页面，只改RAM。
     // Prepare manual collages behind the white lock badge; other entries keep their prior page while drawing RAM.
-    epd_hl_set_all_white(hl);
     uint8_t lock_style = app_settings_lock_style();
+    // 透明书封保留当前页面作为底图，不清白、不重排阅读页，也不读取旧阅读快照。
+    // Keep the current page beneath the PNG; no white reset, reader reflow or old reader snapshot.
+    if (lock_style != 3) epd_hl_set_all_white(hl);
     bool ticket = lock_style == 0;
     bool system_lock = ticket || lock_style == 2 || lock_pin_enabled();
     app_lock_font_t lock_font = {0};
@@ -467,7 +470,8 @@ void enter_lock_and_sleep(
     // Ticket mode owns the lock canvas: book cover first, ticket on top. Custom wallpaper is wallpaper-only.
     bool lock_drawn = ticket
         ? book_ticket_draw(framebuffer, reader_background)
-        : lock_style == 2 ? book_lock_collage_prepare(framebuffer) : draw_wallpaper(framebuffer);
+        : lock_style == 2 ? book_lock_collage_prepare(framebuffer) :
+          lock_style == 3 ? book_lock_bookmark_draw(framebuffer,app_settings_bookmark_path()) : draw_wallpaper(framebuffer);
     if (!lock_drawn) {
         epd_hl_set_all_white(hl);
         ui_draw_full_image(framebuffer, lock_4bpp_bin_start);
@@ -495,6 +499,7 @@ void enter_lock_and_sleep(
     if (wake == APP_WAKE_TIMEOUT) {
         // PMU SOFT_SLEEP drops the ESP rail while keeping its RTC alive. A short
         // power-key press boots the host; the e-paper keeps this lock image.
+        if(!lock_pin_enabled() && lock_screen_save(framebuffer)) (void)pico_boot_mark_frame_cached();
         app_enter_host_sleep(APP_SLEEP_DEEP);
     }
     pico_boot_clear_resume();
@@ -524,8 +529,12 @@ void app_lock_boot_gate(EpdiyHighlevelState *hl, cst836u_handle_t touch, sc7a20h
     app_lock_font_t saved; app_font_begin_lock(&saved);
     uint8_t *fb = epd_hl_get_framebuffer(hl);
     if (!lock_screen_restore(fb)) {
+        // 冷启动丢失锁屏缓存时没有当前页面，用干净底图并继续密码校验。
+        // A cold start with no retained art has no current page; use a clean base and keep authentication.
+        if (app_settings_lock_style() == 3) memset(fb,255,(size_t)epd_width()*epd_height()/2);
         bool drawn = app_settings_lock_style() == 0 ? book_ticket_draw(fb, false) :
-            app_settings_lock_style() == 2 ? book_lock_collage_draw(fb) : draw_wallpaper(fb);
+            app_settings_lock_style() == 2 ? book_lock_collage_draw(fb) :
+            app_settings_lock_style() == 3 ? book_lock_bookmark_draw(fb,app_settings_bookmark_path()) : draw_wallpaper(fb);
         if (!drawn) { memset(fb, 255, (size_t)epd_width() * epd_height() / 2); ui_draw_full_image(fb, lock_4bpp_bin_start); }
     }
     lock_screen_authenticate(hl, touch, acc, true);

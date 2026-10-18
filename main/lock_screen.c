@@ -33,8 +33,8 @@ typedef struct {uint32_t magic,rotation,style,checksum;uint64_t wallpaper;} art_
 extern const uint8_t lock_4bpp_bin_start[] asm("_binary_lock_4bpp_bin_start");
 static uint32_t checksum(const uint8_t *bytes){uint32_t h=2166136261u;for(unsigned i=0;i<FRAME_BYTES;++i)h=(h^bytes[i])*16777619u;return h;}
 static uint64_t wallpaper_key(void){
-    if(app_settings_lock_style()!=1)return 0;
-    const char *path=app_settings_wallpaper_path();
+    if(app_settings_lock_style()!=1 && app_settings_lock_style()!=3)return 0;
+    const char *path=app_settings_lock_style()==3?app_settings_bookmark_path():app_settings_wallpaper_path();
     uint64_t key=UINT64_C(14695981039346656037);
     for(const unsigned char *p=(const unsigned char*)path;*p;++p)key=(key^*p)*UINT64_C(1099511628211);
     struct stat st;
@@ -55,15 +55,15 @@ bool lock_screen_restore(uint8_t *frame){
         fread(frame,1,FRAME_BYTES,f)==FRAME_BYTES&&fgetc(f)==EOF&&h.checksum==checksum(frame);
     fclose(f);return ok;
 }
-static void save_art(const uint8_t *frame){
+bool lock_screen_save(const uint8_t *frame){
     (void)mkdir(LOCK_SCREEN_CACHE_PARENT,0775);(void)mkdir(LOCK_SCREEN_CACHE_PARENT "/locks",0775);
-    FILE *f=fopen(LOCK_ART_PATH ".tmp","wb");if(!f)return;
+    FILE *f=fopen(LOCK_ART_PATH ".tmp","wb");if(!f)return false;
     art_header_t h={.magic=ART_MAGIC,.rotation=(uint32_t)epd_get_rotation(),
         .style=app_settings_lock_style(),.checksum=checksum(frame),.wallpaper=wallpaper_key()};
     bool ok=fwrite(&h,1,sizeof(h),f)==sizeof(h)&&fwrite(frame,1,FRAME_BYTES,f)==FRAME_BYTES&&fflush(f)==0;
     if(fclose(f))ok=false;
-    if(ok&&rename(LOCK_ART_PATH ".tmp",LOCK_ART_PATH)==0)return;
-    (void)remove(LOCK_ART_PATH ".tmp");
+    if(ok&&rename(LOCK_ART_PATH ".tmp",LOCK_ART_PATH)==0)return true;
+    (void)remove(LOCK_ART_PATH ".tmp");return false;
 }
 static void restore_art(uint8_t *fb,const uint8_t *original){
     if(original)memcpy(fb,original,FRAME_BYTES);
@@ -85,7 +85,7 @@ static void present_input(EpdiyHighlevelState *hl,EpdRect area){
 void lock_screen_authenticate(EpdiyHighlevelState *hl,cst836u_handle_t touch,sc7a20h_handle_t acc,bool boot){
     uint8_t *fb=epd_hl_get_framebuffer(hl);
     (void)ble_pt_stop(2000);
-    save_art(fb);
+    lock_screen_save(fb);
     uint8_t *original=heap_caps_get_free_size(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT)>FRAME_BYTES+1024u*1024u
         ?heap_caps_malloc(FRAME_BYTES,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT):NULL;
     if(original)memcpy(original,fb,FRAME_BYTES);

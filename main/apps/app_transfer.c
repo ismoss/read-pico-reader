@@ -94,32 +94,6 @@ static bool transfer_book_file(const char *path) {
     return ext && (!strcasecmp(ext, ".epub") || !strcasecmp(ext, ".txt"));
 }
 
-static bool transfer_path_below(const char *path, const char *directory) {
-    size_t n = strlen(directory);
-    return !strncmp(path, directory, n) && (!path[n] || path[n] == '/');
-}
-
-static void transfer_directory_deleted(const char *path) {
-    if (transfer_path_below(app_settings_books_dir(), path))
-        (void)app_settings_set_books_dir("/sdcard/books");
-    if (transfer_path_below(app_settings_fonts_dir(), path))
-        (void)app_settings_set_fonts_dir("/sdcard/fonts");
-}
-
-static void transfer_directory_moved(const char *old_path, const char *new_path) {
-    const char *selected[2] = {app_settings_books_dir(), app_settings_fonts_dir()};
-    for (int i = 0; i < 2; ++i) {
-        if (!transfer_path_below(selected[i], old_path)) continue;
-        char updated[288];
-        if (snprintf(updated, sizeof(updated), "%s%s", new_path, selected[i] + strlen(old_path)) >= (int)sizeof(updated)) continue;
-        bool saved = i == 0 ? app_settings_set_books_dir(updated) : app_settings_set_fonts_dir(updated);
-        if (!saved) {
-            if (i == 0) (void)app_settings_set_books_dir("/sdcard/books");
-            else (void)app_settings_set_fonts_dir("/sdcard/fonts");
-        }
-    }
-}
-
 static void transfer_file_deleted(const char *path) {
     if (transfer_book_file(path)) {
         (void)book_progress_forget(path);
@@ -1029,8 +1003,6 @@ static app_redraw_t on_tick(app_ctx_t* ctx) {
                 .file_limit = book_store_file_limit(&s_root), .free_bytes_cb = free_bytes, .free_bytes_ctx = &s_root,
                 .file_changed_cb = book_progress_forget, .file_deleted_cb = transfer_file_deleted,
                 .file_moved_cb = transfer_file_moved,
-                .directory_deleted_cb = transfer_directory_deleted,
-                .directory_moved_cb = transfer_directory_moved,
                 .wallpaper_set_cb = transfer_set_wallpaper,
                 .signature_get_cb = transfer_signature_get, .signature_set_cb = transfer_signature_set,
                 .title_get_cb = NULL, .title_set_cb = NULL};

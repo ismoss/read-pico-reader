@@ -325,8 +325,10 @@ int main(void){
 assert 'ble_receive_feedback()' in function(SETTINGS, 'on_tick')
 assert 'while (ble_pt_pop_raw(&stale))' in function(SETTINGS, 'on_gesture')
 transfer = (ROOT / 'components/read_pico_transfer/read_pico_transfer.c').read_text()
-for name in ('read_pico_transfer_start', 'read_pico_transfer_scan_wifi', 'read_pico_transfer_sync_time'):
+for name in ('read_pico_transfer_start', 'read_pico_transfer_scan_wifi', 'sync_time_impl'):
     assert 'ble_pt_network_acquire()' in function(ROOT / 'components/read_pico_transfer/read_pico_transfer.c', name)
+assert 'sync_time_run(utc_seconds, false, false)' in function(ROOT / 'components/read_pico_transfer/read_pico_transfer.c', 'read_pico_transfer_sync_time')
+assert 'sync_time_impl(utc_seconds)' in function(ROOT / 'components/read_pico_transfer/read_pico_transfer.c', 'sync_time_run')
 assert transfer.count('ble_pt_network_acquire()') == 3
 with tempfile.TemporaryDirectory(prefix='pico-ble-test-') as directory:
     work = Path(directory)

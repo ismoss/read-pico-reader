@@ -8,6 +8,7 @@ on:
       - flash/notices.html
       - flash/manual.html
       - flash/manual/**
+      - flash/new-features/**
       - flash/assets/**
       - flash/site.css
       - flash/site.js

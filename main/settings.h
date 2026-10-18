@@ -75,9 +75,11 @@ void app_settings_set_system_font_size(uint8_t percent);
 uint8_t app_settings_system_contrast(void);
 void app_settings_set_system_contrast(uint8_t percent);
 /// 锁屏样式和壁纸路径。/ Lock style and wallpaper image path.
-/// 锁屏：0阅读票根、1壁纸、2书架拼贴。/ Lock: ticket (0), wallpaper (1), library collage (2).
+/// 锁屏：0阅读票根、1壁纸、2书架拼贴、3透明书封。/ Lock: ticket (0), wallpaper (1), collage (2), PNG cover (3).
 uint8_t app_settings_lock_style(void);
 void app_settings_set_lock_style(uint8_t style);
+const char* app_settings_bookmark_path(void);
+void app_settings_set_bookmark_path(const char *path);
 const char* app_settings_wallpaper_path(void);
 void app_settings_set_wallpaper_path(const char* path);
 /// 上次浅睡唤醒源（app_wake_source_t），掉电也保留。/ Last light-sleep wake source (app_wake_source_t); kept across power loss.
@@ -89,7 +91,7 @@ void app_settings_set_last_boot(uint8_t reason);
 /// 浅睡拿起唤醒。默认关；有加速度计也不会自动开。/ Light-sleep pickup wake. Defaults off; an accelerometer does not turn it on.
 bool app_settings_pickup_wake(void);
 void app_settings_set_pickup_wake(bool on);
-/// 阅读默认字号，36..72，默认 48。/ Default reading size, 36..72, initially 48.
+/// 阅读默认字号，18..90，默认 48。/ Default reading size, 18..90, initially 48.
 /// Reading stroke weight -2..2: thin, lighter, native, heavier, bold.
 int8_t app_settings_book_weight(void);
 #define APP_BOOK_WEIGHT_SUBSTEPS 16
@@ -169,13 +171,17 @@ void app_settings_set_shelf_recent_sort(bool on);
 /// by default. Turning it off tears the whole stack down and returns NimBLE's memory.
 bool app_settings_ble_turner(void);
 void app_settings_set_ble_turner(bool on);
-/// 字间距档位 0..4，默认 2 居中；对应 -4/-2/0/+2/+4 像素。/ Tracking index 0..4, centered default 2; maps to -4/-2/0/+2/+4 pixels.
+/// 字间距默认0px，31档以0居中。/ Default 0px, centered among 31 tracking stops.
+#define APP_BOOK_TRACK_MIN (-15)
+#define APP_BOOK_TRACK_MAX 15
+#define APP_BOOK_TRACK_COUNT (APP_BOOK_TRACK_MAX-APP_BOOK_TRACK_MIN+1)
+/// 字间距索引0..30对应-15..+15px，每档1px。/ Tracking indices 0..30 map to -15..+15px, in 1px steps.
 uint8_t app_settings_book_tracking(void);
 void app_settings_set_book_tracking(uint8_t index);
 /// 普通正文首行缩进 0..3 字，默认两字。/ First-line indent: 0..3 em, default 2.
 uint8_t app_settings_book_indent(void);
 void app_settings_set_book_indent(uint8_t em);
-/// 正文首行缩进微调，-20..20像素，默认0；无缩进时不生效。/ First-line adjustment in pixels, -20..20 (default 0); ignored with no indent.
+/// 正文首行缩进微调，-100..100像素，默认0；无缩进时不生效。/ First-line adjustment in pixels, -100..100 (default 0); ignored with no indent.
 int8_t app_settings_book_indent_adjust(void);
 void app_settings_set_book_indent_adjust(int8_t px);
 /// 正文阅读线：0 无，1 虚线，2 点线。/ Body reading guides: none, dashed or dotted.
@@ -190,18 +196,18 @@ void app_settings_set_book_line_spacing(uint8_t percent);
 /// 阅读页左右边距，0..48 像素。/ Reader horizontal margin: 0..48 pixels.
 uint8_t app_settings_book_margin(void);
 void app_settings_set_book_margin(uint8_t px);
-/// 段后距离百分比，0/25/50/75。/ Paragraph-gap percentage: 0/25/50/75.
+/// 段距11档，25%居中，0..100%。/ Eleven paragraph-gap stops centered on 25%, spanning 0..100%.
+#define APP_BOOK_PARAGRAPH_COUNT 11
+uint8_t app_settings_book_paragraph_value(uint8_t level);
+uint8_t app_settings_book_paragraph_level(uint8_t percent);
 uint8_t app_settings_book_paragraph_spacing(void);
 void app_settings_set_book_paragraph_spacing(uint8_t percent);
 /// 书架样式：1 深色书轨、2 亚克力、5 列表；旧3/4安全回退2。/ Shelf styles: rail (1), acrylic (2), list (5); retired IDs 3/4 fall back to 2.
 uint8_t app_settings_shelf_style(void);
 void app_settings_set_shelf_style(uint8_t style);
-/// 当前 TF 卡书籍目录和字体目录；默认分别为 /sdcard/books、/sdcard/fonts。
+/// 固定 TF 根目录：/sdcard/books 与 /sdcard/fonts；旧配置/备份不能修改。/ Fixed TF roots, unaffected by legacy settings/backups.
 const char* app_settings_books_dir(void);
 const char* app_settings_fonts_dir(void);
-/// 仅允许已挂载 TF 卡内的有界绝对目录；调用者负责确认目录存在。
-bool app_settings_set_books_dir(const char* path);
-bool app_settings_set_fonts_dir(const char* path);
 
 /// 将设置、阅读记录和 WiFi 凭据保存到 TF 卡根目录；备份含明文密码，需妥善保管。
 /// Save settings, reading records and WiFi credentials to TF root; keep the plaintext-secret backup private.

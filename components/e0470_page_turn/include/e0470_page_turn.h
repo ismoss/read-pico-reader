@@ -60,6 +60,16 @@ enum EpdDrawError e0470_page_turn_with_waveform_compact(
     const EpdWaveform* waveform, unsigned bands
 );
 
+/// 倒置竖屏的上下柔和区与中间校准区同时逐相输出；区域须全逻辑宽、32列对齐。
+/// Inverted portrait: output soft chrome and calibrated middle art in the same phases; full logical width and 32-column alignment are required.
+/// 不错相、不改灰阶序列；仅临时2048B PSRAM，成功后一次提交真实back，失败留给调用方恢复。
+/// No staggering or sequence changes; use 2048 temporary PSRAM bytes, commit the real baseline once on success and let the caller recover failures.
+enum EpdDrawError e0470_update_regions(
+    EpdiyHighlevelState* hl, EpdRect area, EpdRect strong_area,
+    const EpdWaveform* soft_waveform, const EpdWaveform* strong_waveform,
+    enum EpdDrawMode strong_mode
+);
+
 #ifdef __cplusplus
 }
 #endif

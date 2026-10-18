@@ -85,9 +85,18 @@ esp_err_t nvs_flash_init(void) { return ESP_OK; }
 esp_err_t nvs_flash_erase(void) { return ESP_OK; }
 esp_err_t nvs_open(const char *ns, int mode, nvs_handle_t *h) { (void)ns; (void)mode; *h = 1; return ESP_OK; }
 void nvs_close(nvs_handle_t h) { (void)h; }
-esp_err_t nvs_get_u8(nvs_handle_t h, const char *key, uint8_t *value) { (void)h; if(!strcmp(key,NVS_KEY_BOOK_WEIGHT_FINE)&&has_fine){*value=loaded_fine;return ESP_OK;} if(!strcmp(key,NVS_KEY_HOME_COMPONENT)&&loaded_home>=0){*value=(uint8_t)loaded_home;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_AA)&&has_aa){*value=loaded_aa;return ESP_OK;} if(!strcmp(key,NVS_KEY_READER_KEYS_V2)&&keys_v2){*value=1;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_WEIGHT)&&has_weight){*value=loaded_weight;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_INDENT_ADJUST)&&has_adjust){*value=loaded_adjust;return ESP_OK;} if(!strcmp(key,NVS_KEY_SHELF_STYLE)&&loaded_shelf>=0){*value=(uint8_t)loaded_shelf;return ESP_OK;} if(!strcmp(key,NVS_KEY_SHELF_V22)&&loaded_shelf_v22){*value=1;return ESP_OK;} if(!strcmp(key,NVS_KEY_LOCK_STYLE)&&loaded_lock>=0){*value=(uint8_t)loaded_lock;return ESP_OK;} if(!strcmp(key,NVS_KEY_HOLD_ACTION)&&has_hold){*value=loaded_hold;return ESP_OK;} for(unsigned i=0;i<3;++i) if(!strcmp(key,s_reader_key_names[i])&&has_keys[i]){*value=loaded_keys[i];return ESP_OK;} if (!strcmp(key, NVS_KEY_MAIN_REFRESH) && has_main_mode) { *value=loaded_main_mode;return ESP_OK; } if (!strcmp(key, "ui_fast")) { *value = test_loaded_fast; return ESP_OK; } if (!strcmp(key, NVS_KEY_SYS_SIZE) && test_loaded_system_size) { *value = test_loaded_system_size; return ESP_OK; } return ESP_FAIL; }
-esp_err_t nvs_set_u8(nvs_handle_t h, const char *key, uint8_t value) { (void)h; if(!strcmp(key,NVS_KEY_BOOK_WEIGHT_FINE)){loaded_fine=value;has_fine=true;} if(!strcmp(key,NVS_KEY_BOOK_AA)){loaded_aa=value;has_aa=true;} if(!strcmp(key,NVS_KEY_READER_KEYS_V2))keys_v2=value==1; if(!strcmp(key,NVS_KEY_BOOK_WEIGHT)){loaded_weight=value;has_weight=true;} if(!strcmp(key,NVS_KEY_BOOK_INDENT_ADJUST)){loaded_adjust=value;has_adjust=true;} if(!strcmp(key,NVS_KEY_SHELF_STYLE))loaded_shelf=value; if(!strcmp(key,NVS_KEY_SHELF_V22))loaded_shelf_v22=value==1; if(!strcmp(key,NVS_KEY_LOCK_STYLE))loaded_lock=value; if(!strcmp(key,NVS_KEY_HOLD_ACTION)){loaded_hold=value;has_hold=true;} for(unsigned i=0;i<3;++i) if(!strcmp(key,s_reader_key_names[i])){loaded_keys[i]=value;has_keys[i]=true;} if (!strcmp(key, NVS_KEY_MAIN_REFRESH)) {has_main_mode=true;loaded_main_mode=value;} if (!strcmp(key, "ui_fast")) test_loaded_fast=value; return ESP_OK; }
-esp_err_t nvs_get_str(nvs_handle_t h, const char *key, char *value, size_t *size) { (void)h; (void)key; (void)value; (void)size; return ESP_FAIL; }
+static bool has_tracking,has_para;static uint8_t loaded_tracking,loaded_para;
+esp_err_t nvs_get_u8(nvs_handle_t h, const char *key, uint8_t *value) { (void)h; if(!strcmp(key,NVS_KEY_BOOK_PARA)&&has_para){*value=loaded_para;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_TRACK)&&has_tracking){*value=loaded_tracking;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_WEIGHT_FINE)&&has_fine){*value=loaded_fine;return ESP_OK;} if(!strcmp(key,NVS_KEY_HOME_COMPONENT)&&loaded_home>=0){*value=(uint8_t)loaded_home;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_AA)&&has_aa){*value=loaded_aa;return ESP_OK;} if(!strcmp(key,NVS_KEY_READER_KEYS_V2)&&keys_v2){*value=1;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_WEIGHT)&&has_weight){*value=loaded_weight;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_INDENT_ADJUST)&&has_adjust){*value=loaded_adjust;return ESP_OK;} if(!strcmp(key,NVS_KEY_SHELF_STYLE)&&loaded_shelf>=0){*value=(uint8_t)loaded_shelf;return ESP_OK;} if(!strcmp(key,NVS_KEY_SHELF_V22)&&loaded_shelf_v22){*value=1;return ESP_OK;} if(!strcmp(key,NVS_KEY_LOCK_STYLE)&&loaded_lock>=0){*value=(uint8_t)loaded_lock;return ESP_OK;} if(!strcmp(key,NVS_KEY_HOLD_ACTION)&&has_hold){*value=loaded_hold;return ESP_OK;} for(unsigned i=0;i<3;++i) if(!strcmp(key,s_reader_key_names[i])&&has_keys[i]){*value=loaded_keys[i];return ESP_OK;} if (!strcmp(key, NVS_KEY_MAIN_REFRESH) && has_main_mode) { *value=loaded_main_mode;return ESP_OK; } if (!strcmp(key, "ui_fast")) { *value = test_loaded_fast; return ESP_OK; } if (!strcmp(key, NVS_KEY_SYS_SIZE) && test_loaded_system_size) { *value = test_loaded_system_size; return ESP_OK; } return ESP_FAIL; }
+esp_err_t nvs_set_u8(nvs_handle_t h, const char *key, uint8_t value) { (void)h; if(!strcmp(key,NVS_KEY_BOOK_PARA)){loaded_para=value;has_para=true;} if(!strcmp(key,NVS_KEY_BOOK_TRACK)){loaded_tracking=value;has_tracking=true;} if(!strcmp(key,NVS_KEY_BOOK_WEIGHT_FINE)){loaded_fine=value;has_fine=true;} if(!strcmp(key,NVS_KEY_BOOK_AA)){loaded_aa=value;has_aa=true;} if(!strcmp(key,NVS_KEY_READER_KEYS_V2))keys_v2=value==1; if(!strcmp(key,NVS_KEY_BOOK_WEIGHT)){loaded_weight=value;has_weight=true;} if(!strcmp(key,NVS_KEY_BOOK_INDENT_ADJUST)){loaded_adjust=value;has_adjust=true;} if(!strcmp(key,NVS_KEY_SHELF_STYLE))loaded_shelf=value; if(!strcmp(key,NVS_KEY_SHELF_V22))loaded_shelf_v22=value==1; if(!strcmp(key,NVS_KEY_LOCK_STYLE))loaded_lock=value; if(!strcmp(key,NVS_KEY_HOLD_ACTION)){loaded_hold=value;has_hold=true;} for(unsigned i=0;i<3;++i) if(!strcmp(key,s_reader_key_names[i])){loaded_keys[i]=value;has_keys[i]=true;} if (!strcmp(key, NVS_KEY_MAIN_REFRESH)) {has_main_mode=true;loaded_main_mode=value;} if (!strcmp(key, "ui_fast")) test_loaded_fast=value; return ESP_OK; }
+esp_err_t nvs_get_str(nvs_handle_t h, const char *key, char *value, size_t *size) {
+ (void)h;
+ if(!strcmp(key,NVS_KEY_BOOKS_DIR)||!strcmp(key,NVS_KEY_FONTS_DIR)) {
+  const char *legacy="/sdcard/legacy/custom";size_t bytes=strlen(legacy)+1;
+  if(*size<bytes)return ESP_FAIL;
+  memcpy(value,legacy,bytes);*size=bytes;return ESP_OK;
+ }
+ return ESP_FAIL;
+}
 esp_err_t nvs_set_str(nvs_handle_t h, const char *key, const char *value) { (void)h; (void)key; (void)value; return ESP_OK; }
 esp_err_t nvs_erase_key(nvs_handle_t h, const char *key) { (void)h; (void)key; return ESP_OK; }
 esp_err_t nvs_commit(nvs_handle_t h) { (void)h; ++commit_count; return commit_fails ? ESP_FAIL : ESP_OK; }
@@ -139,7 +148,9 @@ int main(void) {
     assert(app_settings_book_indent_adjust()==0);
     app_settings_set_book_indent_adjust(-20);assert(loaded_adjust==0);
     s_book_indent_adjust=20;app_settings_init();assert(app_settings_book_indent_adjust()==-20);
-    app_settings_set_book_indent_adjust(20);app_settings_set_book_indent_adjust(21);assert(loaded_adjust==40);
+    app_settings_set_book_indent_adjust(20);app_settings_set_book_indent_adjust(21);assert(loaded_adjust==41);
+    app_settings_set_book_indent_adjust(-100);assert(loaded_adjust==200&&app_settings_book_indent_adjust()==-100);
+    app_settings_set_book_indent_adjust(100);assert(loaded_adjust==120&&app_settings_book_indent_adjust()==100);
     loaded_adjust=255;app_settings_init();assert(app_settings_book_indent_adjust()==0);
     app_settings_set_book_indent_adjust(-7);
     has_keys[0]=has_keys[1]=has_keys[2]=true;
@@ -191,7 +202,7 @@ int main(void) {
     assert(app_settings_reader_hold_action()==APP_READER_KEY_HOME);
     s_system_size = 200;
     s_book_px = 62;
-    s_book_tracking = 4;
+    s_book_tracking = 8;
     s_book_indent = 3;
     app_settings_set_book_indent_adjust(-7);
     s_book_rule_offset = 7; /* +6 px */
@@ -333,7 +344,7 @@ int main(void) {
            !strcmp(saved_wifi.ssid, "Home_2.4G") &&
            !strcmp(saved_wifi.password, "password123"));
     assert(app_settings_book_indent_adjust()==-7&&loaded_adjust==13);
-    assert(s_book_px == 62 && s_book_tracking == 4 && s_book_indent == 3 &&
+    assert(s_book_px == 62 && s_book_tracking == 8 && s_book_indent == 3 &&
            s_book_rule_offset == 7 && s_reader_full_pages == 5);
     assert(s_reader_turn_effect == 1 && s_reader_power_turn && s_reader_immersive && s_shelf_style == 2);
     assert(s_staged_shutdown&&app_settings_auto_lock_minutes()==5);
@@ -366,9 +377,9 @@ int main(void) {
     size_t v11_tail_bytes=(size_t)(v12_end-v11_network_at);uint8_t *v11_tail=malloc(v11_tail_bytes);assert(v11_tail);
     assert(fseek(saved,v11_network_at,SEEK_SET)==0&&fread(v11_tail,1,v11_tail_bytes,saved)==v11_tail_bytes);
     /* 旧格式没有背景和首页组件块。/ Legacy tails omit background and Home blocks. */
-    memmove(v11_tail+sizeof(settings_backup_wifi_t), v11_tail+sizeof(settings_backup_wifi_t)+(sizeof(settings_backup_background_t)+sizeof(settings_backup_home_t)), v11_tail_bytes-sizeof(settings_backup_wifi_t)-(sizeof(settings_backup_background_t)+sizeof(settings_backup_home_t)));
-    v11_tail_bytes-=(sizeof(settings_backup_background_t)+sizeof(settings_backup_home_t));v12_end-=(long)(sizeof(settings_backup_background_t)+sizeof(settings_backup_home_t));
-    memcpy(legacy_header.magic,"PICOSETB",8);backup_seal(&legacy_header);
+    memmove(v11_tail+sizeof(settings_backup_wifi_t), v11_tail+sizeof(settings_backup_wifi_t)+(2*sizeof(settings_backup_background_t)+sizeof(settings_backup_home_t)), v11_tail_bytes-sizeof(settings_backup_wifi_t)-(2*sizeof(settings_backup_background_t)+sizeof(settings_backup_home_t)));
+    v11_tail_bytes-=(2*sizeof(settings_backup_background_t)+sizeof(settings_backup_home_t));v12_end-=(long)(2*sizeof(settings_backup_background_t)+sizeof(settings_backup_home_t));
+    memcpy(legacy_header.magic,"PICOSETB",8);legacy_header.flags[BK_TRACKING]=4;backup_seal(&legacy_header);
     uint32_t v11_hash=backup_shutdown_checksum(&legacy_header,legacy_ext[0],legacy_ext[1],legacy_ext[2]);
     for(int i=0;i<4;++i)legacy_ext[i+3]=(uint8_t)(v11_hash>>(8*i));
     v11_hash=backup_profile_checksum(&legacy_header,legacy_ext[0],legacy_ext[1],legacy_ext[2],&saved_profile);
@@ -396,12 +407,12 @@ int main(void) {
     size_t v10_tail_size=(size_t)(v11_end-v10_tail_start);uint8_t *v10_tail=malloc(v10_tail_size);assert(v10_tail);
     assert(fseek(saved,v10_tail_start,SEEK_SET)==0&&fread(v10_tail,1,v10_tail_size,saved)==v10_tail_size);
     /* 旧格式没有背景和首页组件块。/ Legacy tails omit background and Home blocks. */
-    memmove(v10_tail+sizeof(settings_backup_wifi_t), v10_tail+sizeof(settings_backup_wifi_t)+(sizeof(settings_backup_background_t)+sizeof(settings_backup_home_t)), v10_tail_size-sizeof(settings_backup_wifi_t)-(sizeof(settings_backup_background_t)+sizeof(settings_backup_home_t)));
-    v10_tail_size-=(sizeof(settings_backup_background_t)+sizeof(settings_backup_home_t));v11_end-=(long)(sizeof(settings_backup_background_t)+sizeof(settings_backup_home_t));
+    memmove(v10_tail+sizeof(settings_backup_wifi_t), v10_tail+sizeof(settings_backup_wifi_t)+(2*sizeof(settings_backup_background_t)+sizeof(settings_backup_home_t)), v10_tail_size-sizeof(settings_backup_wifi_t)-(2*sizeof(settings_backup_background_t)+sizeof(settings_backup_home_t)));
+    v10_tail_size-=(2*sizeof(settings_backup_background_t)+sizeof(settings_backup_home_t));v11_end-=(long)(2*sizeof(settings_backup_background_t)+sizeof(settings_backup_home_t));
     saved_keys.actions[0]=APP_READER_KEY_HOME;saved_keys.actions[1]=APP_READER_KEY_FULLSCREEN;saved_keys.actions[2]=APP_READER_KEY_REFRESH;
     uint32_t missing_tools_hash=backup_keys_checksum(&saved_keys);
     for(int i=0;i<4;++i)saved_keys.checksum[i]=(uint8_t)(missing_tools_hash>>(i*8));
-    memcpy(legacy_header.magic,"PICOSETA",8);backup_seal(&legacy_header);
+    memcpy(legacy_header.magic,"PICOSETA",8);legacy_header.flags[BK_TRACKING]=4;backup_seal(&legacy_header);
     uint32_t v10_ext_hash=backup_shutdown_checksum(&legacy_header,legacy_ext[0],legacy_ext[1],legacy_ext[2]);
     for(int i=0;i<4;++i)legacy_ext[i+3]=(uint8_t)(v10_ext_hash>>(i*8));
     uint32_t v10_profile_hash=backup_profile_checksum(&legacy_header,legacy_ext[0],legacy_ext[1],legacy_ext[2],&saved_profile);
@@ -424,7 +435,7 @@ int main(void) {
     assert(fread(&legacy_header,1,sizeof(legacy_header),saved)==sizeof(legacy_header));
     assert(fread(legacy_ext,1,sizeof(legacy_ext),saved)==sizeof(legacy_ext));
     assert(fread(&saved_profile,1,sizeof(saved_profile),saved)==sizeof(saved_profile));
-    memcpy(legacy_header.magic,"PICOSET8",8);backup_seal(&legacy_header);legacy_ext[2]&=7;
+    memcpy(legacy_header.magic,"PICOSET8",8);legacy_header.flags[BK_TRACKING]=4;backup_seal(&legacy_header);legacy_ext[2]&=7;
     uint32_t ext_hash=backup_shutdown_checksum(&legacy_header,legacy_ext[0],legacy_ext[1],legacy_ext[2]);
     for(int i=0;i<4;++i)legacy_ext[i+3]=(uint8_t)(ext_hash>>(i*8));
     saved_profile.home_full_refresh=(saved_profile.home_full_refresh&127)|64;
@@ -435,8 +446,8 @@ int main(void) {
     size_t tail_size=(size_t)(file_end-tail_start);uint8_t *tail=malloc(tail_size);assert(tail);
     assert(fseek(saved,tail_start,SEEK_SET)==0&&fread(tail,1,tail_size,saved)==tail_size);
     /* 旧格式没有背景和首页组件块。/ Legacy tails omit background and Home blocks. */
-    memmove(tail+sizeof(settings_backup_wifi_t), tail+sizeof(settings_backup_wifi_t)+(sizeof(settings_backup_background_t)+sizeof(settings_backup_home_t)), tail_size-sizeof(settings_backup_wifi_t)-(sizeof(settings_backup_background_t)+sizeof(settings_backup_home_t)));
-    tail_size-=(sizeof(settings_backup_background_t)+sizeof(settings_backup_home_t));file_end-=(long)(sizeof(settings_backup_background_t)+sizeof(settings_backup_home_t));
+    memmove(tail+sizeof(settings_backup_wifi_t), tail+sizeof(settings_backup_wifi_t)+(2*sizeof(settings_backup_background_t)+sizeof(settings_backup_home_t)), tail_size-sizeof(settings_backup_wifi_t)-(2*sizeof(settings_backup_background_t)+sizeof(settings_backup_home_t)));
+    tail_size-=(2*sizeof(settings_backup_background_t)+sizeof(settings_backup_home_t));file_end-=(long)(2*sizeof(settings_backup_background_t)+sizeof(settings_backup_home_t));
     rewind(saved);assert(fwrite(&legacy_header,1,sizeof(legacy_header),saved)==sizeof(legacy_header));
     assert(fwrite(legacy_ext,1,sizeof(legacy_ext),saved)==sizeof(legacy_ext));
     assert(fwrite(&saved_profile,1,sizeof(saved_profile),saved)==sizeof(saved_profile));
@@ -495,6 +506,9 @@ int main(void) {
     assert(fread(&legacy, 1, sizeof(legacy), file) == sizeof(legacy));
     assert(fclose(file) == 0);
     memcpy(legacy.magic, "PICOSET3", sizeof(legacy.magic));
+    if(backup_version(&legacy)<19)legacy.flags[BK_TRACKING]=4;
+    strlcpy(legacy.books_dir,"/sdcard/legacy/books",sizeof(legacy.books_dir));
+    strlcpy(legacy.fonts_dir,"/sdcard/legacy/fonts",sizeof(legacy.fonts_dir));
     backup_seal(&legacy);
     uint8_t v3_extension[6] = {3, 4};
     uint32_t v3_hash = backup_rule_offset_checksum(&legacy, v3_extension[0], v3_extension[1]);
@@ -505,6 +519,9 @@ int main(void) {
     assert(fwrite(v3_extension, 1, sizeof(v3_extension), file) == sizeof(v3_extension));
     assert(fclose(file) == 0);
     assert(app_settings_backup_restore() == ESP_OK && !s_staged_shutdown);
+    assert(!strcmp(app_settings_books_dir(),"/sdcard/books")&&!strcmp(app_settings_fonts_dir(),"/sdcard/fonts"));
+    app_settings_init();
+    assert(!strcmp(app_settings_books_dir(),"/sdcard/books")&&!strcmp(app_settings_fonts_dir(),"/sdcard/fonts"));
 
     assert(!s_home_full_refresh && !strcmp(s_device_name, "kiikoread") && !s_status_signature[0]);
     assert(!strcmp(saved_wifi.ssid, "Home_2.4G")); /* Old backups leave network alone. */
@@ -515,6 +532,7 @@ int main(void) {
     assert(fread(&legacy, 1, sizeof(legacy), file) == sizeof(legacy));
     assert(fclose(file) == 0);
     memcpy(legacy.magic, "PICOSET2", sizeof(legacy.magic));
+    if(backup_version(&legacy)<19)legacy.flags[BK_TRACKING]=4;
     backup_seal(&legacy);
     uint8_t old_extension[5] = {3};
     uint32_t old_hash = backup_indent_checksum(&legacy, old_extension[0]);
@@ -534,6 +552,7 @@ int main(void) {
     assert(fread(&legacy, 1, sizeof(legacy), file) == sizeof(legacy));
     assert(fclose(file) == 0);
     memcpy(legacy.magic, "PICOSET1", sizeof(legacy.magic));
+    if(backup_version(&legacy)<19)legacy.flags[BK_TRACKING]=4;
     backup_seal(&legacy);
     file = fopen(BACKUP_FILE, "wb");
     assert(file);
@@ -616,6 +635,74 @@ int main(void) {
     s_home_component=(app_home_component_t)3;assert(app_settings_backup_save()==ESP_OK);
     s_home_component=APP_HOME_KEHAI;assert(app_settings_backup_restore()==ESP_OK&&app_settings_home_component()==APP_HOME_CLOCK);
     assert(remove(BACKUP_FILE)==0);
+    for(unsigned old=0;old<=4;++old){has_tracking=true;loaded_tracking=old;app_settings_init();assert(app_settings_book_tracking()==old*2-4-APP_BOOK_TRACK_MIN);}
+    for(unsigned old=128;old<=148;++old){
+        has_tracking=true;loaded_tracking=old;app_settings_init();
+        int px=(int)old-128-4;if(px>15)px=15;
+        assert(app_settings_book_tracking()==px-APP_BOOK_TRACK_MIN);
+    }
+    for(unsigned track=0;track<APP_BOOK_TRACK_COUNT;++track){
+        s_book_tracking=255;app_settings_set_book_tracking(track);assert(loaded_tracking==192+track);
+        s_book_tracking=255;app_settings_init();assert(app_settings_book_tracking()==track);
+    }
+    const uint8_t invalid_tracks[]={5,127,149,191,223,255};
+    for(unsigned i=0;i<sizeof(invalid_tracks);++i){loaded_tracking=invalid_tracks[i];s_book_tracking=255;app_settings_init();assert(s_book_tracking==-APP_BOOK_TRACK_MIN);}
+    assert(APP_BOOK_TRACK_COUNT==31&&-APP_BOOK_TRACK_MIN==APP_BOOK_TRACK_COUNT/2);
+    for(unsigned track=0;track<APP_BOOK_TRACK_COUNT;++track){
+        app_settings_set_book_tracking(track);assert(app_settings_backup_save()==ESP_OK);
+        s_book_tracking=255;assert(app_settings_backup_restore()==ESP_OK);
+        assert(s_book_tracking==track&&loaded_tracking==192+track);
+    }
+    // V19备份按实际像素迁移，超过新上限的+16px收敛为+15px。/ V19 backups retain physical spacing, clamping +16px to +15px.
+    for(unsigned old=0;old<=20;++old){
+        app_settings_set_book_paragraph_spacing(25);assert(app_settings_backup_save()==ESP_OK);
+        FILE *legacy_file=fopen(BACKUP_FILE,"r+b");assert(legacy_file);
+        settings_backup_v1_t header;uint8_t ext[7];settings_backup_profile_t profile;
+        assert(fread(&header,1,sizeof(header),legacy_file)==sizeof(header));
+        assert(fread(ext,1,sizeof(ext),legacy_file)==sizeof(ext));
+        assert(fread(&profile,1,sizeof(profile),legacy_file)==sizeof(profile));
+        memcpy(header.magic,"PICOSETJ",8);header.flags[BK_TRACKING]=(uint8_t)old;backup_seal(&header);
+        uint32_t hash=backup_shutdown_checksum(&header,ext[0],ext[1],ext[2]);
+        for(int i=0;i<4;++i)ext[3+i]=(uint8_t)(hash>>(8*i));
+        hash=backup_profile_checksum(&header,ext[0],ext[1],ext[2],&profile);
+        for(int i=0;i<4;++i)profile.checksum[i]=(uint8_t)(hash>>(8*i));
+        rewind(legacy_file);assert(fwrite(&header,1,sizeof(header),legacy_file)==sizeof(header));
+        assert(fwrite(ext,1,sizeof(ext),legacy_file)==sizeof(ext));
+        assert(fwrite(&profile,1,sizeof(profile),legacy_file)==sizeof(profile)&&fclose(legacy_file)==0);
+        s_book_tracking=255;assert(app_settings_backup_restore()==ESP_OK);
+        int px=(int)old-4;if(px>15)px=15;
+        assert(s_book_tracking==px-APP_BOOK_TRACK_MIN&&loaded_tracking==192+s_book_tracking);
+    }
+    const uint8_t paragraph_stops[]={0,5,10,15,20,25,30,40,50,75,100};
+    assert(APP_BOOK_PARAGRAPH_COUNT==11);
+    for(unsigned i=0;i<APP_BOOK_PARAGRAPH_COUNT;++i){
+        assert(app_settings_book_paragraph_value(i)==paragraph_stops[i]);
+        assert(app_settings_book_paragraph_level(paragraph_stops[i])==i);
+        app_settings_set_book_paragraph_spacing(paragraph_stops[i]);
+        assert(app_settings_book_paragraph_spacing()==paragraph_stops[i]);
+        s_book_para=255;app_settings_init();assert(s_book_para==paragraph_stops[i]);
+        assert(app_settings_backup_save()==ESP_OK);s_book_para=255;
+        assert(app_settings_backup_restore()==ESP_OK&&s_book_para==paragraph_stops[i]);
+    }
+    assert(app_settings_book_paragraph_value(APP_BOOK_PARAGRAPH_COUNT/2)==25);
+    has_tracking=false;s_book_tracking=-APP_BOOK_TRACK_MIN;
+    // PNG书签独立于壁纸保存；恢复缺失PNG时退票根，不能留无效锁屏入口。
+    // PNG bookmarks persist independently of wallpapers; a missing restored PNG falls back to a usable ticket.
+    app_settings_set_bookmark_path("/sdcard/pictures/marker.png");app_settings_set_lock_style(3);
+    assert(app_settings_lock_style()==3&&!strcmp(app_settings_bookmark_path(),"/sdcard/pictures/marker.png"));
+    app_settings_set_bookmark_path("/sdcard/pictures/not-png.jpg");
+    assert(!strcmp(app_settings_bookmark_path(),"/sdcard/pictures/marker.png"));
+    assert(app_settings_backup_save()==ESP_OK);s_bookmark[0]=0;s_lock_style=0;
+    assert(app_settings_backup_restore()==ESP_OK&&app_settings_lock_style()==0&&!app_settings_bookmark_path()[0]);
+    // 所有阅读字号都可保存与备份恢复，范围外仍使用默认48。
+    // Every reader size survives settings/backup restore; out-of-range values still use default 48.
+    for(int px=18;px<=90;++px){
+        app_settings_set_book_px((uint8_t)px);assert(app_settings_book_px()==px);
+        assert(app_settings_backup_save()==ESP_OK);s_book_px=0;
+        assert(app_settings_backup_restore()==ESP_OK&&app_settings_book_px()==px);
+    }
+    app_settings_set_book_px(17);assert(app_settings_book_px()==48);
+    app_settings_set_book_px(91);assert(app_settings_book_px()==48);
     puts("settings backup host test passed (200% sizes, retired shelf migration, collage persistence/restore without wallpaper)");
     return 0;
 }

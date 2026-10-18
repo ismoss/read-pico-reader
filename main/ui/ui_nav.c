@@ -28,7 +28,7 @@
 // 底栏图标盒、返回键箭头、充电闪电的边长。
 // Box sizes for the bar icons, the back chevron and the charging bolt.
 #define UI_NAV_TAB_ICON_PX 44
-#define UI_NAV_BACK_ICON_PX 38
+#define UI_NAV_BACK_ICON_PX 48
 #define UI_NAV_BOLT_ICON_PX 26
 #define UI_NAV_NETWORK_ICON_PX 28
 #define UI_STATUS_TIME_PX 28
@@ -105,14 +105,10 @@ static void status_fit_signature(char *text, int width) {
 static const char *const labels[] = {"首页", "书架", "文件管理", "设置"};
 
 void ui_nav_back(uint8_t *fb, int x, int y) {
-    ui_click_feedback_register(fb, (EpdRect){x - 10, y + 3, 64, 64}, UI_CLICK_BACK_SMALL, UI_ICON_CHEVRON_LEFT);
-    // 参考系统题头缩小返回键，中心仍保持在 y=113。/ Match the smaller reference back control while retaining the title centerline.
-    ui_fill_round_rect(fb, (EpdRect){x, y + 13, 44, 44}, 22, UI_GRAY_WHITE);
-    ui_draw_round_rect(fb, (EpdRect){x, y + 13, 44, 44}, 22, UI_NAV_BACK_BORDER_GRAY);
-    ui_draw_round_rect(fb, (EpdRect){x + 1, y + 14, 42, 42}, 21, UI_NAV_BACK_BORDER_GRAY);
-    // Lucide chevron-left 的笔画占画布 14/24 高，取 38 像素复现原来 22 像素的视觉高度。
-    // Lucide chevron-left spans 14/24 of its canvas, so 38 px reproduces the old 22 px visual height.
-    ui_draw_icon(fb, x + 22, y + 35, UI_NAV_BACK_ICON_PX, UI_ICON_CHEVRON_LEFT, UI_GRAY_BLACK);
+    ui_click_feedback_register(fb,(EpdRect){x-10,y+3,64,64},UI_CLICK_BACK_SMALL,UI_ICON_ANIMATE_CIRCLE_CHEVRON_LEFT);
+    // 24px原画以48px输出，圆外径约44px，中心与触控区域保持原位。
+    // Render the original 24px artwork at 48px for an approximately 44px circle without changing center or hits.
+    ui_draw_icon(fb,x+22,y+35,UI_NAV_BACK_ICON_PX,UI_ICON_ANIMATE_CIRCLE_CHEVRON_LEFT,0x30);
 }
 
 void ui_nav_wifi_icon(uint8_t *fb, int cx, int cy, int size, uint8_t gray) {

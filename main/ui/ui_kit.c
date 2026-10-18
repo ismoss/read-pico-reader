@@ -48,7 +48,7 @@ uint8_t ui_contrast_gray(uint8_t gray) {
     return (uint8_t)value & 0xf0;
 }
 
-static uint8_t ui_read_pixel(const uint8_t *fb, int x, int y) {
+uint8_t ui_read_pixel(const uint8_t *fb, int x, int y) {
     int px = x, py = y;
     switch (epd_get_rotation()) {
         case EPD_ROT_PORTRAIT: px = epd_width() - y - 1; py = x; break;
@@ -141,6 +141,49 @@ void ui_draw_icon(
                 (background * (15 - cover) + (int)gray * cover + 7) / 15;
             epd_draw_pixel(px, py, ui_contrast_gray((uint8_t)blended), framebuffer);
         }
+    }
+}
+
+EpdRect ui_pager_area(void) { return (EpdRect){36,1006,612,50}; }
+EpdRect ui_pager_rect(int action) {
+    static const int left[]={36,116,480,576},width[]={72,88,88,72};
+    return action>=UI_PAGER_FIRST&&action<=UI_PAGER_LAST?
+        (EpdRect){left[action],1006,width[action],50}:(EpdRect){0};
+}
+int ui_pager_hit(int x,int y) {
+    for(int action=UI_PAGER_FIRST;action<=UI_PAGER_LAST;++action)
+        if(ui_rect_hit(ui_pager_rect(action),x,y))return action;
+    return UI_PAGER_NONE;
+}
+int ui_pager_target(int action,int page,int pages) {
+    if(pages<1)pages=1;
+    if(page<0)page=0;
+    if(page>=pages)page=pages-1;
+    if(action==UI_PAGER_FIRST)return 0;
+    if(action==UI_PAGER_PREVIOUS)return page>0?page-1:page;
+    if(action==UI_PAGER_NEXT)return page+1<pages?page+1:page;
+    if(action==UI_PAGER_LAST)return pages-1;
+    return page;
+}
+void ui_pager_draw(uint8_t *fb,const char *label,int page,int pages,bool key_mode,int pressed) {
+    ui_text_box(fb,(EpdRect){212,1006,260,50},21,label,EPD_DRAW_ALIGN_CENTER,false);
+    for(int action=UI_PAGER_FIRST;action<=UI_PAGER_LAST;++action){
+        EpdRect r=ui_pager_rect(action);
+        bool previous=action==UI_PAGER_FIRST||action==UI_PAGER_PREVIOUS;
+        bool end=action==UI_PAGER_FIRST||action==UI_PAGER_LAST;
+        bool down=pressed==action,outlined=key_mode&&!end;
+        bool enabled=ui_pager_target(action,page,pages)!=page;
+        int cx=r.x+r.width/2+(down?(previous?-3:3):0),cy=r.y+r.height/2;
+        int size=down?42:36;
+        static const ui_icon_t icons[]={UI_ICON_PAGER_CHEVRON_FIRST,UI_ICON_CHEVRON_LEFT,
+            UI_ICON_CHEVRON_RIGHT,UI_ICON_PAGER_CHEVRON_LAST};
+        ui_icon_t icon=icons[action];
+        // AnimateIcons 的首末页竖线与箭头；按键模式仅沿轮廓描边，不添加圆圈或底框。
+        // AnimateIcons end stops and chevrons; key mode outlines the glyph without circles or backing boxes.
+        if(outlined)
+            for(int dy=-2;dy<=2;++dy)for(int dx=-2;dx<=2;++dx)
+                if(dx*dx+dy*dy<=4)ui_draw_icon(fb,cx+dx,cy+dy,size,icon,enabled?0x10:0x90);
+        ui_draw_icon(fb,cx,cy,size,icon,outlined?(down?0x30:0xf0):(enabled?0:0xa0));
     }
 }
 
