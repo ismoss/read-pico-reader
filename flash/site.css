@@ -9,3 +9,7 @@
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}.button{transition:none}}
 
 .install-card>.archive-bin{margin-top:0;margin-bottom:20px;font-size:12px}
+
+/* 在线固件实例等比显示，内容高度由同源 iframe 回报。/ Uniform firmware view with same-origin content sizing. */
+.live-gallery{padding:24px}.live-gallery iframe{display:block;width:100%;height:820px;border:0;background:#fff}
+@media(max-width:620px){.live-gallery{padding:18px}}

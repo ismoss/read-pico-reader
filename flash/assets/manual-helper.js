@@ -7,8 +7,11 @@
   const script = document.currentScript;
   const indexURL = new URL(script.dataset.index, location.href);
   const manualURL = new URL(script.dataset.manual, location.href);
-  const examples = ['最近看的书排前面', '英文怎么打大写', 'WiFi 密码输错了', '恢复阅读进度'];
-  let pending, search;
+  const examples = ['怎么调阅读字号', '怎么设置锁屏密码', '怎么切换书架样式', '英文怎么打大写'];
+  let pending, search, guidePending;
+  const simulatorURL=new URL('../simulator/',script.src);
+  function guides(){if(!guidePending)guidePending=fetch(new URL('guides.json',simulatorURL)).then(r=>r.ok?r.json():{}).catch(()=>({}));return guidePending;}
+
   function load() {
     if (!pending) pending = fetch(indexURL).then(r => {
       if (!r.ok) throw new Error('manual unavailable');
@@ -51,7 +54,7 @@
     status.textContent = '正在查找说明书…'; output.replaceChildren();
     const asked = el('p', 'manual-asked', q); output.append(asked);
     try {
-      const find = await load(); if (current !== sequence) return;
+      const [find,availableGuides] = await Promise.all([load(),guides()]); if (current !== sequence) return;
       const hits = find(q, 5);
       status.textContent = hits.length ? `找到 ${hits.length} 项相关操作，点击可查看完整图解。` : '没有找到相关操作。换个说法，或打开完整目录查找。';
       for (let n = 0; n < hits.length; n++) {
@@ -64,7 +67,17 @@
         }
         const link = el('a', 'manual-answer-link', n === 0 ? '查看完整步骤与图解 →' : '定位到说明书 →');
         link.href = linkFor(hit.id);
-        link.addEventListener('click', () => dialog.close()); card.append(link); output.append(card);
+        link.addEventListener('click', () => dialog.close()); card.append(link);
+        if(availableGuides[hit.id]){
+          const demo=el('a','manual-answer-demo',availableGuides[hit.id].scope==='入口'?'在模拟器查看入口 →':'在模拟器里演示 →');
+          const url=new URL(simulatorURL);url.searchParams.set('guide',hit.id);demo.href=url.href;
+          demo.addEventListener('click',event=>{
+            const frame=document.getElementById('firmware-simulator');
+            if(frame){event.preventDefault();dialog.close();frame.scrollIntoView({behavior:'smooth',block:'center'});frame.contentWindow.postMessage({type:'kiikoread:guide',id:hit.id},location.origin);}
+            else if(document.getElementById('screen')){event.preventDefault();dialog.close();document.dispatchEvent(new CustomEvent('kiikoread:start-guide',{detail:{id:hit.id}}));}
+          });card.append(demo);
+        }
+        output.append(card);
       }
       if (!hits.length) {
         const link = el('a', 'manual-answer-link', '打开全部说明书 →'); link.href = manualURL; output.append(link);

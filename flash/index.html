@@ -13,10 +13,10 @@
   </script>
   <link rel="stylesheet" href="./site.css">
   <script src="./installer-bridge.js"></script>
-  <script src="./site.js?v=rc97-20261018" defer></script>
+  <script src="./site.js?v=simulator-rc97-20261020" defer></script>
   <link rel="stylesheet" href="./assets/manual-helper.css">
   <script src="./assets/manual-search.js" defer></script>
-  <script src="./assets/manual-helper.js" data-index="./manual/manual-index.json" data-manual="./manual/" defer></script>
+  <script src="./assets/manual-helper.js?v=simulator-20261020" data-index="./manual/manual-index.json" data-manual="./manual/" defer></script>
   <script type="module" src="./vendor/web/install-button.js?v=verified-bundle-20261018"></script>
   <script src="./flasher-integrity.js?v=20261018" defer></script>
   <script src="./versions.js?v=verified-bundle-20261018" defer></script>
@@ -37,19 +37,9 @@
     <div class="hero-spec"><span>EPUB / TXT</span><span>自定义字体</span><span>开源固件</span></div>
     <p class="hardware">适用墨水屏型号：RDP-G01-W</p>
   </div>
-  <div class="screen-gallery" aria-label="墨水屏界面展示">
-    <div class="gallery-heading"><span class="eyebrow">SCREEN PREVIEW</span><span id="screen-counter">01 / 05</span></div>
-    <button class="screen-open" id="screen-open" type="button" aria-label="放大首页界面"><img id="screen-image" src="./assets/screens/home-rc95-folder.png" alt="kiikoread 首页界面预览" width="684" height="1216"><span class="zoom-label">点击放大 <span aria-hidden="true">↗</span></span></button>
-    <div class="screen-tabs" role="tablist" aria-label="选择预览界面">
-      <button type="button" role="tab" id="tab-home" aria-selected="true" aria-controls="screen-caption" data-screen="home">首页</button>
-      <button type="button" role="tab" id="tab-shelf" aria-selected="false" aria-controls="screen-caption" tabindex="-1" data-screen="shelf">书架</button>
-      <button type="button" role="tab" id="tab-reader" aria-selected="false" aria-controls="screen-caption" tabindex="-1" data-screen="reader">阅读</button>
-      <button type="button" role="tab" id="tab-wifi" aria-selected="false" aria-controls="screen-caption" tabindex="-1" data-screen="wifi">连接</button>
-      <button type="button" role="tab" id="tab-lock" aria-selected="false" aria-controls="screen-caption" tabindex="-1" data-screen="lock">锁屏</button>
-    </div>
-    <div id="screen-styles" class="screen-styles" role="group" hidden></div>
-    <p id="screen-caption" class="screen-caption" role="tabpanel" aria-labelledby="tab-home">rc97 首页：阅读时长、目标圆环与资料卡头像，续读卡片搭配最近三本书和月阅读记录。</p>
-    <p class="preview-note">首页按 0.3.3-rc97 正式版绘制，书籍与阅读数据为示例；刷新效果以实机为准。</p>
+  <div class="screen-gallery live-gallery" aria-label="kiikoread 实际固件在线体验">
+    <iframe id="firmware-simulator" src="./simulator/?embed=1&amp;v=rc97-20261020" title="kiikoread rc97 在线模拟器" width="500" height="820" loading="eager"></iframe>
+    <noscript>请启用 JavaScript，或查看<a href="./manual/">使用说明</a>。</noscript>
   </div>
 </section>
 <div class="section-divider wrap"><span>少一点打扰，多一点阅读。</span><span>DESIGNED FOR READING</span></div>

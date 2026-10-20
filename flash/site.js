@@ -113,3 +113,12 @@
     list.replaceChildren(...notes.map(note => Object.assign(document.createElement("li"), {textContent:note})));
   });
 })();
+
+(() => {
+ const frame=document.getElementById('firmware-simulator');
+ window.addEventListener('message',event=>{
+  if(!frame||event.origin!==location.origin||event.source!==frame.contentWindow)return;
+  if(event.data?.type==='kiikoread:simulator-height'&&Number.isFinite(event.data.height))frame.style.height=Math.max(650,Math.min(1200,event.data.height))+'px';
+  if(event.data?.type==='kiikoread:ask-manual')document.querySelector('.manual-launch')?.click();
+ });
+})();

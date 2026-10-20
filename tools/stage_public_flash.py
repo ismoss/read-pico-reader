@@ -44,6 +44,10 @@ def stage(output: Path, ota_origin: str | None = None) -> None:
     shutil.copytree(FLASH / "manual", output / "manual", dirs_exist_ok=True)
     if (FLASH / "new-features").is_dir():
         shutil.copytree(FLASH / "new-features", output / "new-features", dirs_exist_ok=True)
+    # 中文：只发布构建好的模拟器；宿主源码、个人书库和工具链留在站点外。
+    # English: Publish built simulator assets only, excluding sources, personal files and toolchains.
+    if (FLASH / "simulator").is_dir():
+        shutil.copytree(FLASH / "simulator", output / "simulator", dirs_exist_ok=True)
     version = json.loads((FLASH / "manifest.json").read_text())["version"]
     versioned = FLASH / f"Pico-update-{version}.bin"
     if versioned.is_file(): shutil.copy2(versioned, output / versioned.name)

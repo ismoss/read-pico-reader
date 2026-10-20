@@ -18,3 +18,6 @@
   Cache-Control: no-store
 /vendor/web/install-button.js
   Cache-Control: no-store
+
+/simulator/*
+  Cache-Control: no-cache
