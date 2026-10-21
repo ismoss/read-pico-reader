@@ -584,7 +584,9 @@ int main(void) {
     test_guide_segments = 0; test_guide_first_x = -1; vertical_draws = 0;
     book_layout_draw_page(&fb, 0, r, 40);
     assert(test_guide_segments > 1 && vertical_draws > 0);
-    assert(test_guide_first_x >= first_vertical_x + 40 && test_guide_height > 2);
+    // 首个虚线可被文字起点裁成一像素；断言实际交集，不能要求完整段长。/ A first dash may clip to one pixel at the text start; assert that intersection instead of a full segment.
+    assert(test_guide_first_x >= first_vertical_x + 40);
+    assert(test_guide_first_y == first_vertical_y && test_guide_height == 1);
     // 阅读线只铺在有字的纵向范围：列首缩进下面没有虚线，第一段从字首起笔而不是页顶。
     // The guide inks only the glyph span: no dashes under the leading indent, so the first segment
     // starts at the first glyph instead of the page top.
