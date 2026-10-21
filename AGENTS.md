@@ -214,6 +214,9 @@ Every comment is bilingual. Comments only; no logic changes.
 
 ## Previous official release / 上一正式版
 
+用户2026-10-21要求修复官网OTA，不切换GitHub固件镜像。发布前及证书续期后按 `docs/OTA_MAINTENANCE.md` 检查原正式固件的信任链兼容性、完整下载与Range续传，并用已发布设备实测。不要以浏览器访问成功替代设备证书验证，不关闭TLS/SHA校验。
+The user requires repairing the official OTA origin without a GitHub firmware mirror. Follow `docs/OTA_MAINTENANCE.md` before releases and after certificate renewal; validate released trust stores, downloads/resumes and an actual released device, retaining TLS/SHA verification.
+
 每个正式版本同时保留USB全量包与TF升级包，官网按所选版本分别提供下载入口。TF应用Bin保留兼容文件名Pico-update.bin，ZIP可附说明与校验值；不得将USB全量包当作TF升级镜像。
 Retain both USB full base packages and TF application upgrades for each official release, with separate version-matched website downloads. Keep Pico-update.bin for TF compatibility; ZIPs may include instructions/checksums. Never present a USB base bundle as a TF upgrade image.
 
