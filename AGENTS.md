@@ -42,6 +42,9 @@ Publish GitHub Releases alongside the web flasher, TF downloads and online OTA. 
 
 ## 目录职责 / Layout
 
+用户2026-10-21临时授权rc98 OTA采用既有GitHub Pages固件地址并做rc97实机验证，以绕开官网Pages独立证书的不兼容。保留原Release字节、SHA及双槽分区，不把直接Release重定向URL交给旧OTA客户端。后续恢复官网来源需先通过旧版真实信任库及设备下载验证；不能把该临时授权外推为任意镜像或关闭TLS验证。
+The user temporarily authorized the existing GitHub Pages rc98 OTA image and real rc97 validation on 2026-10-21. Retain original Release bytes, hashes and partitions; old OTA clients cannot use direct Release redirects. Restore the official image origin only after legacy-trust and device-download checks; this does not authorize arbitrary mirrors or disabled TLS verification.
+
 | 路径 / Path | 职责 / Role |
 | --- | --- |
 | `main/app_main.c` | 开机装配：板级 init、读设置、定 VCOM、开机图、字体，然后交给 `app_loop`。/ Boot wiring, then `app_loop`. |

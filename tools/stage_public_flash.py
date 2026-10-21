@@ -111,12 +111,11 @@ def stage(output: Path, ota_origin: str | None = None) -> None:
             if target.is_dir(): target = target / 'index.html'
             assert target.is_relative_to(output.resolve()) and target.is_file(), (
                 f"broken local link in {page}: {link}")
-    if ota_origin:
-        assert ota_origin == 'https://kiikoread.com'
-    # 中文：用户指定固件始终从官网获取，保留来源与校验规则。
-    # English: The user requires firmware downloads from the official site, preserving origin and integrity checks.
-    origin = ota_origin or 'https://kiikoread.com'
     feed = json.loads((output / 'update.json').read_text())
+    # 用户临时授权rc98用既有GitHub Pages源；只接受固件已允许的两个HTTPS来源。
+    # The user temporarily authorized the existing Pages source for rc98; retain the firmware's exact HTTPS allowlist.
+    origin = ota_origin or feed['url'].rsplit('/', 1)[0]
+    assert origin in ('https://kiikoread.com', 'https://wegooo-cell.github.io/read-pico-reader')
     feed['url'] = origin + '/' + f'Pico-update-{version}.bin'
     (output / 'update.json').write_text(json.dumps(feed, ensure_ascii=False, indent=2) + '\n')
     check(output)
@@ -130,6 +129,6 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('output', nargs='?', type=Path, default=ROOT / '_site')
-    parser.add_argument('--ota-origin', choices=['https://kiikoread.com'])
+    parser.add_argument('--ota-origin', choices=['https://kiikoread.com', 'https://wegooo-cell.github.io/read-pico-reader'])
     args = parser.parse_args()
     stage(args.output, args.ota_origin)
