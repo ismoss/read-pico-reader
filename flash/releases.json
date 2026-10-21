@@ -24,7 +24,34 @@
           "sha256": "7d2c7ac4888bfd75cd5f56e8d61f69595121183afc81556c876732fd3782c62f"
         }
       },
-      "usb_package_url": "https://github.com/wegooo-cell/read-pico-reader/releases/download/v0.3.3-rc97/kiikoread-0.3.3-rc97-USB.zip"
+      "usb_package_url": "https://github.com/wegooo-cell/read-pico-reader/releases/download/v0.3.3-rc97/kiikoread-0.3.3-rc97-USB.zip",
+      "tf_package_url": "https://github.com/wegooo-cell/read-pico-reader/releases/download/v0.3.3-rc97/kiikoread-0.3.3-rc97-TF.zip"
+    },
+    {
+      "version": "0.3.3-rc96",
+      "manifest": "releases/0.3.3-rc96/manifest.json",
+      "bin": "Pico-update-0.3.3-rc96.bin",
+      "source_commit": "7c6637204731cdff4cd48f821f6921a296133ed0",
+      "files": {
+        "bootloader.bin": {
+          "size": 21232,
+          "sha256": "856fb19103088cf4aad7ada0f54a96c50e34969318f435b3753159b94b727324"
+        },
+        "partitions.bin": {
+          "size": 3072,
+          "sha256": "edba9d92e5fc51c706c12f4b4a5d5d23728ba8fb0fbc00be654f1eccef404bda"
+        },
+        "firmware.bin": {
+          "size": 4173392,
+          "sha256": "e0eaa966bd3cea3a03ee83fa6f310febf2a96186758dbba9367468714c1c1e0a"
+        },
+        "ota_data_initial.bin": {
+          "size": 8192,
+          "sha256": "7d2c7ac4888bfd75cd5f56e8d61f69595121183afc81556c876732fd3782c62f"
+        }
+      },
+      "usb_package_url": "https://github.com/wegooo-cell/read-pico-reader/releases/download/v0.3.3-rc96/kiikoread-0.3.3-rc96-USB.zip",
+      "tf_package_url": "https://github.com/wegooo-cell/read-pico-reader/releases/download/v0.3.3-rc96/kiikoread-0.3.3-rc96-TF.zip"
     },
     {
       "version": "0.3.3-rc86",

@@ -75,7 +75,7 @@
       const tfPackage = document.getElementById("tf-package-download");
       if (tfPackage) {
         const expected = `https://github.com/wegooo-cell/read-pico-reader/releases/download/v${manifest.version}/kiikoread-${manifest.version}-TF.zip`;
-        tfPackage.hidden = manifest.tf_package_url !== expected;
+        tfPackage.hidden = (manifest.tf_package_url || choice.tf_package_url) !== expected;
         tfPackage.removeAttribute("href");
         if (!tfPackage.hidden) {
           tfPackage.href = expected;
