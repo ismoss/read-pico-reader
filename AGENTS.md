@@ -42,8 +42,8 @@ Publish GitHub Releases alongside the web flasher, TF downloads and online OTA. 
 
 ## 目录职责 / Layout
 
-用户2026-10-21临时授权rc98 OTA采用既有GitHub Pages固件地址并做rc97实机验证，以绕开官网Pages独立证书的不兼容。保留原Release字节、SHA及双槽分区，不把直接Release重定向URL交给旧OTA客户端。后续恢复官网来源需先通过旧版真实信任库及设备下载验证；不能把该临时授权外推为任意镜像或关闭TLS验证。
-The user temporarily authorized the existing GitHub Pages rc98 OTA image and real rc97 validation on 2026-10-21. Retain original Release bytes, hashes and partitions; old OTA clients cannot use direct Release redirects. Restore the official image origin only after legacy-trust and device-download checks; this does not authorize arbitrary mirrors or disabled TLS verification.
+用户2026-10-21明确指定GitHub Pages为默认OTA清单及应用来源，rc97真机已下载并校验原rc98成功。新固件优先GitHub清单、官网清单备用；原已发布rc97/98仍依照其原内置顺序请求。官网网页刷机独立保持，正式Bin及历史包继续归档GitHub Release；旧OTA不能直接使用会重定向的Release附件URL。保留双槽、HTTPS与完整SHA校验；不得因官网证书问题重现而自动改回官网应用地址，也不得外推为任意镜像或关闭TLS校验。后续更改默认来源先获得用户指示并验证旧信任库与实际下载。
+The user selected GitHub Pages as the default OTA metadata/image source on 2026-10-21; a real rc97 device downloaded and verified original rc98. New builds prefer Pages metadata and retain the website fallback; released clients keep their baked-in order. Keep web flashing separate and archive original binaries/packages in Releases; legacy OTA cannot follow Release redirects. Retain dual slots, HTTPS and full SHA checks. Do not silently restore the incompatible site image origin or allow arbitrary mirrors; future default-source changes require user direction and legacy/device validation.
 
 | 路径 / Path | 职责 / Role |
 | --- | --- |

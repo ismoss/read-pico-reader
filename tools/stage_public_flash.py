@@ -112,8 +112,8 @@ def stage(output: Path, ota_origin: str | None = None) -> None:
             assert target.is_relative_to(output.resolve()) and target.is_file(), (
                 f"broken local link in {page}: {link}")
     feed = json.loads((output / 'update.json').read_text())
-    # 用户临时授权rc98用既有GitHub Pages源；只接受固件已允许的两个HTTPS来源。
-    # The user temporarily authorized the existing Pages source for rc98; retain the firmware's exact HTTPS allowlist.
+    # 用户指定GitHub Pages为默认OTA源；只接受固件已允许的两个HTTPS来源。
+    # The user selected GitHub Pages for OTA; retain the firmware's exact HTTPS allowlist.
     origin = ota_origin or feed['url'].rsplit('/', 1)[0]
     assert origin in ('https://kiikoread.com', 'https://wegooo-cell.github.io/read-pico-reader')
     feed['url'] = origin + '/' + f'Pico-update-{version}.bin'
