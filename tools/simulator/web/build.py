@@ -45,3 +45,5 @@ manifest=json.loads((r/'source-manifest.json').read_text());(dist/'version.json'
 for name in ['index.html','simulator.css','simulator.js','worker.js','guides.js','tour-controller.js','NOTICE.txt']:shutil.copy2(web/name,dist/name)
 subprocess.run([os.environ.get('NODE',str(r/'build/toolchains/emsdk/node/24.19.0_64bit/bin/node')),'--input-type=module','-e',"import {tours} from './guides.js';import fs from 'node:fs';fs.writeFileSync('./dist/guides.json',JSON.stringify(Object.fromEntries(Object.entries(tours).flatMap(([key,t])=>t.ids.map(id=>[id,{tour:key,title:t.title,scope:t.scope||'步骤'}]))),null,2));"],cwd=web,check=True)
 print('Browser firmware ready:',dist)
+
+runpy.run_path(str(web/'pack_runtime.py'))['pack'](dist)

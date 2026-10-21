@@ -12,7 +12,7 @@ Install and activate Emscripten 6.0.13, Node 22+ and Python 3.10+. Run from this
 
 ```sh
 PICO_SIM_FIRMWARE=../.. EMCC="$(command -v emcc)" NODE="$(command -v node)" python3 web/build.py
-python3 -m http.server 8880 --directory web/dist
+python3 web/dev_server.py 8880
 ```
 
 使用与 source-manifest.json 相同的发布 commit 检出仓库，再编译。环境变量指向该仓库根目录；本机已有 firmware/ 快照时可省略 PICO_SIM_FIRMWARE。构建不改固件源码；异步预取调整和测试目标元数据只生成到宿主副本。web/dist 的成品复制到 flash/simulator/ 发布。
@@ -57,3 +57,7 @@ Original upstream licenses and attributions are retained. Firmware and bundled a
 启动上述 8880 端口后，在 web 目录安装 Playwright 并运行 `npm run test:tours`、`npm run test:storage`。默认使用 Playwright Chromium；CHROME_PATH 可指定本机 Chrome。输出留在被忽略的 build/web 中。
 
 Serve on port 8880, install the web package and Playwright Chromium, then run the tour and storage scripts. CHROME_PATH may select an existing Chrome binary. Reports stay in ignored build/web.
+
+Safari 启动：数据包预压缩 gzip，内容哈希资源长期缓存；使用 web/dev_server.py 提供一致的本地响应头。阅读记录恢复超过 2.5 秒时启动不写盘的临时实例，保留原浏览器记录。仅在画面变化时转换像素，后台和屏幕外停止轮询。
+
+Safari startup uses precompressed gzip data and fingerprinted cached assets. The dev server sends matching headers. A timed-out history restore restarts in a non-persistent instance without modifying stored records. Only changed screen areas are decoded; hidden and off-screen views stop polling.

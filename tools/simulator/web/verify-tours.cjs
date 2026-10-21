@@ -3,7 +3,7 @@ const fs=require('node:fs'),path=require('node:path');
 (async()=>{const {tours}=await import('./guides.js');const b=await chromium.launch({...(process.env.CHROME_PATH?{executablePath:process.env.CHROME_PATH}:{}),headless:true});const results=[];
 try{const p=await b.newPage({viewport:{width:1100,height:1100}});for(const [key,tour] of Object.entries(tours)){
   const record={key,steps:tour.steps.length,passed:false};try{
-    await p.goto(`http://127.0.0.1:8880/?embed=1&guide=${key}`,{waitUntil:'load'});
+    await p.goto(`${process.env.SIMULATOR_URL||'http://127.0.0.1:8880/'}?embed=1&guide=${key}`,{waitUntil:'load'});
     await p.locator('#guide-next').waitFor({state:'visible',timeout:20000});await p.waitForFunction(()=>!document.querySelector('#guide-next').disabled,{},{timeout:20000});
     if(await p.locator('#guide-play').innerText()==='暂停')await p.locator('#guide-play').click();
     for(let i=0;i<tour.steps.length-1;i++){

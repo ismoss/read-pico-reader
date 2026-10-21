@@ -13,3 +13,6 @@
 /* 在线固件实例等比显示，内容高度由同源 iframe 回报。/ Uniform firmware view with same-origin content sizing. */
 .live-gallery{padding:24px}.live-gallery iframe{display:block;width:100%;height:820px;border:0;background:#fff}
 @media(max-width:620px){.live-gallery{padding:18px}}
+
+/* 中文：首页首屏鸣谢，姓名直接链接到贡献者主页。/ Prominent home-page thanks with a contributor profile link. */
+.contributor-credit{max-width:420px;padding:15px 18px;margin:0 0 28px;border:1px solid var(--line);border-left:3px solid var(--ink);border-radius:10px;background:#fafbfa}.contributor-credit p{margin:0;font-size:12px;color:var(--muted);line-height:1.7}.contributor-credit .credit-heading{font-size:16px;font-weight:650;color:var(--ink);margin-bottom:4px}.credit-heading a{text-decoration:underline;text-underline-offset:4px}.credit-heading a span{display:inline-block;margin-left:6px;font-size:11px;font-weight:500;color:var(--muted)}

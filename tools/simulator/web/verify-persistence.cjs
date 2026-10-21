@@ -1,7 +1,7 @@
-const {chromium}=require('playwright');
+const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
 (async()=>{const browser=await chromium.launch({...(process.env.CHROME_PATH?{executablePath:process.env.CHROME_PATH}:{}),headless:true});
-try{const page=await browser.newPage();await page.goto('http://127.0.0.1:8880/version.json');
+try{const page=await browser.newPage();await page.goto((process.env.SIMULATOR_URL||'http://127.0.0.1:8880/')+'version.json');
 const result=await page.evaluate(async()=>{
  let w,seq=0,pending=new Map();
  async function start(){w=new Worker('./worker.js',{type:'module'});await new Promise((resolve,reject)=>{w.onmessage=e=>{if(e.data.type==='ready')resolve();if(e.data.type==='error')reject(new Error(e.data.text));if(e.data.type==='frame'&&e.data.id){pending.get(e.data.id)?.(e.data);pending.delete(e.data.id);}};w.postMessage({type:'init'});});}
