@@ -212,6 +212,14 @@ static bool pickup_wait_quiet(sc7a20h_handle_t acc, int quiet_ms, int timeout_ms
     return false;
 }
 
+// 单击开机：一次短按即醒；双击开机：600ms 内两次，包里不易误触。两条等待路径共用。
+// Single-press boot wakes on one short press; double-click boot needs two within 600 ms so a bag cannot wake it.
+static bool key_wake_pending(void) {
+    return app_settings_wake_presses() == 1
+        ? read_pico_pmu_take_key_wakeup_single()
+        : read_pico_pmu_take_key_wakeup();
+}
+
 app_wake_source_t app_light_sleep_wait_timed(sc7a20h_handle_t acc, uint32_t timeout_ms) {
     bool covers_idle=book_cover_jobs_quiesce(2000);
     bool avatar_idle=ui_avatar_quiesce(2000);
@@ -277,7 +285,7 @@ app_wake_source_t app_light_sleep_wait_timed(sc7a20h_handle_t acc, uint32_t time
         // The PMU event is authoritative even if the IOE edge was missed.
         // Timer wakeups below provide a bounded fallback poll for that case.
         // 即使漏掉 IOE 中断，也由定时唤醒轮询 PMU 按键事件。
-        if (read_pico_pmu_take_key_wakeup()) {
+        if (key_wake_pending()) {
             wake = APP_WAKE_KEY;
             break;
         }
@@ -323,7 +331,7 @@ app_wake_source_t app_light_sleep_wait_timed(sc7a20h_handle_t acc, uint32_t time
         esp_err_t sleep_error = esp_light_sleep_start();
         int64_t dt_ms = (esp_timer_get_time() - t0) / 1000;
         read_pico_clear_ioe_int();
-        if (read_pico_pmu_take_key_wakeup()) {
+        if (key_wake_pending()) {
             wake = APP_WAKE_KEY;
             break;
         }

@@ -185,9 +185,21 @@ void app_main(void) {
     // Confirm a new slot only after hardware, display, touch, and required setup succeed.
     pico_ota_confirm_running();
 
-    if(resuming && !lock_pin_enabled())
-        ESP_LOGI(TAG,"resume lock cache=%d; waiting for double power press",restored_lock);
-    app_lock_boot_gate(&hl, hw.touch, hw.sensor);
+    // 单击开机：开机那一次短按就算开机，直接续读；双击开机仍停在锁屏等第二次。
+    // One-press boot treats the powering short press as the boot; double-click boot still waits on the lock face.
+    const bool boot_press = read_pico_pmu_take_boot_short_press();
+    const bool boot_with_one_press = resuming && !lock_pin_enabled() && boot_press &&
+        app_settings_wake_presses() == 1;
+    if (boot_with_one_press) {
+        ESP_LOGI(TAG, "resume lock cache=%d; one-press boot", restored_lock);
+        pico_boot_ready();
+        pico_boot_hold_resume();
+    } else {
+        if(resuming && !lock_pin_enabled())
+            ESP_LOGI(TAG,"resume lock cache=%d; power presses=%u",restored_lock,
+                (unsigned)app_settings_wake_presses());
+        app_lock_boot_gate(&hl, hw.touch, hw.sensor);
+    }
     rp_boot_mark("lock");
     const app_desc_t *first = app_home_page();
     pico_resume_t resume = {0};
