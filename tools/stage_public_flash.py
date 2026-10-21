@@ -113,9 +113,9 @@ def stage(output: Path, ota_origin: str | None = None) -> None:
                 f"broken local link in {page}: {link}")
     if ota_origin:
         assert ota_origin == 'https://kiikoread.com'
-    # 中文：备用站的清单也下载备用站固件，不能再次依赖主站。
-    # English: The fallback feed must download its own mirror rather than depend on the primary again.
-    origin = ota_origin or 'https://wegooo-cell.github.io/read-pico-reader'
+    # 中文：用户指定固件始终从官网获取，保留来源与校验规则。
+    # English: The user requires firmware downloads from the official site, preserving origin and integrity checks.
+    origin = ota_origin or 'https://kiikoread.com'
     feed = json.loads((output / 'update.json').read_text())
     feed['url'] = origin + '/' + f'Pico-update-{version}.bin'
     (output / 'update.json').write_text(json.dumps(feed, ensure_ascii=False, indent=2) + '\n')
