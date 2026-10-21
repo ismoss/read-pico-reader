@@ -66,7 +66,7 @@ def stage(output: Path, ota_origin: str | None = None) -> None:
     # Publish only verified archived manifests/base parts, excluding local test files.
     # 最新基础包来自 Release；兼容性检查使用已经校验过的站点镜像。
     # The latest base comes from Release; compare archives with the verified staged image.
-    archives = check_archived_releases(FLASH, output / "partitions.bin")
+    archives = check_archived_releases(FLASH, output / "partitions.bin", output)
     previous = json.loads((FLASH / 'manifest.json').read_text()).get('previous_version')
     if previous:
         assert any(item['version'] == previous for item in archives), 'previous official release is missing'
