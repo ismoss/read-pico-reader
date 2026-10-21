@@ -42,6 +42,11 @@ def archive(folder: Path, commit: str, payloads: Path | None = None) -> None:
     entry = {'version': version, 'manifest': f'releases/{version}/manifest.json',
              'bin': f'Pico-update-{version}.bin', 'source_commit': commit, 'files': files}
     existing = [r for r in catalog['releases'] if r['version'] == version]
+    usb_url = manifest.get('usb_package_url') or (existing[0].get('usb_package_url') if existing else None)
+    if usb_url:
+        expected = f'https://github.com/wegooo-cell/read-pico-reader/releases/download/v{version}/kiikoread-{version}-USB.zip'
+        assert usb_url == expected
+        entry['usb_package_url'] = expected
     assert not existing or existing == [entry], 'published archive metadata changed'
     destination = folder / 'releases' / version
     candidates = {folder / entry['bin']: image,

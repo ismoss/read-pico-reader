@@ -214,5 +214,8 @@ Every comment is bilingual. Comments only; no logic changes.
 
 ## Previous official release / 上一正式版
 
+每个正式版本同时保留USB全量包与TF升级包，官网按所选版本分别提供下载入口。TF应用Bin保留兼容文件名Pico-update.bin，ZIP可附说明与校验值；不得将USB全量包当作TF升级镜像。
+Retain both USB full base packages and TF application upgrades for each official release, with separate version-matched website downloads. Keep Pico-update.bin for TF compatibility; ZIPs may include instructions/checksums. Never present a USB base bundle as a TF upgrade image.
+
 Every official publication must archive the original previous Release with `tools/archive_current_release.py` before replacing the latest manifest. Keep its web-flashing/TF choices and immutable binary hashes, as well as all earlier archives. `manifest.previous_version` is checked during website staging. TF images replace the complete application in the inactive slot; full base installation remains USB.
 每次发布必须先归档上一正式版原字节，保留网页刷机与TF入口，不能用本地同号测试包替换；TF升级完整应用，不写引导程序和分区表。

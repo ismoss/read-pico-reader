@@ -43,5 +43,6 @@
   },
   "updated_at": "2026-10-21T13:55:43+08:00",
   "previous_version": "0.3.3-rc97",
-  "tf_package_url": "https://github.com/wegooo-cell/read-pico-reader/releases/download/v0.3.3-rc98/kiikoread-0.3.3-rc98-TF.zip"
+  "tf_package_url": "https://github.com/wegooo-cell/read-pico-reader/releases/download/v0.3.3-rc98/kiikoread-0.3.3-rc98-TF.zip",
+  "usb_package_url": "https://github.com/wegooo-cell/read-pico-reader/releases/download/v0.3.3-rc98/kiikoread-0.3.3-rc98-USB.zip"
 }

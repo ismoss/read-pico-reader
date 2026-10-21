@@ -23,7 +23,8 @@
           "size": 8192,
           "sha256": "7d2c7ac4888bfd75cd5f56e8d61f69595121183afc81556c876732fd3782c62f"
         }
-      }
+      },
+      "usb_package_url": "https://github.com/wegooo-cell/read-pico-reader/releases/download/v0.3.3-rc97/kiikoread-0.3.3-rc97-USB.zip"
     },
     {
       "version": "0.3.3-rc86",

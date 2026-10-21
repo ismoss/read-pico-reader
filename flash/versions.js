@@ -32,6 +32,8 @@
     download.removeAttribute("href");
     const pendingTF = document.getElementById("tf-package-download");
     if (pendingTF) { pendingTF.hidden = true; pendingTF.removeAttribute("href"); }
+    const pendingUSB = document.getElementById("usb-package-download");
+    if (pendingUSB) { pendingUSB.hidden = true; pendingUSB.removeAttribute("href"); }
     version.textContent = "读取中…";
     document.dispatchEvent(new CustomEvent("kiikoread:release-loading"));
     updated.textContent = "读取中…";
@@ -68,7 +70,7 @@
       installer = next;
       download.href = new URL(choice === latest ? `./Pico-update-${manifest.version}.bin` : choice.bin,
                               document.baseURI).href;
-      download.textContent = `下载 ${shortVersion} TF 卡完整固件 Bin ↓`;
+      download.textContent = `下载 ${shortVersion} TF 卡升级包 Bin ↓`;
       download.hidden = false;
       const tfPackage = document.getElementById("tf-package-download");
       if (tfPackage) {
@@ -77,7 +79,17 @@
         tfPackage.removeAttribute("href");
         if (!tfPackage.hidden) {
           tfPackage.href = expected;
-          tfPackage.textContent = `下载 ${shortVersion} TF 卡完整应用包 ZIP ↓`;
+          tfPackage.textContent = `下载 ${shortVersion} TF 卡升级包 ZIP ↓`;
+        }
+      }
+      const usbPackage = document.getElementById("usb-package-download");
+      if (usbPackage) {
+        const expected = `https://github.com/wegooo-cell/read-pico-reader/releases/download/v${manifest.version}/kiikoread-${manifest.version}-USB.zip`;
+        usbPackage.hidden = (manifest.usb_package_url || choice.usb_package_url) !== expected;
+        usbPackage.removeAttribute("href");
+        if (!usbPackage.hidden) {
+          usbPackage.href = expected;
+          usbPackage.textContent = `下载 ${shortVersion} 全量包（USB）ZIP ↓`;
         }
       }
       manifestReady = true;
