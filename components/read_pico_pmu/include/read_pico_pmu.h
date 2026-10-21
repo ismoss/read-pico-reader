@@ -206,6 +206,12 @@ bool read_pico_pmu_take_key_short(void);
 /// 抽干队列；两次有效短按释放相距60..600ms才解锁，按下/长按不计入。
 /// / Wake only after two distinct short releases 60..600 ms apart; DOWN/holds do not count.
 bool read_pico_pmu_take_key_wakeup(void);
+/// 抽干队列；任意一次电源键短按即算唤醒，用于“单击开机”。
+/// / Drain the queue; any single power-key short release wakes, for one-press power-on.
+bool read_pico_pmu_take_key_wakeup_single(void);
+/// 本次启动握手期间是否收到过电源键短按；取一次后清零。
+/// / Whether a power-key short press arrived during this boot's handshake; consumed once.
+bool read_pico_pmu_take_boot_short_press(void);
 /// 保证 RUNNING 后发 HOST_SOFT_SLEEP，等到 STATUS 为 SOFT_SLEEP（随后 EN=0）。
 /// / After RUNNING, send HOST_SOFT_SLEEP and wait for STATUS SOFT_SLEEP (then EN=0).
 esp_err_t read_pico_pmu_report_sleep(void);

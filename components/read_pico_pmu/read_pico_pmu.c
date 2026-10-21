@@ -385,6 +385,10 @@ esp_err_t read_pico_pmu_event_ack(uint16_t event_id) {
 }
 
 static power_double_click_t s_wake_click;
+// 最近一次事件扫描见过短按；握手时转存为本次启动的按键证据。
+// A short press was seen in the latest scan; the handshake stores it as this boot's key evidence.
+static bool s_scan_short;
+static bool s_boot_short;
 void read_pico_pmu_drain_events(void) {
     s_wake_click=(power_double_click_t){0};
     for (int i = 0; i < PMU_EVENT_FIFO_DEPTH; i++) {
@@ -423,6 +427,7 @@ bool read_pico_pmu_take_key_short(void) {
 }
 
 bool read_pico_pmu_take_key_wakeup(void) {
+    s_scan_short = false;
     for (int i = 0; i < PMU_EVENT_FIFO_DEPTH; i++) {
         if (read_pico_pmu_poll() != ESP_OK) break;
         if (!s_snap.event_ok || s_snap.pending_events == 0) break;
@@ -430,6 +435,7 @@ bool read_pico_pmu_take_key_wakeup(void) {
         uint16_t id = s_snap.event.event_id;
         if (type == PMU_EVT_KEY_SHORT) {
             power_double_click_push(&s_wake_click,s_snap.event.timestamp_ms);
+            s_scan_short = true;
             ESP_LOGI(TAG, "key wake %s id=%u", pmu_event_name(type), (unsigned)id);
         } else if (type == PMU_EVT_KEY_LONG) {
             s_wake_click=(power_double_click_t){0};
@@ -438,6 +444,30 @@ bool read_pico_pmu_take_key_wakeup(void) {
         if (read_pico_pmu_event_ack(id) != ESP_OK) break;
     }
     return power_double_click_take(&s_wake_click);
+}
+
+// 单击开机：任意一次短按就算醒来，不再等第二次；长按仍按原样取消。
+// One-press power-on: any short press wakes without waiting for a second one; a hold cancels as before.
+bool read_pico_pmu_take_key_wakeup_single(void) {
+    for (int i = 0; i < PMU_EVENT_FIFO_DEPTH; i++) {
+        if (read_pico_pmu_poll() != ESP_OK) break;
+        if (!s_snap.event_ok || s_snap.pending_events == 0) break;
+        uint8_t type = s_snap.event.type;
+        uint16_t id = s_snap.event.event_id;
+        s_scan_short = type == PMU_EVT_KEY_SHORT;
+        if (s_scan_short) ESP_LOGI(TAG, "key wake single id=%u", (unsigned)id);
+        if (s_scan_short || type == PMU_EVT_KEY_LONG) s_wake_click = (power_double_click_t){0};
+        if (id == 0) break;
+        if (read_pico_pmu_event_ack(id) != ESP_OK) break;
+        if (s_scan_short) return true;
+    }
+    return false;
+}
+
+bool read_pico_pmu_take_boot_short_press(void) {
+    bool seen = s_boot_short;
+    s_boot_short = false;
+    return seen;
 }
 
 // 命令 OK/ACCEPTED 只表示受理，以 STATUS power_state 为准。
@@ -744,8 +774,11 @@ esp_err_t read_pico_pmu_init(i2c_master_bus_handle_t bus_handle, const read_pico
     if (s_ready) {
         // 保留开机期间已完成的双击；普通启动的主循环随后正常丢弃这些事件。
         // Retain a completed boot-time double click for deep-lock resume; normal UI drains it later.
+        // 同时记下开机期间是否真的按过电源键，供“单击开机”跳过解锁等待。
+        // Also record whether the power key was really pressed during boot, so one-press power-on can skip the unlock wait.
         bool boot_double=read_pico_pmu_take_key_wakeup();
         s_wake_click.ready=boot_double;
+        s_boot_short = s_scan_short;
         return ESP_OK;
     }
     (void)read_pico_pmu_deinit();

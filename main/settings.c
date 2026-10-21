@@ -38,6 +38,7 @@
 #define NVS_NS KIIKO_BOARD_SETTINGS_NAMESPACE
 #define NVS_KEY_SLEEP "sleep"
 #define NVS_KEY_SHUTDOWN_MODE "shutdown"
+#define NVS_KEY_WAKE_PRESSES "wake_press"
 #define NVS_KEY_HOME_FULL "home_full"
 #define NVS_KEY_HOME_COMPONENT "home_widget"
 #define NVS_KEY_HOME_GOAL "home_goal"
@@ -91,6 +92,7 @@
 
 static app_sleep_mode_t s_sleep = APP_SLEEP_DEEP;
 static bool s_staged_shutdown;
+static uint8_t s_wake_presses = 2;
 static bool s_home_full_refresh;
 static app_home_component_t s_home_component = APP_HOME_FOLDER;
 static uint8_t s_home_goal_minutes = 30;
@@ -195,6 +197,9 @@ void app_settings_init(void) {
     raw = 0;
     if (nvs_get_u8(h, NVS_KEY_SHUTDOWN_MODE, &raw) == ESP_OK)
         s_staged_shutdown = raw == 1;
+    raw = 2;
+    if (nvs_get_u8(h, NVS_KEY_WAKE_PRESSES, &raw) != ESP_OK || (raw != 1 && raw != 2)) raw = 2;
+    s_wake_presses = raw;
     raw = 0;
     if (nvs_get_u8(h, NVS_KEY_HOME_FULL, &raw) == ESP_OK) s_home_full_refresh = raw == 1;
     raw = 0;
@@ -390,6 +395,13 @@ void app_settings_set_staged_shutdown(bool staged) {
     if (staged == s_staged_shutdown) return;
     s_staged_shutdown = staged;
     nvs_put_u8(NVS_KEY_SHUTDOWN_MODE, staged ? 1 : 0);
+}
+uint8_t app_settings_wake_presses(void) { return s_wake_presses; }
+void app_settings_set_wake_presses(uint8_t presses) {
+    if (presses != 1) presses = 2;
+    if (presses == s_wake_presses) return;
+    s_wake_presses = presses;
+    nvs_put_u8(NVS_KEY_WAKE_PRESSES, presses);
 }
 
 app_home_component_t app_settings_home_component(void) { return s_home_component; }
