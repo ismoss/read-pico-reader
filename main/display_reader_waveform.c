@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: Apache-2.0
- * 中文：普通文字翻页的柔和灰边，保留抗锯齿目标、驱动计数和周期清残影。
- * English: Soften gray-edge transients on ordinary text turns, preserving antialiased targets,
+ * 中文：文字水波纹的柔和灰边，保留抗锯齿目标、驱动计数和周期清残影。
+ * English: Soften gray-edge transients on text ripple turns, preserving antialiased targets,
  * pulse counts and periodic cleanup.
  * 冻结：仅白底到中灰提前最多两相回浅；黑/白端点、其他迁移、原表及帧时序不改。
  * 相同驱动计数不保证光学灰度相同；此调序需实屏对比深浅与残影。

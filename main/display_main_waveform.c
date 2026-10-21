@@ -164,3 +164,9 @@ const EpdWaveform* display_main_shelf_waveform(enum EpdDrawMode draw_mode) {
     waves[index].temp_intervals=E0470_WAVEFORM.temp_intervals;
     return &waves[index];
 }
+
+// 用户2026-10-20恢复二级底色：浅灰卡片也使用原完整灰阶，白底沿用同向擦白；底栏由独立裁剪保护。
+// User revision2026-10-20: restore complete original gray drive for light cards and directional white erasure; separate clipping protects navigation.
+const EpdWaveform* display_main_ui_waveform(void) {
+    return display_main_normal_waveform();
+}

@@ -1,8 +1,8 @@
 /* SPDX-License-Identifier: Apache-2.0
  * 中文：顶部快捷菜单的独立手势和纯绘图；动作由主循环执行。
  * English: Independent gesture recognition and pure drawing for the top quick layer; the loop owns actions.
- * 用户修订：展开时生成液态玻璃；菜单存续期间只保留四圆键4bpp小缓存，点按立即局部反馈，状态变化不重画底页。
- * User revision: generate glass on open; retain four small packed key snapshots while open, acknowledge presses locally and never repaint the underlay for status changes.
+ * 用户修订：展开复用现有底页并生成液态玻璃；只保留顶部4bpp底图及四圆键，收起还原，点按局部反馈。
+ * User revision: open over the existing page; retain only a packed top underlay and four keys, restore on close, and acknowledge presses locally.
  * 冻结：仅边缘起手；不做连续动画或整帧缓存；关闭、切页、睡眠和错误时释放控件缓存。
  * Frozen: edge-origin capture only, no continuous animation or full-frame cache; release key snapshots on close, navigation, sleep and errors.
  */
@@ -38,9 +38,13 @@ bool ui_quick_menu_feed(ui_quick_menu_t *menu, const app_ctx_t *ctx, bool allowe
 void ui_quick_menu_cancel_input(ui_quick_menu_t *menu);
 /// 只覆盖顶部，保留下层其他像素；44px图标与底栏相同，状态栏正常绘制。
 /// Cover the top only, leaving other pixels intact; use the same 44px icon size as navigation and draw the normal status bar.
-void ui_quick_menu_draw(uint8_t *fb, bool wifi, bool bluetooth);
+/// soften_text仅用于阅读正文：轻微柔化玻璃背后的文字，收起恢复原像素，点按不重复模糊。
+/// soften_text is for reader body only: gently blur text behind glass, restore original pixels on close and never reblur on input.
+void ui_quick_menu_draw(uint8_t *fb, bool wifi, bool bluetooth,bool soften_text);
 /// 当前按住的圆键，取消/滑出/释放时为-1。/ The held key, or -1 after cancellation, movement or release.
 int ui_quick_menu_pressed(const ui_quick_menu_t *menu);
+/// 精确还原顶部底图；缓存不可用时返回false，调用方重绘当前页。/ Restore the exact top underlay; false asks the caller to repaint the current page.
+bool ui_quick_menu_restore(uint8_t *fb);
 /// 恢复原玻璃小块并画状态/圆内按压，不分配、不模糊、不排字。/ Restore a glass tile and paint its state/interior press without allocating, blurring or shaping text.
 bool ui_quick_menu_draw_button(uint8_t *fb, int button, bool active, bool pressed, EpdRect *dirty);
 /// 只重画清晰状态栏，供网络状态变化时局刷。/ Repaint only the sharp status strip for network changes.

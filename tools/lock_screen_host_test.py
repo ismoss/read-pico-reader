@@ -27,7 +27,7 @@ with tempfile.TemporaryDirectory() as folder:
 #define LOW_W 76
 #define LOW_H 136
 #define RADIUS 72
-#define ART_MAGIC UINT32_C(0x50414432)
+#define ART_MAGIC UINT32_C(0x50414433)
 #define LOCK_SCREEN_CACHE_PARENT "FOLDER"
 #define LOCK_ART_PATH LOCK_SCREEN_CACHE_PARENT "/locks/pin-background.bin"
 #define MALLOC_CAP_SPIRAM 1
@@ -47,7 +47,6 @@ typedef struct {int unused;} EpdiyHighlevelState;
 typedef int ble_pt_event_t;typedef int ble_pt_raw_t;
 typedef struct {uint32_t magic,rotation,style,checksum;uint64_t wallpaper;} art_header_t;
 static const int xs[3]={158,342,526},ys[4]={544,703,862,1021},E0470_WAVEFORM=0,E0470_FOLLOW_WAVEFORM=1;
-const uint8_t lock_4bpp_bin_start[1]={0};
 static uint8_t framebuffer[FRAME_BYTES];
 static uint8_t selected_style;
 static const char *wallpaper="";
@@ -72,11 +71,11 @@ static uint8_t *epd_hl_get_framebuffer(EpdiyHighlevelState *h){(void)h;return fr
 enum EpdRotation epd_get_rotation(void){return 1;}
 static void epd_poweron(void){}
 static void epd_poweroff(void){}
-static void ui_draw_full_image(uint8_t *fb,const uint8_t *bytes){(void)bytes;memset(fb,224,FRAME_BYTES);}
+static void ui_lock_fallback_draw(uint8_t *fb){memset(fb,255,FRAME_BYTES);fb[FRAME_BYTES/2]=0;}
 static size_t heap_caps_get_free_size(int caps){(void)caps;return low_memory?1024*1024:8*1024*1024;}
 static void *heap_caps_malloc(size_t n,int caps){(void)caps;return malloc(n);}
 static void app_lock_wait_key_idle(int ms){(void)ms;}
-static int app_light_sleep_wait_timed(void *acc,unsigned ms){(void)acc;assert(ms==600000);++waits;return timeout_scenario?APP_WAKE_TIMEOUT:(waits%2?APP_WAKE_KEY:APP_WAKE_PICKUP);}
+static int app_light_sleep_wait_timed(void *acc,unsigned ms){assert(!acc);assert(ms==600000);++waits;return timeout_scenario?APP_WAKE_TIMEOUT:APP_WAKE_KEY;}
 static void app_enter_host_sleep(int mode){assert(mode==APP_SLEEP_DEEP);longjmp(deep,1);}
 static int64_t esp_timer_get_time(void){return now*1000;}
 static int read_pico_pmu_poll(void){return 0;}
@@ -120,10 +119,10 @@ int main(void){
  tap(342,1350);add(158,544,1,0);add(158,544,2,0);add(158,544,0,0);
  add(158,544,1,0);add(158,544,0,-1);add(0,0,0,0);correct();
  lock_screen_authenticate(&hl,(void*)1,(void*)2,false);assert(verified==2&&waits==2&&!ready&&!held&&wiped>2&&entries==2&&!settles);
- // Cold boot authenticates immediately and marks startup ready while retaining resume.
- start();correct();lock_screen_authenticate(&hl,(void*)1,(void*)2,true);assert(verified==1&&!waits&&ready==1&&held==1&&entries==1&&!settles);
+ // Cold boot waits for a validated double click, then authenticates and retains resume.
+ start();correct();lock_screen_authenticate(&hl,(void*)1,(void*)2,true);assert(verified==1&&waits==1&&ready==1&&held==1&&entries==1&&!settles);
  // PMU short/long actions only return to the locked art, then demand authentication again.
- for(int action=2;action<=3;++action){start();add(0,0,0,-action);for(int i=0;i<10;++i)add(0,0,0,0);correct();lock_screen_authenticate(&hl,(void*)1,(void*)2,true);assert(verified==1&&waits==1);}
+ for(int action=2;action<=3;++action){start();add(0,0,0,-action);for(int i=0;i<10;++i)add(0,0,0,0);correct();lock_screen_authenticate(&hl,(void*)1,(void*)2,true);assert(verified==1&&waits==2);}
  // Low-memory/cache fallback and display errors still demand the correct credential.
  start();low_memory=display_failure=true;correct();lock_screen_authenticate(&hl,(void*)1,(void*)2,true);assert(verified==1&&fulls>0);low_memory=display_failure=false;
  start();low_memory=true;correct();lock_screen_authenticate(&hl,(void*)1,(void*)2,false);assert(verified==1&&waits==1&&entries==1&&!settles);low_memory=false;
@@ -152,6 +151,13 @@ int main(void){
  image=fopen(wallpaper,"ab");assert(image);assert(fputc(1,image)!=EOF&&fclose(image)==0);assert(!lock_screen_restore(f));
  assert(remove(wallpaper)==0);lock_screen_save(framebuffer);assert(lock_screen_restore(f));
  assert(!lock_screen_restore(NULL));
+ // 新兜底规则不能继续复用旧版完整缓存；当前有效缓存仍直接恢复。
+ // Reject a complete old-policy cache while retaining valid current-generation art.
+ lock_screen_save(framebuffer);FILE *policy=fopen(LOCK_ART_PATH,"r+b");assert(policy);
+ uint32_t old_policy=UINT32_C(0x50414432);assert(fwrite(&old_policy,1,4,policy)==4&&!fclose(policy));
+ memset(f,0xee,FRAME_BYTES);assert(!lock_screen_restore(f)&&f[0]==0xee);
+ restore_art(f,NULL);assert(f[0]==255&&f[FRAME_BYTES/2]==0);
+ lock_screen_save(framebuffer);assert(lock_screen_restore(f));
  // 旧版缓存必须重绘当前样式，旋转不符也不能复用。/ Old cache versions and mismatched rotations require current-style redraw.
  FILE *old=fopen(LOCK_ART_PATH,"wb");assert(old);uint32_t legacy[3]={UINT32_C(0x50414431),1,checksum(framebuffer)};
  assert(fwrite(legacy,1,sizeof(legacy),old)==sizeof(legacy)&&fwrite(framebuffer,1,FRAME_BYTES,old)==FRAME_BYTES&&fclose(old)==0);

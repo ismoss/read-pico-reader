@@ -333,6 +333,7 @@ int main(void) {
     assert(lut_builds==before_luts+37 && scans==44);
     scans=differences=0;
     const unsigned invalid_bands[]={0,1,33};
+    const unsigned invalid_compact_bands[]={0,33};
     for(unsigned i=0;i<sizeof(invalid_bands)/sizeof(invalid_bands[0]);++i)
         assert(e0470_page_turn_with_waveform(&hl,(EpdRect){0,0,HEIGHT,WIDTH},E0470_TURN_LTR,
                                              &soft_wave,invalid_bands[i])==EPD_DRAW_INVALID_CROP);
@@ -349,8 +350,22 @@ int main(void) {
     for (size_t i = 0; i < sizeof(back); ++i) assert(back[i] == 0xFF);
     assert(e0470_page_turn_with_waveform_compact(&hl,main_body,direction,&soft_wave,16)==EPD_DRAW_NO_PHASES_AVAILABLE);
     assert(scans==0 && differences==0);
-    for(unsigned i=0;i<sizeof(invalid_bands)/sizeof(invalid_bands[0]);++i)
-        assert(e0470_page_turn_with_waveform_compact(&hl,main_body,direction,&soft_wave,invalid_bands[i])==EPD_DRAW_INVALID_CROP);
+    for(unsigned i=0;i<sizeof(invalid_compact_bands)/sizeof(invalid_compact_bands[0]);++i)
+        assert(e0470_page_turn_with_waveform_compact(&hl,main_body,direction,&soft_wave,invalid_compact_bands[i])==EPD_DRAW_INVALID_CROP);
     assert(e0470_page_turn_with_waveform_compact(&hl,main_body,direction,NULL,16)==EPD_DRAW_NO_PHASES_AVAILABLE);
+    // 普通翻页同步输出一个条带，保留每个像素的全部灰阶相位。/ Ordinary turns synchronize one band without dropping grayscale phases.
+    water_test_alloc_fail=0;check_direction=false;test_bands=1;test_launch_step=1;
+    for(int rot=0;rot<4;++rot)for(int dir=0;dir<4;++dir){
+        rotation=(enum EpdRotation)rot;direction=(e0470_turn_dir_t)dir;
+        EpdRect page=(rot&1)?(EpdRect){0,0,HEIGHT,WIDTH}:(EpdRect){0,0,WIDTH,HEIGHT};
+        for(int failure=0;failure<=37;++failure){
+            memset(back,255,sizeof(back));scans=differences=0;fail_at=failure;memset(phase_hits,0,sizeof(phase_hits));
+            enum EpdDrawError error=e0470_page_turn_with_waveform_compact(&hl,page,direction,&soft_wave,1);
+            assert(error==(failure?EPD_DRAW_OTHER_ERROR:EPD_DRAW_SUCCESS));assert(!staged_luts);
+            if(!failure){assert(scans==37);for(int phase=0;phase<37;++phase)assert(phase_hits[phase]==1);assert(!memcmp(back,front,sizeof(back)));}
+            else for(size_t at=0;at<sizeof(back);++at)assert(back[at]==255);
+        }
+    }
+    puts("PASS: one-band ordinary turn, four rotations/directions, all phases once and every failed phase preserves history");
     puts("water turn: 4 rotations x 4 directions; reader 8 bands at 44 ticks, simulated 487.96ms; main original 24/compact 24/16/8 bands: 83/60/52/44 ticks, simulated 996/720/624/487.96ms; slow scans complete all 37 phases; every failure tick preserves history and clears LUTs; crop bounds, invalid inputs and OOM passed");
 }

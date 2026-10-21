@@ -9,6 +9,7 @@
 #include "settings.h"
 #include "ui_pinpad.h"
 #include "ui_kit.h"
+#include "ui_lock_feedback.h"
 #include "sleep.h"
 #include "boot_state.h"
 #include "display.h"
@@ -28,9 +29,10 @@
 #define LOCK_SCREEN_CACHE_PARENT "/sdcard/.readpico"
 #endif
 #define LOCK_ART_PATH LOCK_SCREEN_CACHE_PARENT "/locks/pin-background.bin"
-#define ART_MAGIC UINT32_C(0x50414432)
+// 旧兜底图可能包含加载提示；升级缓存代号，失效后只显示无文字圆锁。
+// Old fallbacks may contain loading text; invalidate that art generation and replace misses with the text-free badge.
+#define ART_MAGIC UINT32_C(0x50414433)
 typedef struct {uint32_t magic,rotation,style,checksum;uint64_t wallpaper;} art_header_t;
-extern const uint8_t lock_4bpp_bin_start[] asm("_binary_lock_4bpp_bin_start");
 static uint32_t checksum(const uint8_t *bytes){uint32_t h=2166136261u;for(unsigned i=0;i<FRAME_BYTES;++i)h=(h^bytes[i])*16777619u;return h;}
 static uint64_t wallpaper_key(void){
     if(app_settings_lock_style()!=1 && app_settings_lock_style()!=3)return 0;
@@ -67,7 +69,7 @@ bool lock_screen_save(const uint8_t *frame){
 }
 static void restore_art(uint8_t *fb,const uint8_t *original){
     if(original)memcpy(fb,original,FRAME_BYTES);
-    else if(!lock_screen_restore(fb)){memset(fb,255,FRAME_BYTES);ui_draw_full_image(fb,lock_4bpp_bin_start);}
+    else if(!lock_screen_restore(fb))ui_lock_fallback_draw(fb);
 }
 static void present(EpdiyHighlevelState *hl,EpdRect area){
     epd_poweron();enum EpdDrawError result=update_display_area_diff_with(hl,&E0470_WAVEFORM,MODE_GL16,area);
@@ -85,22 +87,25 @@ static void present_input(EpdiyHighlevelState *hl,EpdRect area){
 void lock_screen_authenticate(EpdiyHighlevelState *hl,cst836u_handle_t touch,sc7a20h_handle_t acc,bool boot){
     if(!lock_pin_enabled())return;
     uint8_t *fb=epd_hl_get_framebuffer(hl);
+    (void)acc;
     (void)ble_pt_stop(2000);
     lock_screen_save(fb);
     uint8_t *original=heap_caps_get_free_size(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT)>FRAME_BYTES+1024u*1024u
         ?heap_caps_malloc(FRAME_BYTES,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT):NULL;
     if(original)memcpy(original,fb,FRAME_BYTES);
     ui_pinpad_t pad={0};ui_pinpad_begin(&pad,fb,"输入密码");
-    bool waiting=!boot;
+    bool waiting=true;
     unsigned failures=0;int64_t retry_at=0;
     for(;;){
         if(waiting){
             restore_art(fb,original);present(hl,ui_pinpad_full());
-            app_lock_wait_key_idle(800);epd_poweroff();
-            if(app_light_sleep_wait_timed(acc,10u*60u*1000u)==APP_WAKE_TIMEOUT){
+            if(!boot)app_lock_wait_key_idle(800);
+            epd_poweroff();
+            if(app_light_sleep_wait_timed(NULL,10u*60u*1000u)==APP_WAKE_TIMEOUT){
                 ui_pinpad_end(&pad);free(original);app_enter_host_sleep(APP_SLEEP_DEEP);
                 // 防御性处理：电源交接意外返回也继续验证。/ Defensive: a returning power handoff still requires verification.
                 original=NULL;ui_pinpad_begin(&pad,fb,"输入密码");
+                continue;
             }
         }
         app_lock_wait_key_idle(800);

@@ -5,6 +5,7 @@
  * Frozen: No partition erasure, allocations or per-page Flash writes. Consume resume successfully before using it; failed resources fall back to an operable page.
  */
 #include "boot_state.h"
+#include "kiiko_board_config.h"
 #include <stddef.h>
 #include <string.h>
 #include "esp_log.h"
@@ -101,7 +102,7 @@ static esp_err_t store(void) {
     uint8_t packed[BOOT_PACKED_MAX];size_t size=pack_record(packed);
     if(!size)return ESP_ERR_INVALID_STATE;
     nvs_handle_t h;
-    esp_err_t err = nvs_open("pico_startup", NVS_READWRITE, &h);
+    esp_err_t err = nvs_open(KIIKO_BOARD_STARTUP_NAMESPACE, NVS_READWRITE, &h);
     s_writable=err==ESP_OK;
     if (err != ESP_OK) {ESP_LOGW("boot_state","checkpoint open: %s",esp_err_to_name(err));return err;}
     err = nvs_set_blob(h, "state", packed, size);
@@ -127,7 +128,7 @@ void pico_boot_init(bool abnormal_reset) {
     s_interrupted = false;
     s_recovery = abnormal_reset;
     nvs_handle_t h;
-    esp_err_t err = nvs_open("pico_startup", NVS_READWRITE, &h);
+    esp_err_t err = nvs_open(KIIKO_BOARD_STARTUP_NAMESPACE, NVS_READWRITE, &h);
     s_writable = err == ESP_OK;
     if (s_writable) {
         uint8_t data[BOOT_PACKED_MAX];size_t size=sizeof(data);

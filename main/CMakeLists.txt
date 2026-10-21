@@ -37,9 +37,7 @@ set(main_requires
     mbedtls
     espressif__cjson
 )
-idf_component_register(
-    SRCS
-        "app_main.c"
+set(kiiko_selected_sources "app_main.c"
         "boot_state.c"
         "apps/app_boot_recovery.c"
         "ota_update.c"
@@ -54,6 +52,7 @@ idf_component_register(
         "lock_pin_flow.c"
         "lock_screen.c"
         "settings.c"
+        "factory_reset.c"
         "app/app_loop.c"
         "app/crash_note.c"
         "app/app_registry.c"
@@ -114,7 +113,9 @@ idf_component_register(
         "font/ui_font.c"
         "font/ui_hanzi.c"
         "factory/pmu_selftest.c"
-        "factory/vcom_setup.c"
+        "factory/vcom_setup.c")
+idf_component_register(
+    SRCS ${kiiko_selected_sources}
     REQUIRES ${main_requires}
     INCLUDE_DIRS "." "app" "apps" "font" "ui" "factory" "book"
     EMBED_FILES

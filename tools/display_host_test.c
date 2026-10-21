@@ -22,6 +22,7 @@ bool pico_online_display_begin(void) { ++ota_display_depth; return true; }
 void pico_online_display_end(bool held) { assert(held && ota_display_depth); --ota_display_depth; }
 void e0470_page_turn_release(void) {}
 static int turn_tick_us = 21000;
+static unsigned expected_turn_bands=E0470_TURN_FAST_BANDS;
 void e0470_page_turn_set_tick_us(int us) { turn_tick_us = us; }
 int e0470_page_turn_tick_us(void) { return turn_tick_us; }
 bool app_settings_main_fast_refresh(void) {return false;}
@@ -48,6 +49,7 @@ static const EpdWaveform reader_soft = {5};
 const EpdWaveform* display_reader_text_waveform(void) {return &reader_soft;}
 const EpdWaveform* display_main_water_waveform(void) {return &soft_gray;}
 const EpdWaveform* display_main_normal_waveform(void) { return display_main_water_waveform(); }
+const EpdWaveform* display_main_ui_waveform(void) {return display_main_normal_waveform();}
 const EpdWaveform* display_main_bw_waveform(void) {return &E0470_WAVEFORM;}
 const EpdWaveform* display_main_acrylic_waveform(void) {return &E0470_WAVEFORM;}
 const EpdWaveform* display_main_acrylic_clean_waveform(void) {return &E0470_WAVEFORM;}
@@ -80,8 +82,9 @@ enum EpdDrawError e0470_page_turn_with_waveform_compact(EpdiyHighlevelState* hl,
     e0470_turn_dir_t dir,const EpdWaveform* waveform,unsigned bands) {
     assert(ota_display_depth);
     assert(hl&&area.width>0&&dir==E0470_TURN_RTL);
-    assert(waveform==&reader_soft&&bands==E0470_TURN_FAST_BANDS);
+    assert(waveform==(expected_turn_bands==1?display_main_gray_waveform():&reader_soft)&&bands==expected_turn_bands);
     ++water_calls;assert(last_scan==READ_PICO_EPD_SCAN_FAST);
+    assert(prefill==127);
     return water_result;
 }
 
@@ -196,8 +199,8 @@ int main(void) {
     assert(update_display_mode_diff(&hl, MODE_GL16) == EPD_DRAW_SUCCESS);
     assert(last_mode == MODE_GC16);
 
-    // 普通子页面一次输出柔和灰阶，第三次不驱动整页，达到原阈值仍用原表GC16。
-    // Ordinary subpages use one soft-gray difference without third-page full output, retaining original-table GC16 at the threshold.
+    // 子页和首次模式选择不触发第3/12次全刷，仍保留显式全刷及欠载恢复。
+    // Child/mode transitions never trigger third/twelfth-operation full output; explicit full and underrun recovery remain.
     for (int i = 0; i < APP_UI_FAST_GC16_EVERY - 1; ++i) {
         int prior_full = full_draws;
         assert(update_display_fast_page(&hl) == EPD_DRAW_SUCCESS);
@@ -206,7 +209,7 @@ int main(void) {
         assert(full_draws == prior_full);
     }
     assert(update_display_fast_page(&hl) == EPD_DRAW_SUCCESS);
-    assert(last_mode == MODE_GC16 && waveform_at_draw == &E0470_WAVEFORM && last_scan == READ_PICO_EPD_SCAN_FULL && full_draws > 0);
+    assert(last_mode == MODE_GL16 && waveform_at_draw == &soft_gray && last_scan == READ_PICO_EPD_SCAN_FULL);
 
     // Image pages clear the optical state and use the full grayscale waveform.
     memcpy(front, target, FB_BYTES);
@@ -261,6 +264,10 @@ int main(void) {
     assert(update_display_water_turn(&hl,(EpdRect){0,0,16,16},E0470_TURN_RTL)==EPD_DRAW_SUCCESS);
     assert(water_calls==1&&!draws&&!clears&&last_scan==READ_PICO_EPD_SCAN_FULL);
     assert(turn_tick_us==21000&&!ota_display_depth);
+    expected_turn_bands=1;
+    assert(update_display_text_turn(&hl,(EpdRect){0,0,16,16},E0470_TURN_RTL)==EPD_DRAW_SUCCESS);
+    assert(turn_tick_us==21000&&!ota_display_depth);
+    expected_turn_bands=E0470_TURN_FAST_BANDS;
     water_calls=0;
     water_result = EPD_DRAW_NO_PHASES_AVAILABLE;
     assert(update_display_water_turn(&hl, (EpdRect){0, 0, 16, 16}, E0470_TURN_RTL) == EPD_DRAW_SUCCESS);

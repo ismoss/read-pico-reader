@@ -14,6 +14,8 @@
   Cache-Control: no-store
 /versions.js
   Cache-Control: no-store
+/releases.json
+  Cache-Control: no-store
 /flasher-integrity.js
   Cache-Control: no-store
 /vendor/web/install-button.js

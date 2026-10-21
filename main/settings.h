@@ -113,7 +113,7 @@ bool app_settings_set_book_background_path(const char *path);
 /// Full-screen cleanup every 5/10/15/30 turns; 0 disables periodic cleanup only.
 uint8_t app_settings_reader_full_pages(void);
 void app_settings_set_reader_full_pages(uint8_t pages);
-/// 阅读翻页效果：0默认，1采用PR17快速水波纹；沿用原设置值和默认效果。/ Reader turn effect: 0 default, 1 PR17 fast ripple; retain stored values and the default effect.
+/// 阅读翻页效果：0普通，1水波纹；S31额外提供2速读黑白。/ Reader turn effect:0 ordinary,1 ripple; S31 additionally supports2 fast BW.
 uint8_t app_settings_reader_turn_effect(void);
 void app_settings_set_reader_turn_effect(uint8_t effect);
 /// 阅读正文里短按电源键翻下一页；默认关闭。/ Short power press turns forward only in reader body; off by default.
@@ -208,6 +208,9 @@ void app_settings_set_shelf_style(uint8_t style);
 /// 固定 TF 根目录：/sdcard/books 与 /sdcard/fonts；旧配置/备份不能修改。/ Fixed TF roots, unaffected by legacy settings/backups.
 const char* app_settings_books_dir(void);
 const char* app_settings_fonts_dir(void);
+/// TF卡内自定义目录，持久化成功后才更改当前路径。/ Custom SD roots change only after persistence succeeds.
+bool app_settings_set_books_dir(const char* path);
+bool app_settings_set_fonts_dir(const char* path);
 
 /// 将设置、阅读记录和 WiFi 凭据保存到 TF 卡根目录；备份含明文密码，需妥善保管。
 /// Save settings, reading records and WiFi credentials to TF root; keep the plaintext-secret backup private.

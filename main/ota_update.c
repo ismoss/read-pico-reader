@@ -9,6 +9,7 @@
  * Frozen: never overwrite the running partition or switch boot slots before validation completes.
  */
 #include "ota_update.h"
+#include "kiiko_board_config.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -43,7 +44,7 @@ static esp_err_t read_candidate(FILE *file, esp_image_header_t *header, esp_app_
     if (fseek(file, 0, SEEK_SET) != 0 || fread(header, 1, sizeof(*header), file) != sizeof(*header) ||
         fread(&segment, 1, sizeof(segment), file) != sizeof(segment) ||
         fread(desc, 1, sizeof(*desc), file) != sizeof(*desc)) return ESP_ERR_INVALID_SIZE;
-    if (header->magic != ESP_IMAGE_HEADER_MAGIC || desc->magic_word != ESP_APP_DESC_MAGIC_WORD ||
+    if (header->magic != ESP_IMAGE_HEADER_MAGIC || header->chip_id != KIIKO_BOARD_IMAGE_CHIP_ID || desc->magic_word != ESP_APP_DESC_MAGIC_WORD ||
         segment.data_len < sizeof(*desc)) return ESP_ERR_INVALID_RESPONSE;
     return ESP_OK;
 }

@@ -103,6 +103,20 @@ static void status_fit_signature(char *text, int width) {
 }
 
 static const char *const labels[] = {"首页", "书架", "文件管理", "设置"};
+static int s_power_signature=-1000;
+static int power_signature(void) {
+    const pmu_snapshot_t *pmu=read_pico_pmu_get();
+    return (pmu_battery_percent(pmu)+1)*2+(pmu_battery_charging(pmu)?1:0);
+}
+
+EpdRect ui_nav_status_area(void) { return (EpdRect){0,12,UI_LOCK_WIDTH,56}; }
+
+bool ui_nav_refresh_power(uint8_t *fb) {
+    if (!ui_status_visible(fb) || s_power_signature==power_signature()) return false;
+    epd_fill_rect(ui_nav_status_area(),UI_GRAY_WHITE,fb);
+    ui_nav_status(fb);
+    return true;
+}
 
 void ui_nav_back(uint8_t *fb, int x, int y) {
     ui_click_feedback_register(fb,(EpdRect){x-10,y+3,64,64},UI_CLICK_BACK_SMALL,UI_ICON_ANIMATE_CIRCLE_CHEVRON_LEFT);
@@ -218,13 +232,15 @@ void ui_nav_status(uint8_t *fb) {
         if (width > 0) ui_fill_round_rect(fb, (EpdRect){610, status_center_y - 7, width, 14}, 4, UI_GRAY_BLACK);
     }
     if (charging) {
-        // 闪电只落在深色电量块上：透明像素保留底色，白色墨在浅色区自然消失，
-        // 不必再按电量高低切换墨色。
-        // The bolt shows only over the dark fill: transparent pixels keep the background,
-        // so white ink vanishes on the light part and no SOC-dependent colour is needed.
-        ui_draw_icon(fb, 627, status_center_y, UI_NAV_BOLT_ICON_PX, UI_ICON_ZAP, UI_GRAY_WHITE);
+        // 固定黑底与白色闪电描边，0%时也有完整对比，不依赖电量填充宽度。
+        // A fixed black well and white bolt outline retain contrast even at0%, independent of the charge fill.
+        ui_fill_round_rect(fb,(EpdRect){614,status_center_y-10,26,20},3,UI_GRAY_BLACK);
+        ui_draw_icon(fb, 627, status_center_y, 22, UI_ICON_ZAP, UI_GRAY_WHITE);
+
     }
     ui_text_fixed_vc(fb, 595, status_center_y, UI_STATUS_PERCENT_PX, percent, EPD_DRAW_ALIGN_RIGHT, false);
+    ui_status_mark_visible(fb);
+    s_power_signature=power_signature();
 }
 
 int ui_nav_hit(uint16_t x, uint16_t y) {

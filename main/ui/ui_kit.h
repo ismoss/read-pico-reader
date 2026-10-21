@@ -189,6 +189,11 @@ void ui_draw_icon(
 /// 书架与文件目录共用四向分页栏；矩形止于导航触摸区之上，无圆圈或反馈底框。
 /// Shared shelf/file pager, ending above the navigation touch strip, without circles or backing boxes.
 enum { UI_PAGER_NONE=-1, UI_PAGER_FIRST, UI_PAGER_PREVIOUS, UI_PAGER_NEXT, UI_PAGER_LAST };
+/// 分页绘制、命中和局部输出共享同一纵坐标。/ Pager drawing, hits and local output share one vertical origin.
+EpdRect ui_pager_area_at(int top);
+EpdRect ui_pager_rect_at(int action,int top);
+int ui_pager_hit_at(int x,int y,int top);
+void ui_pager_draw_at(uint8_t *fb,const char *label,int page,int pages,bool key_mode,int pressed,int top);
 EpdRect ui_pager_area(void);
 EpdRect ui_pager_rect(int action);
 int ui_pager_hit(int x,int y);
@@ -309,6 +314,9 @@ int ui_datamatrix_side(const char* text);
 void ui_draw_datamatrix(uint8_t* framebuffer, EpdRect rect, const char* text);
 
 void ui_clear_page(uint8_t* framebuffer);
+/// 记录实际绘有状态栏的帧；清页会失效，离屏清页不影响当前帧。/ Track a painted header; clearing that frame invalidates it, while offscreen clears leave it visible.
+void ui_status_mark_visible(uint8_t *fb);
+bool ui_status_visible(const uint8_t *fb);
 /// Exact logical fill using contiguous packed rows; preserves boundary nibbles.
 void ui_fill_rect_fast(EpdRect rect, uint8_t gray, uint8_t *framebuffer);
 /// 直接写入已裁剪的一位位图，源数据按行、低位在先；不缩放、不申请内存。/ Blit a clipped row-major, least-bit-first mono bitmap directly, without rescaling or allocation.

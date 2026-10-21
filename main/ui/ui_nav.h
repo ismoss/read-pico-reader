@@ -14,6 +14,10 @@
 
 void ui_nav_draw(uint8_t *fb, int active);
 void ui_nav_status(uint8_t *fb);
+EpdRect ui_nav_status_area(void);
+/// 电量/充电变化且状态栏可见时重画；调用方只差分推状态栏区域。
+/// Paint changed power state only when visible; callers present only the status-bar diff.
+bool ui_nav_refresh_power(uint8_t *fb);
 /// 系统字体就绪时缓存状态栏字宽，阅读页只复用，不重载整份系统字体。
 /// Cache status metrics when the system face is ready; reading reuses them without reloading that font.
 void ui_nav_status_font_context(bool reading, bool face_changed);

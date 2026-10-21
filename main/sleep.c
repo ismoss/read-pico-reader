@@ -213,7 +213,9 @@ static bool pickup_wait_quiet(sc7a20h_handle_t acc, int quiet_ms, int timeout_ms
 }
 
 app_wake_source_t app_light_sleep_wait_timed(sc7a20h_handle_t acc, uint32_t timeout_ms) {
-    if (!(book_cover_jobs_quiesce(2000) && ui_avatar_quiesce(2000))) return APP_WAKE_KEY;
+    bool covers_idle=book_cover_jobs_quiesce(2000);
+    bool avatar_idle=ui_avatar_quiesce(2000);
+    bool poll_only=!(covers_idle && avatar_idle);
     bool pickup = acc != NULL && app_settings_pickup_wake();
     bool acc_armed = false;
     const int64_t deadline_us = timeout_ms
@@ -279,16 +281,14 @@ app_wake_source_t app_light_sleep_wait_timed(sc7a20h_handle_t acc, uint32_t time
             wake = APP_WAKE_KEY;
             break;
         }
+        if(poll_only) {vTaskDelay(pdMS_TO_TICKS(40));continue;}
         read_pico_clear_ioe_int();
         if (gpio_get_level((gpio_num_t)READ_PICO_IOE_INT_GPIO) == 0) {
             if (!ioe_low_since_us) ioe_low_since_us = now_us;
             if (now_us - ioe_low_since_us >= APP_LOCK_STUCK_IRQ_US) {
-                // Return to the active page instead of leaving an inert lock
-                // image when a non-key IOE interrupt cannot be cleared.
-                // 非按键中断一直清不掉时，退回可操作页面，避免像死机一样停在锁屏。
-                ESP_LOGW(TAG, "lock IOE_INT stuck low; recover active page");
-                wake = APP_WAKE_KEY;
-                break;
+                // 中断或浅睡异常只能回退到轮询，不能冒充双击解锁。/ Fall back to polling on IRQ/sleep faults, never synthesize an unlock.
+                ESP_LOGW(TAG, "lock IOE_INT stuck low; retain lock and poll key");
+                poll_only=true;
             }
             vTaskDelay(pdMS_TO_TICKS(20));
             continue;
@@ -314,8 +314,7 @@ app_wake_source_t app_light_sleep_wait_timed(sc7a20h_handle_t acc, uint32_t time
         if (timer_error != ESP_OK) {
             ESP_LOGW(TAG, "lock sleep timer rejected: %s", esp_err_to_name(timer_error));
             if (++sleep_errors >= APP_LOCK_SLEEP_ERROR_LIMIT) {
-                wake = APP_WAKE_KEY;
-                break;
+                poll_only=true;
             }
             vTaskDelay(pdMS_TO_TICKS(100));
             continue;
@@ -353,9 +352,8 @@ app_wake_source_t app_light_sleep_wait_timed(sc7a20h_handle_t acc, uint32_t time
             }
             last_sleep_error = sleep_error;
             if (++sleep_errors >= APP_LOCK_SLEEP_ERROR_LIMIT) {
-                ESP_LOGE(TAG, "lock light sleep repeatedly rejected; recover active page");
-                wake = APP_WAKE_KEY;
-                break;
+                ESP_LOGE(TAG, "lock light sleep repeatedly rejected; retain lock and poll key");
+                poll_only=true;
             }
             // A rejected sleep must not spin at full CPU speed behind the static e-paper image.
             vTaskDelay(pdMS_TO_TICKS(100));
@@ -462,6 +460,7 @@ void enter_lock_and_sleep(
     // 透明书封保留当前页面作为底图，不清白、不重排阅读页，也不读取旧阅读快照。
     // Keep the current page beneath the PNG; no white reset, reader reflow or old reader snapshot.
     if (lock_style != 3) epd_hl_set_all_white(hl);
+    else memcpy(framebuffer,hl->back_fb,(size_t)epd_width()*epd_height()/2);
     bool ticket = lock_style == 0;
     bool system_lock = ticket || lock_style == 2 || lock_pin_enabled();
     app_lock_font_t lock_font = {0};
@@ -473,8 +472,7 @@ void enter_lock_and_sleep(
         : lock_style == 2 ? book_lock_collage_prepare(framebuffer) :
           lock_style == 3 ? book_lock_bookmark_draw(framebuffer,app_settings_bookmark_path()) : draw_wallpaper(framebuffer);
     if (!lock_drawn) {
-        epd_hl_set_all_white(hl);
-        ui_draw_full_image(framebuffer, lock_4bpp_bin_start);
+        ui_lock_fallback_draw(framebuffer);
     }
     enum EpdDrawError result = EPD_DRAW_SUCCESS;
     if (feedback_visible) result = update_display_full(hl);
@@ -495,12 +493,13 @@ void enter_lock_and_sleep(
     epd_poweroff();
     app_wake_source_t wake = APP_WAKE_KEY;
     if (lock_pin_enabled()) lock_screen_authenticate(hl, touch, acc, false);
-    else wake = app_light_sleep_wait_timed(acc, APP_LOCK_LIGHT_SLEEP_MS);
-    if (wake == APP_WAKE_TIMEOUT) {
+    else wake = app_light_sleep_wait_timed(NULL, APP_LOCK_LIGHT_SLEEP_MS);
+    while (wake == APP_WAKE_TIMEOUT) {
         // PMU SOFT_SLEEP drops the ESP rail while keeping its RTC alive. A short
         // power-key press boots the host; the e-paper keeps this lock image.
         if(!lock_pin_enabled() && lock_screen_save(framebuffer)) (void)pico_boot_mark_frame_cached();
         app_enter_host_sleep(APP_SLEEP_DEEP);
+        wake=app_light_sleep_wait_timed(NULL,APP_LOCK_LIGHT_SLEEP_MS);
     }
     pico_boot_clear_resume();
     if (system_lock) app_font_end_lock(&lock_font);
@@ -520,7 +519,13 @@ void enter_lock_and_sleep(
 }
 
 void app_lock_boot_gate(EpdiyHighlevelState *hl, cst836u_handle_t touch, sc7a20h_handle_t acc) {
-    if (!lock_pin_enabled()) return;
+    if (!lock_pin_enabled()) {
+        if(pico_boot_has_resume()) {
+            pico_boot_ready();pico_boot_hold_resume();
+            (void)app_light_sleep_wait_timed(NULL,0);
+        }
+        return;
+    }
     // 卡挂载有界等待仅为了字体/锁屏图；没有卡仍必须验证。
     // Bound mount waiting for the face/art only; absent media still requires authentication.
     read_pico_sd_info_t info;
@@ -535,7 +540,7 @@ void app_lock_boot_gate(EpdiyHighlevelState *hl, cst836u_handle_t touch, sc7a20h
         bool drawn = app_settings_lock_style() == 0 ? book_ticket_draw(fb, false) :
             app_settings_lock_style() == 2 ? book_lock_collage_draw(fb) :
             app_settings_lock_style() == 3 ? book_lock_bookmark_draw(fb,app_settings_bookmark_path()) : draw_wallpaper(fb);
-        if (!drawn) { memset(fb, 255, (size_t)epd_width() * epd_height() / 2); ui_draw_full_image(fb, lock_4bpp_bin_start); }
+        if (!drawn) ui_lock_fallback_draw(fb);
     }
     lock_screen_authenticate(hl, touch, acc, true);
     app_font_end_lock(&saved);

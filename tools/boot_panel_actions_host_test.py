@@ -56,7 +56,7 @@ tick = function('on_tick', SETTINGS)
 tick = tick[tick.index('    if (s_panel_repair_pending)'):tick.index('    if (s_page==SETTINGS_MAIN && s_avatar_pending')]
 gesture = function('on_gesture', SETTINGS)
 gesture = gesture[gesture.index('    if(y>=SETTINGS_MAINTENANCE_Y'):gesture.rindex('    return APP_REDRAW_NONE;')]
-render = function('render', SETTINGS)
+render = function('render_content', SETTINGS)
 root_render = re.sub(r'\s+', '', render[render.index('const char *maintenance_labels'):])
 assert root_render.index('if(s_notice[0])') > root_render.index(
     'ui_fill_rect_fast((EpdRect){0,0,UI_LOCK_WIDTH,160},UI_GRAY_WHITE,fb);')
@@ -69,14 +69,15 @@ ACTIONS = r'''
 #include <string.h>
 typedef enum {APP_REDRAW_NONE,APP_REDRAW_PAGE,APP_REDRAW_FULL,APP_REDRAW_DONE} app_redraw_t;
 typedef struct { void *hl; uint8_t *fb; } app_ctx_t;
-enum { SETTINGS_MAIN, SETTINGS_CONFIG, SETTINGS_BOOT };
+enum { SETTINGS_MAIN, SETTINGS_CONFIG, SETTINGS_BOOT, SETTINGS_FACTORY_RESET };
 enum EpdDrawError { EPD_DRAW_SUCCESS, EPD_DRAW_ERROR };
 #define SETTINGS_MAINTENANCE_Y 500
 #define SETTINGS_MAINTENANCE_ROWS 4
 #define SETTINGS_ROW_H 68
 static int s_page, repairs, paints, upgrades;
 static bool s_panel_repair_pending, s_scroll_present_pending, s_boot_pending, s_config_confirm;
-static char s_notice[96];
+static char s_notice[96],s_reset_notice[96];
+static bool s_reset_confirm,s_reset_pending;
 static enum EpdDrawError result;
 static void upgrade_open(void) { ++upgrades; }
 static void render(app_ctx_t *ctx, uint8_t *fb) {

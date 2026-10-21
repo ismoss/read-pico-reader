@@ -1,7 +1,8 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 #pragma once
 #include "epdiy.h"
+#include <stdbool.h>
 
-/// 普通纯文字翻页：白底到中灰的少量回浅脉冲提前，其余迁移保留原表。
-/// Plain text turns: advance a few gray-edge settling pulses; retain all other transitions.
+/// 柔和文字序列：白底到中灰的少量回浅脉冲提前；具体阅读模式由板级出口选择。
+/// Soft text phases advance a few gray-edge settling pulses; board output selects the reading modes that use them.
 const EpdWaveform* display_reader_text_waveform(void);

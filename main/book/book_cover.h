@@ -66,3 +66,6 @@ void book_cover_fast_cache_write_checked(const char *path,const char *title,cons
 
 /// PNG预乘灰度及alpha；输出缓冲各width*height字节。/ Premultiplied PNG gray and alpha; each output buffer holds width*height bytes.
 bool book_png_file_layer(const char *path,unsigned width,unsigned height,uint8_t *gray,uint8_t *alpha);
+/// 流式透明层：仅保留源行窗口和一条输出行。/ Stream premultiplied gray/alpha through bounded row buffers.
+bool book_png_file_layer_rows(const char *path, unsigned width, unsigned height,
+    bool (*sink)(void *, unsigned, unsigned, const uint8_t *, const uint8_t *), void *context);

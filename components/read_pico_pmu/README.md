@@ -52,3 +52,10 @@ Chinese and English editions are provided.
 Apache-2.0，见 [LICENSE](LICENSE)。
 
 Apache-2.0, see [LICENSE](LICENSE).
+
+
+## Pico 高电量显示 / Pico upper-SOC display
+
+CW32按其文档中的电压表估算SOC，并在充电结束时重新定基；拔电电压松弛可能造成百分比跳变。主机不改这张表、不用电压猜充满：只有校验且有效的快照参与显示。高段使用每秒一次的五样本中位数，电源状态变化观察30秒，再按有效较低读数逐步收敛；轮询频率不改变下降速度。低SOC、低压和真实充满状态立即采用原值；长时间缺读或重启从有效原值重新定基，不累计离线下降。原始快照和安全保护不经显示滤波，Metalio电量计不使用此算法。它稳定估算显示，不能代替实际电流计或电池放电校准。
+
+CW32 estimates SOC from its documented voltage table and rebases after charging; unplug relaxation may therefore jump percentages. The host keeps that table and accepts only valid checked samples, without inferring full from voltage. Upper-range display uses a five-sample median at one-second intervals, observes power changes for30seconds and then converges toward lower readings by time. Poll frequency cannot accelerate descent. Low SOC/voltage and confirmed-full samples bypass smoothing; gaps/restarts rebase without offline descent debt. Raw diagnostics/safety remain untouched, and Metalio's gauge does not use this filter. Display stability is not a replacement for current measurement or discharge calibration.

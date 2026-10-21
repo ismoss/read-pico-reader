@@ -2,6 +2,30 @@
   "schema": 1,
   "releases": [
     {
+      "version": "0.3.3-rc97",
+      "manifest": "releases/0.3.3-rc97/manifest.json",
+      "bin": "Pico-update-0.3.3-rc97.bin",
+      "source_commit": "0ae3ef80a3f391bb892248f324cf0835318ddbba",
+      "files": {
+        "bootloader.bin": {
+          "size": 21232,
+          "sha256": "856fb19103088cf4aad7ada0f54a96c50e34969318f435b3753159b94b727324"
+        },
+        "partitions.bin": {
+          "size": 3072,
+          "sha256": "edba9d92e5fc51c706c12f4b4a5d5d23728ba8fb0fbc00be654f1eccef404bda"
+        },
+        "firmware.bin": {
+          "size": 4173744,
+          "sha256": "163ef3e8b4138fc6b9641aef2f84b112b5b025cf0929a1554cbaa04bde785fca"
+        },
+        "ota_data_initial.bin": {
+          "size": 8192,
+          "sha256": "7d2c7ac4888bfd75cd5f56e8d61f69595121183afc81556c876732fd3782c62f"
+        }
+      }
+    },
+    {
       "version": "0.3.3-rc86",
       "manifest": "releases/0.3.3-rc86/manifest.json",
       "bin": "Pico-update-0.3.3-rc86.bin",
@@ -49,5 +73,6 @@
         }
       }
     }
-  ]
+  ],
+  "previous_version": "0.3.3-rc97"
 }

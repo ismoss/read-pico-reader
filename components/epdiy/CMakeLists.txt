@@ -33,8 +33,9 @@ if(DEFINED IDF_VERSION_MAJOR AND IDF_VERSION_MAJOR GREATER_EQUAL 6)
     list(APPEND epdiy_private_requires esp_hal_dma esp_hal_rmt esp_hal_lcd)
 endif()
 
+set(kiiko_selected_sources ${app_sources})
 idf_component_register(
-    SRCS ${app_sources}
+    SRCS ${kiiko_selected_sources}
     INCLUDE_DIRS "src/" "include"
     REQUIRES ${epdiy_requires}
     PRIV_REQUIRES ${epdiy_private_requires}

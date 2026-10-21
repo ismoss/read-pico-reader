@@ -48,6 +48,14 @@
  * User revision: fast acrylic uses a regular one-pixel checkerboard in the same output as cached covers, without gray registration or a furniture-first wait; uncached covers retain bounded lazy decoding. Ordinary/water retain grays; page/lock changes cancel stale targets.
  * 用户要求采用PR17的快速水波纹，并最新指定8条带、每拍11090us；每次显式设置，结束恢复先前节拍，避免影响主页动画。全刷、插图及失败恢复保留原优先级。
  * User requests PR17 fast ripple with the latest 8 bands at 11090us; explicitly select pacing per turn and restore it afterward so main animations remain independent. Retain cleanup, image and recovery priority.
+ * 用户2026-10-20授权S31独立文字水波纹实验包：纯文字水波纹可选四级/22相/8带并合并尾带，合并页脚且最多十页GC48。
+ * 用户最新指定本地普通文字也用与水波纹相同的四级22相，同步整页；速读黑白保留DU20。
+ * Latest user request: local ordinary text shares ripple's four-level22 phases in one synchronous output; FastBW retainsDU20.
+ * 两个短灰阶路径均最多十页GC48；未启用实验、缺相或本次开机扫描失败时回到完整GL48，图片/背景与手动全刷保持。
+ * Both short-gray paths useGC48 within ten turns; builds without the experiment,missing phases or boot-local scan failures retain fullGL48, as do images/backgrounds and manual cleanup.
+ * User authorizes a separate S31 text-ripple experiment on2026-10-20: four target levels/22 phases/eight bands with a paired tail and fused footer and GC48 within ten turns. Regular builds, main pages, images and manual cleanup retain their paths.
+ * 用户随后要求借鉴原厂普通阅读的干净过渡：普通字缘仍保留16级，仅跳过本次所有像素都保持的前导相，不裁有效脉冲。
+ * The user then requests clean vendor-like ordinary turns: retain16-level text targets, omitting only actual all-hold leading phases without trimming active pulses.
  * 用户增加管理/导入按压态：复用现有抬起确认流程，按下灰底加深并下沉2px，只推按钮区域。
  * User adds management/import feedback: retain release-confirmed actions, darken and depress controls 2px on press, presenting only their region.
  * 用户修订：快刷封面保留轻量减黑并按最新要求略增黑点密度，在PSRAM缓存最多九张1位缩略图（约40KiB）；进度未改变时不重复丢弃封面。缓存只画封面，收藏与界面文字实时绘制，开书或卡失效时释放。
@@ -133,6 +141,7 @@
 #include "book_store.h"
 #include "book_shelf_categories.h"
 #include "display.h"
+#include "display_main_waveform.h"
 #include "display_reader_waveform.h"
 #include "e0470_epaper_waveform.h"
 #include "esp_heap_caps.h"
@@ -3264,6 +3273,8 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
         // The turn effect is independent of the footer: full-screen turns still use the selected water effect.
         err = s_water_turn_pending
             ? update_display_water_turn(ctx->hl, s_area, s_water_turn_dir)
+            : s_reader_turn_pending && s_mode==MODE_GL16
+                ? update_display_text_turn(ctx->hl, s_area, E0470_TURN_RTL)
             // 普通翻页与全屏阅读都只驱动变化像素；设置面板等局部绘制保留原路径。
             // Ordinary turns and full-screen reading drive changed pixels only; other local UI keeps its path.
             : (s_reader_fullscreen || s_reader_turn_pending) && s_mode == MODE_GL16
@@ -3286,7 +3297,10 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
         }
     }
     else err = s_view == READING
-        ? update_display_mode_diff(ctx->hl, APP_PAGE_REFRESH_MODE)
+        // 面板切换只推最终灰阶目标，不将首次选择水波纹算作周期全刷。
+        // Panel transitions present their final grays without counting first ripple selection as periodic cleanup.
+        ? update_display_area_diff_with(ctx->hl,display_main_normal_waveform(),MODE_GL16,
+              (EpdRect){0,0,UI_LOCK_WIDTH,UI_LOCK_HEIGHT})
         : update_display_fast_page(ctx->hl);
     int64_t displayed = esp_timer_get_time();
     reader_prefetch_end(prep);
@@ -3675,7 +3689,7 @@ static bool load_chapter_at(app_ctx_t* ctx, size_t chapter, size_t offset,
         copy_text(s_message, sizeof(s_message), "排版失败：内存不足或章节过长");
         return false;
     }
-    book_excerpt_offer(s_path, &loaded);
+    book_excerpt_offer(s_path, chapter, &loaded);
     free(s_text);
     free(s_blocks);
     free(s_runs);
@@ -4954,6 +4968,9 @@ static app_redraw_t reading_settings_action(app_ctx_t *ctx, uint16_t x, uint16_t
         s_turns = 0;
     } else if (ui_rect_hit(reading_setting_rect(1), x, y)) {
         app_settings_set_reader_turn_effect(!app_settings_reader_turn_effect());
+        // 新模式从新一轮计数开始，首次翻页不继承旧模式的自动全刷欠账。
+        // Start a fresh cleanup cycle so the first turn does not inherit the previous effect's cleanup debt.
+        s_turns=0;
     } else if (ui_rect_hit(reading_setting_rect(2), x, y)) {
         s_reader_panel = READER_PANEL_TURN_SETTINGS;
     } else if (ui_rect_hit(reading_setting_rect(4), x, y)) {

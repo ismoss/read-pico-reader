@@ -211,3 +211,8 @@ Every comment is bilingual. Comments only; no logic changes.
 - `enum` 成员短尾注：`///< 中文 / English`
 - 大 `.c` 用 `/* ---- 区块名 / Section ---- */` 分区。/ Large `.c` files use section banners.
 - 术语见表，不在注释里重复解释。/ Use the glossary; do not redefine terms.
+
+## Previous official release / 上一正式版
+
+Every official publication must archive the original previous Release with `tools/archive_current_release.py` before replacing the latest manifest. Keep its web-flashing/TF choices and immutable binary hashes, as well as all earlier archives. `manifest.previous_version` is checked during website staging. TF images replace the complete application in the inactive slot; full base installation remains USB.
+每次发布必须先归档上一正式版原字节，保留网页刷机与TF入口，不能用本地同号测试包替换；TF升级完整应用，不写引导程序和分区表。

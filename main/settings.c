@@ -15,6 +15,8 @@
  */
 
 #include "settings.h"
+#include "kiiko_board_config.h"
+#define READER_TURN_EFFECT_MAX 1
 #include "book/book_font_size.h"
 
 #include <stdio.h>
@@ -33,7 +35,7 @@
 #include "book/book_history_backup.h"
 
 #define TAG "settings"
-#define NVS_NS "read_pico"
+#define NVS_NS KIIKO_BOARD_SETTINGS_NAMESPACE
 #define NVS_KEY_SLEEP "sleep"
 #define NVS_KEY_SHUTDOWN_MODE "shutdown"
 #define NVS_KEY_HOME_FULL "home_full"
@@ -137,8 +139,8 @@ static uint8_t s_book_indent = 2;
 static uint8_t s_book_indent_adjust = 20;
 static uint8_t s_auto_lock_minutes;
 static uint8_t s_shelf_style = 2;
-static const char s_books_dir[MEDIA_DIR_MAX] = "/sdcard/books";
-static const char s_fonts_dir[MEDIA_DIR_MAX] = "/sdcard/fonts";
+static char s_books_dir[MEDIA_DIR_MAX] = "/sdcard/books";
+static char s_fonts_dir[MEDIA_DIR_MAX] = "/sdcard/fonts";
 static void nvs_put_u8(const char* key, uint8_t value);
 
 static bool valid_media_dir(const char* path) {
@@ -156,6 +158,18 @@ static bool valid_media_dir(const char* path) {
         if (!end) break;
         p = end + 1;
     }
+    return true;
+}
+
+static bool set_media_dir(char *dst, const char *key, const char *path) {
+    if (!valid_media_dir(path)) return false;
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS, NVS_READWRITE, &h) != ESP_OK) return false;
+    esp_err_t err = nvs_set_str(h, key, path);
+    if (err == ESP_OK) err = nvs_commit(h);
+    nvs_close(h);
+    if (err != ESP_OK) return false;
+    strlcpy(dst, path, MEDIA_DIR_MAX);
     return true;
 }
 
@@ -206,6 +220,12 @@ void app_settings_init(void) {
     value_len = sizeof(s_status_signature);
     if (nvs_get_str(h, NVS_KEY_STATUS_SIGNATURE, s_status_signature, &value_len) != ESP_OK)
         s_status_signature[0] = 0;
+    size_t dir_len=sizeof(s_books_dir);
+    if(nvs_get_str(h,NVS_KEY_BOOKS_DIR,s_books_dir,&dir_len)!=ESP_OK||!valid_media_dir(s_books_dir))
+        strlcpy(s_books_dir,"/sdcard/books",sizeof(s_books_dir));
+    dir_len=sizeof(s_fonts_dir);
+    if(nvs_get_str(h,NVS_KEY_FONTS_DIR,s_fonts_dir,&dir_len)!=ESP_OK||!valid_media_dir(s_fonts_dir))
+        strlcpy(s_fonts_dir,"/sdcard/fonts",sizeof(s_fonts_dir));
     size_t font_len = sizeof(s_font);
     if (nvs_get_str(h, NVS_KEY_FONT, s_font, &font_len) != ESP_OK) {
         s_font[0] = '\0';
@@ -254,7 +274,7 @@ void app_settings_init(void) {
          reader_full_pages == 15 || reader_full_pages == 30))
         s_reader_full_pages = reader_full_pages;
     uint8_t reader_turn_effect = 0;
-    if (nvs_get_u8(h, NVS_KEY_READER_TURN, &reader_turn_effect) == ESP_OK && reader_turn_effect <= 1)
+    if (nvs_get_u8(h, NVS_KEY_READER_TURN, &reader_turn_effect) == ESP_OK && reader_turn_effect <= READER_TURN_EFFECT_MAX)
         s_reader_turn_effect = reader_turn_effect;
     uint8_t power_turn = 0;
     if (nvs_get_u8(h, NVS_KEY_POWER_TURN, &power_turn) == ESP_OK) s_reader_power_turn = power_turn == 1;
@@ -612,7 +632,7 @@ void app_settings_set_reader_full_pages(uint8_t pages) {
 }
 uint8_t app_settings_reader_turn_effect(void) { return s_reader_turn_effect; }
 void app_settings_set_reader_turn_effect(uint8_t effect) {
-    if (effect > 1 || effect == s_reader_turn_effect) return;
+    if (effect > READER_TURN_EFFECT_MAX || effect == s_reader_turn_effect) return;
     s_reader_turn_effect = effect;
     nvs_put_u8(NVS_KEY_READER_TURN, effect);
 }
@@ -796,6 +816,9 @@ void app_settings_set_shelf_style(uint8_t style) {
 }
 const char* app_settings_books_dir(void) { return s_books_dir; }
 const char* app_settings_fonts_dir(void) { return s_fonts_dir; }
+bool app_settings_set_books_dir(const char* path) { return set_media_dir(s_books_dir,NVS_KEY_BOOKS_DIR,path); }
+bool app_settings_set_fonts_dir(const char* path) { return set_media_dir(s_fonts_dir,NVS_KEY_FONTS_DIR,path); }
+
 #ifndef APP_SETTINGS_BACKUP_ROOT
 #define APP_SETTINGS_BACKUP_ROOT "/sdcard"
 #endif
@@ -1113,7 +1136,7 @@ static bool backup_valid(const settings_backup_v1_t *backup) {
         f[BK_SHAKE] > 1 || (f[BK_FULL_PAGES] != 0 && f[BK_FULL_PAGES] != 5 &&
                             f[BK_FULL_PAGES] != 10 && f[BK_FULL_PAGES] != 15 &&
                             f[BK_FULL_PAGES] != 30) ||
-        f[BK_TURN] > 1 || f[BK_POWER_TURN] > 1 || f[BK_IMMERSIVE] > 1 ||
+        f[BK_TURN] > READER_TURN_EFFECT_MAX || f[BK_POWER_TURN] > 1 || f[BK_IMMERSIVE] > 1 ||
         f[BK_TRACKING] > (backup_version(backup)>=20 ? APP_BOOK_TRACK_COUNT-1 : backup_version(backup)==19 ? 20 : 4) || f[BK_READING_LINE] > 2 ||
         f[BK_LINE_SPACING] < 110 || f[BK_LINE_SPACING] > 150 ||
         f[BK_MARGIN] > 60 ||
@@ -1249,8 +1272,8 @@ esp_err_t app_settings_backup_restore(void) {
     // Accept retired IDs from old backups and restore the default acrylic style.
     if (backup.flags[BK_SHELF] == 3 || backup.flags[BK_SHELF] == 4) backup.flags[BK_SHELF] = 2;
     if (profile.avatar[0] && !backup_file_exists(profile.avatar, false)) profile.avatar[0] = 0;
-    strlcpy(backup.books_dir, "/sdcard/books", sizeof(backup.books_dir));
-    strlcpy(backup.fonts_dir, "/sdcard/fonts", sizeof(backup.fonts_dir));
+    if(!backup_file_exists(backup.books_dir,true))strlcpy(backup.books_dir,"/sdcard/books",sizeof(backup.books_dir));
+    if(!backup_file_exists(backup.fonts_dir,true))strlcpy(backup.fonts_dir,"/sdcard/fonts",sizeof(backup.fonts_dir));
 
     nvs_handle_t h;
     esp_err_t err = nvs_open(NVS_NS, NVS_READWRITE, &h);
@@ -1360,6 +1383,8 @@ esp_err_t app_settings_backup_restore(void) {
     strlcpy(s_book_background, background.path, sizeof(s_book_background));
     s_home_component = (app_home_component_t)home.component;
     s_home_goal_minutes = home.minutes;
+    strlcpy(s_books_dir,backup.books_dir,sizeof(s_books_dir));
+    strlcpy(s_fonts_dir,backup.fonts_dir,sizeof(s_fonts_dir));
     strlcpy(s_font, backup.font, sizeof(s_font));
     strlcpy(s_system_font, backup.system_font, sizeof(s_system_font));
     strlcpy(s_wallpaper, backup.wallpaper, sizeof(s_wallpaper));

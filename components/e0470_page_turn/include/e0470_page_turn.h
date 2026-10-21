@@ -54,11 +54,13 @@ enum EpdDrawError e0470_page_turn_with_waveform(
     const EpdWaveform* waveform, unsigned bands
 );
 
+/// 同步普通翻页用1带，水波纹用2..32带。/ Use one synchronous band for ordinary turns, 2..32 for ripple.
 /// 显式序列的一拍一带入口；保留波形、指定条带数与当前节拍，8带37相共44拍。/ Compact explicit sequence: retain waveform, requested bands and current pacing; eight bands/37 phases take 44 ticks.
 enum EpdDrawError e0470_page_turn_with_waveform_compact(
     EpdiyHighlevelState* hl, EpdRect area, e0470_turn_dir_t dir,
     const EpdWaveform* waveform, unsigned bands
 );
+
 
 /// 倒置竖屏的上下柔和区与中间校准区同时逐相输出；区域须全逻辑宽、32列对齐。
 /// Inverted portrait: output soft chrome and calibrated middle art in the same phases; full logical width and 32-column alignment are required.

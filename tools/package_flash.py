@@ -22,6 +22,12 @@ def package(build: Path, output: Path):
             'published version already exists with different bytes; '
             'stage local tests in build/, or increment the version for an authorized release')
     manifest=json.loads((ROOT/'flash/manifest.json').read_text())
+    if manifest['version'] != version:
+        # 中文：正式发布必须先保留上一版的可刷写清单。/ English: A release must retain the previous installable manifest first.
+        previous = manifest['version']
+        catalog=json.loads((ROOT/'flash/releases.json').read_text())
+        assert any(item['version']==previous for item in catalog['releases']), 'archive the previous official release first'
+        manifest['previous_version']=previous
     manifest['version']=version
     manifest['name']='kiikoread'
     manifest['updated_at']=datetime.now(ZoneInfo('Asia/Shanghai')).isoformat(timespec='seconds')
@@ -41,7 +47,7 @@ def package(build: Path, output: Path):
     release={'schema':1,'version':version,'project':'Read_Pico','board':'RDP-G01-W','layout':'pico-dual-4m-v1',
         'minimum_base_version':'0.3.3-rc72','url':f'https://wegooo-cell.github.io/read-pico-reader/{upgrade_name}',
         'size':len(data),'sha256':hashlib.sha256(data).hexdigest(),
-        'notes':'1. 锁屏设置读取失败时直接进入系统，不拦截启动\n2. 修复字间距反复回跳至-11px，点按和拖动均支持±15px\n3. 修复段距按钮及目录章节名粗细不一、抗锯齿问题'}
+        'notes':'1. 透明书封优化速度和稳定性，下拉菜单更快、更清晰\n2. 电量算法更稳定、优化大内存卡读取\n3. 优化时钟与主页切换，恢复自定义书籍、字体目录\n4. 双击电源键解锁，新增恢复出厂设置\n5. 普通阅读翻页优化字重与抗锯齿，侧滑返回更灵敏'}
     (output/'manifest.json').write_text(json.dumps(manifest,ensure_ascii=False,indent=2)+'\n')
     (output/'update.json').write_text(json.dumps(release,ensure_ascii=False,indent=2)+'\n')
     check(output)

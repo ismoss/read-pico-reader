@@ -36,6 +36,7 @@ static const char* TAG = "sd_card";
 static sdmmc_card_t* card;
 static int probe_state;
 static bool filesystem_unreadable;
+static bool space_busy;
 static portMUX_TYPE state_lock = portMUX_INITIALIZER_UNLOCKED;
 static bool media_invalidated;
 static read_pico_sd_info_t cached_info;
@@ -123,7 +124,9 @@ static void fill_info(read_pico_sd_info_t* info, esp_err_t mount_err) {
     info->capacity_bytes = (uint64_t)card->csd.capacity * card->csd.sector_size;
     // 空间统计失败不覆盖「挂载成功」，仍允许正常读取文件。
     // Allocation-query failure must not turn a mounted filesystem into a mount failure.
-    (void)fill_space(info);
+    // 先发布文件系统可读；FAT全盘统计在文件管理请求时单独进行，不能延迟唤醒/字体。
+    // Publish readable media first; defer full-FAT accounting until Files requests it, never behind wake/font readiness.
+    info->space_error=ESP_ERR_NOT_FINISHED;
 }
 
 static void ensure_media_dirs(void) {
@@ -335,20 +338,48 @@ esp_err_t read_pico_sd_get_info(read_pico_sd_info_t* info) {
 // 驱动操作期间占用忙状态，不在临界区执行 I/O。/ Reserve busy state across driver I/O outside the critical section.
 static bool begin_operation(void) {
     portENTER_CRITICAL(&state_lock);
-    bool ready = probe_state != 1;
+    bool ready = probe_state != 1 && !space_busy;
     if (ready) probe_state = 1;
     portEXIT_CRITICAL(&state_lock);
     return ready;
 }
 
+static bool begin_space_refresh(void) {
+    portENTER_CRITICAL(&state_lock);
+    bool ready=probe_state!=1&&!space_busy&&cached_info.mounted&&!media_invalidated;
+    if(ready)space_busy=true;
+    portEXIT_CRITICAL(&state_lock);
+    return ready;
+}
+static esp_err_t finish_space_refresh(void) {
+    read_pico_sd_info_t info;
+    esp_err_t err=read_pico_sd_get_info(&info);
+    if(err==ESP_OK&&info.mounted){err=fill_space(&info);publish_info(&info);}
+    portENTER_CRITICAL(&state_lock);space_busy=false;portEXIT_CRITICAL(&state_lock);
+    return err;
+}
 esp_err_t read_pico_sd_refresh_space(void) {
     read_pico_sd_info_t info;
-    esp_err_t err = read_pico_sd_get_info(&info);
-    if (err != ESP_OK || !info.mounted) return err != ESP_OK ? err : ESP_ERR_INVALID_STATE;
-    if (!begin_operation()) return ESP_ERR_NOT_FINISHED;
-    err = fill_space(&info);
-    publish_info(&info);
-    return err;
+    esp_err_t err=read_pico_sd_get_info(&info);
+    if(err!=ESP_OK||!info.mounted)return err!=ESP_OK?err:ESP_ERR_INVALID_STATE;
+    if(!begin_space_refresh())return ESP_ERR_NOT_FINISHED;
+    return finish_space_refresh();
+}
+static void space_task(void *arg) {
+    (void)arg;(void)finish_space_refresh();vTaskDelete(NULL);
+}
+esp_err_t read_pico_sd_start_space_refresh(void) {
+    read_pico_sd_info_t info;
+    esp_err_t err=read_pico_sd_get_info(&info);
+    if(err!=ESP_OK||!info.mounted)return err!=ESP_OK?err:ESP_ERR_INVALID_STATE;
+    if(!begin_space_refresh())return ESP_ERR_NOT_FINISHED;
+    // 与挂载忙状态分离，统计期间仍报告已挂载；重挂/USB交接须等统计释放卡。
+    // Accounting never masquerades as an unmounted card; remount/USB handoff wait for this owner.
+    if(xTaskCreate(space_task,"sd_space",4096,NULL,2,NULL)!=pdPASS){
+        portENTER_CRITICAL(&state_lock);space_busy=false;portEXIT_CRITICAL(&state_lock);
+        return ESP_ERR_NO_MEM;
+    }
+    return ESP_ERR_NOT_FINISHED;
 }
 
 esp_err_t read_pico_sd_remount(void) {

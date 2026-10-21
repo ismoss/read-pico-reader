@@ -101,6 +101,8 @@ typedef struct {
     uint16_t diag_host_rst;
     uint16_t diag_adc;
 
+    bool display_soc_valid; ///< 主机高段稳定结果有效；原始PMU字段不变 / Host upper-SOC result; raw PMU fields remain intact
+    uint16_t display_soc_permille;
     bool quick_ok;
     uint16_t qb_mv;
     uint16_t qb_soc;
@@ -138,6 +140,7 @@ static inline int pmu_battery_percent(const pmu_snapshot_t *p) {
         if (!p->status_ok || !(p->flags & PMU_STATUS_BATTERY_VALID)) return -1;
         soc = p->soc_permille;
     }
+    if(soc<=1000 && p->display_soc_valid)soc=p->display_soc_permille;
     return soc <= 1000 ? (soc + 5) / 10 : -1;
 }
 static inline bool pmu_battery_charging(const pmu_snapshot_t *p) {
@@ -200,8 +203,8 @@ read_pico_pmu_key_action_t read_pico_pmu_take_key_action(void);
 /// 抽干事件队列；若有电源键短按返回 true。
 /// / Drain the queue; true if a power-key short press was seen.
 bool read_pico_pmu_take_key_short(void);
-/// 抽干队列；按下或短按都算唤醒（浅睡常先收到 KEY_DOWN）。
-/// / Drain the queue; KEY_DOWN or SHORT both count as wake (light sleep often sees KEY_DOWN first).
+/// 抽干队列；两次有效短按释放相距60..600ms才解锁，按下/长按不计入。
+/// / Wake only after two distinct short releases 60..600 ms apart; DOWN/holds do not count.
 bool read_pico_pmu_take_key_wakeup(void);
 /// 保证 RUNNING 后发 HOST_SOFT_SLEEP，等到 STATUS 为 SOFT_SLEEP（随后 EN=0）。
 /// / After RUNNING, send HOST_SOFT_SLEEP and wait for STATUS SOFT_SLEEP (then EN=0).

@@ -31,6 +31,9 @@
 
 static bool s_system_text_scale = true;
 static bool s_system_ttf;
+static const uint8_t *s_status_framebuffer;
+void ui_status_mark_visible(uint8_t *fb) { s_status_framebuffer=fb; }
+bool ui_status_visible(const uint8_t *fb) { return fb && s_status_framebuffer==fb; }
 
 void ui_text_set_system_scale(bool enabled) { s_system_text_scale = enabled; }
 void ui_text_set_system_font(bool enabled) { s_system_ttf = enabled; }
@@ -146,17 +149,20 @@ void ui_draw_icon(
     }
 }
 
-EpdRect ui_pager_area(void) { return (EpdRect){36,1006,612,50}; }
-EpdRect ui_pager_rect(int action) {
+EpdRect ui_pager_area_at(int top) { return (EpdRect){36,top,612,50}; }
+EpdRect ui_pager_rect_at(int action,int top) {
     static const int left[]={36,116,480,576},width[]={72,88,88,72};
     return action>=UI_PAGER_FIRST&&action<=UI_PAGER_LAST?
-        (EpdRect){left[action],1006,width[action],50}:(EpdRect){0};
+        (EpdRect){left[action],top,width[action],50}:(EpdRect){0};
 }
-int ui_pager_hit(int x,int y) {
+int ui_pager_hit_at(int x,int y,int top) {
     for(int action=UI_PAGER_FIRST;action<=UI_PAGER_LAST;++action)
-        if(ui_rect_hit(ui_pager_rect(action),x,y))return action;
+        if(ui_rect_hit(ui_pager_rect_at(action,top),x,y))return action;
     return UI_PAGER_NONE;
 }
+EpdRect ui_pager_area(void) { return ui_pager_area_at(1006); }
+EpdRect ui_pager_rect(int action) { return ui_pager_rect_at(action,1006); }
+int ui_pager_hit(int x,int y) { return ui_pager_hit_at(x,y,1006); }
 int ui_pager_target(int action,int page,int pages) {
     if(pages<1)pages=1;
     if(page<0)page=0;
@@ -167,10 +173,10 @@ int ui_pager_target(int action,int page,int pages) {
     if(action==UI_PAGER_LAST)return pages-1;
     return page;
 }
-void ui_pager_draw(uint8_t *fb,const char *label,int page,int pages,bool key_mode,int pressed) {
-    ui_text_box(fb,(EpdRect){212,1006,260,50},21,label,EPD_DRAW_ALIGN_CENTER,false);
+void ui_pager_draw_at(uint8_t *fb,const char *label,int page,int pages,bool key_mode,int pressed,int top) {
+    ui_text_box(fb,(EpdRect){212,top,260,50},21,label,EPD_DRAW_ALIGN_CENTER,false);
     for(int action=UI_PAGER_FIRST;action<=UI_PAGER_LAST;++action){
-        EpdRect r=ui_pager_rect(action);
+        EpdRect r=ui_pager_rect_at(action,top);
         bool previous=action==UI_PAGER_FIRST||action==UI_PAGER_PREVIOUS;
         bool end=action==UI_PAGER_FIRST||action==UI_PAGER_LAST;
         bool down=pressed==action,outlined=key_mode&&!end;
@@ -187,6 +193,10 @@ void ui_pager_draw(uint8_t *fb,const char *label,int page,int pages,bool key_mod
                 if(dx*dx+dy*dy<=4)ui_draw_icon(fb,cx+dx,cy+dy,size,icon,enabled?0x10:0x90);
         ui_draw_icon(fb,cx,cy,size,icon,outlined?(down?0x30:0xf0):(enabled?0:0xa0));
     }
+}
+
+void ui_pager_draw(uint8_t *fb,const char *label,int page,int pages,bool key_mode,int pressed) {
+    ui_pager_draw_at(fb,label,page,pages,key_mode,pressed,1006);
 }
 
 static void draw_frosted(uint8_t *fb, EpdRect rect, bool pocket) {
@@ -1398,6 +1408,7 @@ void ui_draw_datamatrix(uint8_t* framebuffer, EpdRect rect, const char* text) {
 }
 
 void ui_clear_page(uint8_t* framebuffer) {
+    if(s_status_framebuffer==framebuffer)s_status_framebuffer=NULL;
 
     memset(framebuffer, 0xFF, (size_t)epd_width() * epd_height() / 2);
 }

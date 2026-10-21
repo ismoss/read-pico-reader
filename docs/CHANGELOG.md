@@ -4,6 +4,23 @@
 User-visible changes by release; see [README](../README.md) for usage.
 
 
+## 0.3.3-rc98 / 2026-10-21
+
+- 透明书封采用按行读取与缓存合成，减少与书内字体、插图争用大块内存，并加快阴影和PNG图案读取；保留透明度和边缘连通去白规则。锁屏图片不可用时显示白底锁标志。
+  Stream/cache transparent covers with lower peak memory and faster shadow/art reads, preserving alpha and edge-connected white removal. Unavailable art shows a lock on white.
+- 下拉菜单直接复用当前画面，收起恢复底页；阅读页玻璃后的文字稍加模糊。下拉锁屏先收回菜单，全刷按钮自动收回菜单再刷新，按钮沿用局部反馈。
+  Reuse/restore the existing quick-menu background with slightly softer reader glass. Dismiss it before locking or explicit full refresh; retain local button feedback.
+- 电量高段显示更稳定，降低插拔后的突降；大容量TF卡先就绪后统计空间，减少等待。保留真实低电提示、原PMU读数与保护，容量估算仍受电池状态影响。
+  Stabilize upper battery percentages and defer large-card capacity accounting until after mount. Retain low-power alerts, raw PMU readings and protection; battery estimates depend on cell condition.
+- 加快首页时钟、书架封面及主页切换，合并可合并的推屏；保留原灰阶底栏。设置、文件及二级页面底栏常驻，右滑返回可从内容区起手，动势从左向右；头像保留灰阶。
+  Reuse clock/cover caches, fuse eligible updates and keep gray navigation across system children. Rightward back swipes start within content and animate left to right; retain avatar grays.
+- TF目录恢复「设为书籍目录」「设为字体目录」；继续阅读书摘跟随当前章节。设置最下方新增两次确认的恢复出厂设置，重置偏好与连接信息，保留TF文件、阅读记录和硬件校准。
+  Restore custom book/font roots and current-chapter excerpts. A twice-confirmed factory reset clears preferences/connections while retaining TF files, reading records and hardware calibration.
+- 锁屏后双击电源键解锁，有密码时继续验证；深睡等待解锁不再误显示准备资源。普通文字翻页改善非全刷后的字重加深与抗锯齿边缘，增加现有行预填以减少供数不足恢复；阅读自动全刷设置保留。
+  Double-press power to unlock, then verify an enabled PIN. Avoid resource-loading text while waiting after deep sleep. Retain calibrated ordinary text gray transitions and larger existing line prefill; keep automatic full-refresh settings.
+- 官网保留上一正式版的网页刷机与TF下载入口；TF包为完整应用镜像，USB包包含引导程序、分区表、应用和启动选择数据，均提供SHA-256校验。升级保持原双槽分区。
+  Retain the previous official web/TF choice. TF contains the complete application; USB contains the base components with SHA-256 checksums. Keep the dual-slot layout.
+
 ## 0.3.3-rc97 / 2026-10-18
 
 - 刷机页修复通用Bin地址的旧缓存风险：按固定版本下载，逐一校验四个文件的大小、SHA-256和应用内部版本，验证后再将独立快照交给安装器。文件不匹配时不打开刷写连接；TF下载也使用固定版本地址。固件镜像保持原rc97不变。

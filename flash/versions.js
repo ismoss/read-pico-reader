@@ -30,6 +30,8 @@
     installer.hidden = true;
     download.hidden = true;
     download.removeAttribute("href");
+    const pendingTF = document.getElementById("tf-package-download");
+    if (pendingTF) { pendingTF.hidden = true; pendingTF.removeAttribute("href"); }
     version.textContent = "读取中…";
     document.dispatchEvent(new CustomEvent("kiikoread:release-loading"));
     updated.textContent = "读取中…";
@@ -66,8 +68,18 @@
       installer = next;
       download.href = new URL(choice === latest ? `./Pico-update-${manifest.version}.bin` : choice.bin,
                               document.baseURI).href;
-      download.textContent = `下载 ${shortVersion} TF 卡升级 Bin ↓`;
+      download.textContent = `下载 ${shortVersion} TF 卡完整固件 Bin ↓`;
       download.hidden = false;
+      const tfPackage = document.getElementById("tf-package-download");
+      if (tfPackage) {
+        const expected = `https://github.com/wegooo-cell/read-pico-reader/releases/download/v${manifest.version}/kiikoread-${manifest.version}-TF.zip`;
+        tfPackage.hidden = manifest.tf_package_url !== expected;
+        tfPackage.removeAttribute("href");
+        if (!tfPackage.hidden) {
+          tfPackage.href = expected;
+          tfPackage.textContent = `下载 ${shortVersion} TF 卡完整应用包 ZIP ↓`;
+        }
+      }
       manifestReady = true;
       showInstaller();
       document.dispatchEvent(new CustomEvent("kiikoread:release", {detail: {manifest, latest: choice === latest}}));
@@ -121,7 +133,7 @@
         releases.set(release.manifest, release);
         const option = document.createElement("option");
         option.value = release.manifest;
-        option.textContent = `${release.version} · 历史正式版`;
+        option.textContent = `${release.version} · ${release.version === catalog.previous_version ? "上一正式版" : "历史正式版"}`;
         selector.appendChild(option);
       }
       const wanted = new URLSearchParams(location.search).get("version");

@@ -1,6 +1,6 @@
 {
   "name": "kiikoread",
-  "version": "0.3.3-rc97",
+  "version": "0.3.3-rc98",
   "new_install_prompt_erase": true,
   "builds": [
     {
@@ -11,7 +11,7 @@
           "path": "bootloader.bin",
           "offset": 0,
           "size": 21232,
-          "sha256": "856fb19103088cf4aad7ada0f54a96c50e34969318f435b3753159b94b727324"
+          "sha256": "c6ea3d1c35fb05780ea3992386024150c9e0df385f7182ecb5ceffed0f3248fa"
         },
         {
           "path": "partitions.bin",
@@ -22,8 +22,8 @@
         {
           "path": "firmware.bin",
           "offset": 65536,
-          "size": 4173744,
-          "sha256": "163ef3e8b4138fc6b9641aef2f84b112b5b025cf0929a1554cbaa04bde785fca"
+          "size": 4189744,
+          "sha256": "8a9f12c19f0acf73712050b04feb6b77a874a4e020b317331dace591463824ca"
         },
         {
           "path": "ota_data_initial.bin",
@@ -36,10 +36,12 @@
   ],
   "pico_ota": {
     "layout": "pico-dual-4m-v1",
-    "base_version": "0.3.3-rc97",
+    "base_version": "0.3.3-rc98",
     "minimum_base_version": "0.3.3-rc72",
     "online_ota_base_version": "0.3.3-rc79",
     "rollback": true
   },
-  "updated_at": "2026-10-18T20:26:55+08:00"
+  "updated_at": "2026-10-21T13:55:43+08:00",
+  "previous_version": "0.3.3-rc97",
+  "tf_package_url": "https://github.com/wegooo-cell/read-pico-reader/releases/download/v0.3.3-rc98/kiikoread-0.3.3-rc98-TF.zip"
 }

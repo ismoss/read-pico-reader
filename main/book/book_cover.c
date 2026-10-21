@@ -282,8 +282,9 @@ static void png_read_mem(png_structp png, png_bytep dst, png_size_t count) {
     else memcpy(dst, input->data + input->pos, count);
     input->pos += count;
 }
-static bool png_gray_input(const uint8_t *data, size_t size, FILE *file, unsigned out_width,
-                     unsigned out_height, uint8_t *out, uint8_t *alpha) {
+static bool png_gray_rows(const uint8_t *data, size_t size, FILE *file, unsigned out_width,
+                     unsigned out_height, uint8_t *out, uint8_t *alpha,
+                     bool (*sink)(void *, unsigned, unsigned, const uint8_t *, const uint8_t *), void *context) {
     png_structp png = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
     if (!png) return false;
     png_infop info = png_create_info_struct(png);
@@ -299,8 +300,10 @@ static bool png_gray_input(const uint8_t *data, size_t size, FILE *file, unsigne
     scale_step_t *volatile xmap = NULL, *volatile ymap = NULL;
     uint8_t *volatile rows[2] = {NULL, NULL};
     uint8_t *volatile masks[2] = {NULL, NULL};
+    uint8_t *volatile output_row = NULL;
     png_input_t input = {data, size, 0, file};
     bool ok = false;
+    const bool keep_alpha = alpha != NULL || sink != NULL;
     if (setjmp(png_jmpbuf(png))) goto done;
     png_set_read_fn(png, &input, png_read_mem);
     png_read_info(png, info);
@@ -330,9 +333,10 @@ static bool png_gray_input(const uint8_t *data, size_t size, FILE *file, unsigne
         ymap = scale_map(out_height, crop.height);
         rows[0] = cover_alloc(crop.width);
         rows[1] = cover_alloc(crop.width);
-        if (alpha) { masks[0] = cover_alloc(crop.width); masks[1] = cover_alloc(crop.width); }
+        if (keep_alpha) { masks[0] = cover_alloc(crop.width); masks[1] = cover_alloc(crop.width); }
     }
-    if (xmap && ymap && rows[0] && rows[1] && (!alpha || (masks[0] && masks[1]))) {
+    if (sink) output_row = cover_alloc(2u * out_width);
+    if (xmap && ymap && rows[0] && rows[1] && (!keep_alpha || (masks[0] && masks[1])) && (!sink || output_row)) {
         for (png_uint_32 y = 0; y < height; ++y) {
             png_read_row(png, row, NULL);
             decode_yield((unsigned)y);
@@ -343,8 +347,8 @@ static bool png_gray_input(const uint8_t *data, size_t size, FILE *file, unsigne
                 const uint8_t *p = row + (size_t)(crop.x + x) * 4;
                 const uint8_t gray = luminance(p[0], p[1], p[2]);
                 // 透明层保留预乘灰度与独立alpha，避免缩放后出现白边。/ Preserve premultiplied gray and alpha for layers, avoiding white scaling fringes.
-                cur[x] = (uint8_t)(((unsigned)gray * p[3] + (alpha ? 0 : 255u * (255u - p[3])) + 127u) / 255u);
-                if (alpha) masks[wy & 1][x] = p[3];
+                cur[x] = (uint8_t)(((unsigned)gray * p[3] + (keep_alpha ? 0 : 255u * (255u - p[3])) + 127u) / 255u);
+                if (keep_alpha) masks[wy & 1][x] = p[3];
             }
             // 两行都齐了的目标行可以一次输出完：同一源行可能对应多个目标行（放大时）。
             // Every destination row whose two source rows are now present can be emitted: one source
@@ -354,19 +358,23 @@ static bool png_gray_input(const uint8_t *data, size_t size, FILE *file, unsigne
                 const int sy1 = scale_next(sy, crop.height);
                 if (wy < sy1) break;
                 const uint8_t *r0 = rows[sy & 1], *r1 = rows[sy1 & 1];
+                uint8_t *destination = sink ? output_row : out + (size_t)next_y * out_width;
+                uint8_t *opacity = sink ? output_row + out_width : alpha ? alpha + (size_t)next_y * out_width : NULL;
                 for (unsigned x = 0; x < out_width; ++x) {
                     const int sx = xmap[x].at, fx = xmap[x].frac;
                     const int sx1 = scale_next(sx, crop.width);
-                    out[next_y * out_width + x] = bilinear4(r0[sx], r0[sx1], r1[sx], r1[sx1], fx, fy);
-                    if (alpha) alpha[next_y * out_width + x] = bilinear4(masks[sy & 1][sx], masks[sy & 1][sx1],
+                    destination[x] = bilinear4(r0[sx], r0[sx1], r1[sx], r1[sx1], fx, fy);
+                    if (opacity) opacity[x] = bilinear4(masks[sy & 1][sx], masks[sy & 1][sx1],
                         masks[sy1 & 1][sx], masks[sy1 & 1][sx1], fx, fy);
                 }
+                if (sink && !sink(context, next_y, out_width, destination, opacity)) goto done;
                 ++next_y;
             }
         }
     }
-    ok = next_y == out_height;
+    if (next_y == out_height) { png_read_end(png, NULL); ok = true; }
 done:
+    free((void *)output_row);
     free(xmap);
     free(ymap);
     free(rows[0]);
@@ -375,6 +383,11 @@ done:
     free((void *)row);
     png_destroy_read_struct(&png, &info, NULL);
     return ok;
+}
+
+static bool png_gray_input(const uint8_t *data, size_t size, FILE *file, unsigned width,
+                          unsigned height, uint8_t *out, uint8_t *alpha) {
+    return png_gray_rows(data, size, file, width, height, out, alpha, NULL, NULL);
 }
 
 bool book_cover_thumbnail(const uint8_t *data, size_t size, bool png,
@@ -822,6 +835,18 @@ bool book_png_file_layer(const char *path, unsigned width, unsigned height, uint
     FILE *file = fopen(path, "rb");
     if (!file) return false;
     bool ok = png_gray_input(NULL, (size_t)st.st_size, file, width, height, gray, alpha);
+    fclose(file);
+    return ok;
+}
+
+bool book_png_file_layer_rows(const char *path, unsigned width, unsigned height,
+        bool (*sink)(void *, unsigned, unsigned, const uint8_t *, const uint8_t *), void *context) {
+    struct stat st;
+    if (!path || !sink || !width || !height || width > 684 || height > 1216 ||
+        stat(path, &st) || st.st_size <= 0 || (uint64_t)st.st_size > BOOK_IMAGE_FILE_MAX) return false;
+    FILE *file = fopen(path, "rb");
+    if (!file) return false;
+    bool ok = png_gray_rows(NULL, (size_t)st.st_size, file, width, height, NULL, NULL, sink, context);
     fclose(file);
     return ok;
 }

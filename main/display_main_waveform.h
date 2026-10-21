@@ -20,3 +20,7 @@ const EpdWaveform* display_main_normal_waveform(void);
 /// 书架封面/材质保留校准灰阶，白色留白只向白推动；只供普通切页，手动全刷保留原表。
 /// Shelf art keeps calibrated grays while white space drives only white; ordinary transitions only, preserving vendor manual full refresh.
 const EpdWaveform* display_main_shelf_waveform(enum EpdDrawMode mode);
+
+/// 系统底色恢复原完整柔和灰阶，白底同向擦除；底栏由调用方裁剪保护，不改原始波形。
+/// Restore complete original soft system grays with directional white erasure; callers crop navigation and vendor tables remain intact.
+const EpdWaveform* display_main_ui_waveform(void);
