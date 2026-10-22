@@ -1,6 +1,6 @@
 {
   "name": "kiikoread",
-  "version": "0.3.3-rc98",
+  "version": "0.3.3-rc99",
   "new_install_prompt_erase": true,
   "builds": [
     {
@@ -11,7 +11,7 @@
           "path": "bootloader.bin",
           "offset": 0,
           "size": 21232,
-          "sha256": "c6ea3d1c35fb05780ea3992386024150c9e0df385f7182ecb5ceffed0f3248fa"
+          "sha256": "37be7b221c48dbb957eb6d8e6481638997099114e6aac0a62670dfeddb5b5367"
         },
         {
           "path": "partitions.bin",
@@ -22,8 +22,8 @@
         {
           "path": "firmware.bin",
           "offset": 65536,
-          "size": 4189744,
-          "sha256": "8a9f12c19f0acf73712050b04feb6b77a874a4e020b317331dace591463824ca"
+          "size": 4194176,
+          "sha256": "238b62fc2fc562c39de4150894bc6388367be258ea6692a85a5d80a46b30fb81"
         },
         {
           "path": "ota_data_initial.bin",
@@ -36,13 +36,14 @@
   ],
   "pico_ota": {
     "layout": "pico-dual-4m-v1",
-    "base_version": "0.3.3-rc98",
+    "base_version": "0.3.3-rc99",
     "minimum_base_version": "0.3.3-rc72",
     "online_ota_base_version": "0.3.3-rc79",
     "rollback": true
   },
-  "updated_at": "2026-10-21T13:55:43+08:00",
-  "previous_version": "0.3.3-rc97",
-  "tf_package_url": "https://github.com/wegooo-cell/read-pico-reader/releases/download/v0.3.3-rc98/kiikoread-0.3.3-rc98-TF.zip",
-  "usb_package_url": "https://github.com/wegooo-cell/read-pico-reader/releases/download/v0.3.3-rc98/kiikoread-0.3.3-rc98-USB.zip"
+  "updated_at": "2026-10-22T09:59:40+08:00",
+  "previous_version": "0.3.3-rc98",
+  "tf_package_url": "https://github.com/wegooo-cell/read-pico-reader/releases/download/v0.3.3-rc99/kiikoread-0.3.3-rc99-TF.zip",
+  "usb_package_url": "https://github.com/wegooo-cell/read-pico-reader/releases/download/v0.3.3-rc99/kiikoread-0.3.3-rc99-USB.zip",
+  "release_source_commit": "51e7d8db3404edb9495be7e842b20ff402710332"
 }

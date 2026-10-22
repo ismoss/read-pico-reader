@@ -14,6 +14,8 @@
  * 普通翻页只刷新正文与页脚；手动或周期清残影整屏全刷。
  * 用户修订：阅读手动与周期全刷恢复 rc90 的原表 GC16 目标页输出，不先擦白再补文字。
  * User revision: restore rc90's original-table GC16 target-page output for manual and periodic refresh, without a white pre-clear and text pass.
+ * 用户2026-10-21修订：Pico进入阅读页单次完整GC16清理；普通文字翻页保留校准GL16前导擦除及等灰保持，沿用预读与单轮合并进度。
+ * User revision 2026-10-21: Pico reader entry uses one complete GC16; ordinary text retains calibrated GL16 erasure and equal-gray holds, prefetch and one fused progress output.
  * 用户修订：正文中间双击固定切换全屏，单击左右各半或上1/3下2/3翻页，不受按键配置影响。
  * 三键单击及中键长按可自定义，提供翻页/工具栏及首页/全屏/工具栏两套推荐；中键长按默认返回主页，阅读页不画右下角菜单图标。
  * 用户授权基础管理：长按书架先看完整详情，清进度与删文件分别确认；失败保留待重试记录，不自动回收其他书进度。
@@ -483,8 +485,8 @@ static size_t fb_bytes(void) { return (size_t)epd_width() * epd_height() / 2; }
 // Give the body a consistent top inset and extend it toward the progress strip in both modes.
 static EpdRect reader_area(void) {
     const int top = s_reader_fullscreen ? (app_settings_reader_immersive() ? 0 : 80) : 160;
-    // 全屏进度线单独差分，翻页时不让正文刷新反复驱动整条横线。
-    // Keep the full-screen progress strip out of body updates so turns do not drive the whole bar.
+    // 正文排版不占进度线；文字翻页合并差分时仅驱动实际变化的进度像素。
+    // Keep text layout outside the progress strip; a fused text turn drives only changed progress pixels.
     const int bottom = s_reader_fullscreen ? READER_FULLSCREEN_PROGRESS_TOP : UI_BAR_TOP + 8;
     return (EpdRect){0, top, UI_LOCK_WIDTH, bottom - top};
 }
@@ -3236,6 +3238,13 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
     enum EpdDrawError err;
     bool image_gray_refresh = s_reader_image_refresh_pending && s_view == READING &&
         s_reader_panel == READER_PANEL_NONE && !s_toolbar && !s_clear_confirm;
+    const bool reader_entry=s_view==READING&&s_text&&s_presented_view!=(int)READING;
+    // 入书和从目录返回正文时先用目标页一次完整清理，覆盖图片/背景，不追加擦白或补刷。
+    // Clean reader entry and TOC returns in one complete target-page output, including images/backgrounds, without white prepasses or replay.
+    if(reader_entry)
+        err=update_display_area_full_with(ctx->hl,&E0470_FULL_WAVEFORM,MODE_GC16,
+                                         (EpdRect){0,0,UI_LOCK_WIDTH,UI_LOCK_HEIGHT});
+    else
     if (image_gray_refresh && redraw == APP_REDRAW_AREA && !s_reader_cleanup && s_presented_view == (int)READING) {
         // 灰阶只驱动正文，避免每张插图都把整屏先清白再闪回。
         // Drive the grayscale body from the current frame instead of clearing the whole screen to white.
@@ -3271,24 +3280,32 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
         if (s_water_turn_pending) e0470_page_turn_set_tick_us(E0470_TURN_FAST_TICK_US);
         // 翻页动画与页脚刷新独立：全屏没有页脚，仍使用用户选择的水波纹。
         // The turn effect is independent of the footer: full-screen turns still use the selected water effect.
+        EpdRect turn_area=s_area;
+        // 普通文字保留校准GL16完整擦除，正文与进度共用一次输出；图片、水波纹和清屏保留独立规则。
+        // Retain calibrated GL16 erasure for ordinary text and present body/progress once; images, ripple and cleanup retain their own paths.
+        const bool fused_footer=s_reader_turn_pending&&!s_water_turn_pending&&s_mode==MODE_GL16;
+        if(fused_footer) {
+            EpdRect footer=s_reader_fullscreen?reader_fullscreen_progress_area():progress_rect();
+            turn_area=ui_rect_union(turn_area,footer);
+        }
         err = s_water_turn_pending
             ? update_display_water_turn(ctx->hl, s_area, s_water_turn_dir)
-            : s_reader_turn_pending && s_mode==MODE_GL16
-                ? update_display_text_turn(ctx->hl, s_area, E0470_TURN_RTL)
+            // 沿用rc97直接差分及连续预读，恢复被文字快档省略的擦除，相数与单次输出保持。
+            // Keep rc97 direct differences and prefetch, restoring text-fast-path erasure with the same phase count and single output.
             // 普通翻页与全屏阅读都只驱动变化像素；设置面板等局部绘制保留原路径。
             // Ordinary turns and full-screen reading drive changed pixels only; other local UI keeps its path.
             : (s_reader_fullscreen || s_reader_turn_pending) && s_mode == MODE_GL16
                 ? update_display_area_diff_with(ctx->hl,
-                    s_reader_turn_pending ? display_reader_text_waveform() : &E0470_WAVEFORM, s_mode, s_area)
+                    s_reader_turn_pending ? display_main_gray_waveform() : &E0470_WAVEFORM, s_mode, turn_area)
                 : update_display_area_with(ctx->hl, &E0470_WAVEFORM, s_mode, s_area);
         if (s_water_turn_pending) e0470_page_turn_set_tick_us(prior_tick);
-        if (s_reader_fullscreen && err == EPD_DRAW_SUCCESS) {
+        if (s_reader_fullscreen && !fused_footer && err == EPD_DRAW_SUCCESS) {
             // 百分比不变时差分直接跳过；变化时只驱动最底部的少量像素。
             // Skip unchanged percentages; otherwise update only the small bottom strip.
             err = update_display_area_diff_with(ctx->hl, &E0470_WAVEFORM, MODE_GL16,
                                                 reader_fullscreen_progress_area());
         }
-        if (s_reader_footer_pending) {
+        if (s_reader_footer_pending && !fused_footer) {
             // 普通翻页页脚只驱动变化像素；全刷由上方整屏分支一次完成。
             // Ordinary turns drive only changed footer pixels; the full-screen branch handles cleanup at once.
             err = (enum EpdDrawError)(err | update_display_area_with(ctx->hl, &E0470_FOLLOW_WAVEFORM,
@@ -3326,7 +3343,10 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
         book_layout_page_image_count(s_page) == 0 && !app_settings_book_background_path()[0];
     s_reader_cleanup = false;
     s_reader_image_refresh_pending = false;
-    s_presented_view = (int)s_view;
+    if(err==EPD_DRAW_SUCCESS) {
+        s_presented_view = (int)s_view;
+        if(reader_entry)s_turns=0;
+    }
     s_reader_footer_pending = false;
     s_water_turn_pending = false;
     s_shelf_feedback_pending = false;

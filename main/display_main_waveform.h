@@ -21,6 +21,9 @@ const EpdWaveform* display_main_normal_waveform(void);
 /// Shelf art keeps calibrated grays while white space drives only white; ordinary transitions only, preserving vendor manual full refresh.
 const EpdWaveform* display_main_shelf_waveform(enum EpdDrawMode mode);
 
+/// 设置列表滚动保留抗锯齿灰阶，变白使用原DU擦除，不叠加书架的四相补白；低内存回退现有柔和表。
+/// Settings scrolling retains AA grays with native DU whitening, omitting the shelf's four extra white phases; low memory keeps the existing soft table.
+const EpdWaveform* display_settings_scroll_waveform(void);
 /// 系统底色恢复原完整柔和灰阶，白底同向擦除；底栏由调用方裁剪保护，不改原始波形。
 /// Restore complete original soft system grays with directional white erasure; callers crop navigation and vendor tables remain intact.
 const EpdWaveform* display_main_ui_waveform(void);

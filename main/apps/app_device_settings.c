@@ -24,6 +24,8 @@
  * S31 user revision: normalize root settings content to BW and use DU20, retaining fixed navigation and gray font/wallpaper previews in subpages.
  * 用户撤回跟手滚动：三种主页模式统一恢复一次手势推进一段列表并差分刷新的原逻辑，无惯性、浅墨或停稳补刷。
  * User rollback: all main modes return to one discrete list step per gesture with differential updates, without inertia, light motion ink or idle restoration.
+ * 用户2026-10-21修订：设置列表滚动保留文字抗锯齿和灰阶头像，撤掉书架额外四相补白，列表仍一次输出且不影响固定底栏。
+ * User revision2026-10-21: keep AA text and gray avatars during list scrolls, omit the shelf's four added white phases, and retain one output with fixed navigation.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -1453,12 +1455,6 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
 
 static void render(app_ctx_t *ctx,uint8_t *fb) {
     render_content(ctx,fb);
-    if(s_page==SETTINGS_MAIN) {
-        EpdRect avatar={57,180-s_main_scroll+(settings_profile_height()-82)/2,82,82};
-        if(avatar.y<160){avatar.height-=160-avatar.y;avatar.y=160;}
-        if(!s_avatar_ready || avatar.height<=0)avatar=(EpdRect){0};
-        display_system_content(fb,true,avatar);
-    }
     settings_navigation(fb);
 }
 
@@ -2431,7 +2427,10 @@ static bool settings_present(app_ctx_t *ctx, app_redraw_t redraw) {
         EpdRect area = {0, top, UI_LOCK_WIDTH, settings_content_end() - top};
         // 只驱动变化像素，滚动次数不触发黑白清屏；题头与底栏保持稳定。
         // Drive changed pixels only; scroll counts never trigger a wipe, and header/nav stay stable.
-        const EpdWaveform *wave=display_main_normal_waveform();
+        // 滚动已限定列表区域；取消主页替换许可，保留抗锯齿并去掉额外补白，不在松手后追加刷新。
+        // Scroll already targets only the list: cancel main-profile substitution, retain AA and omit extra whitening, without a release refresh.
+        display_main_transition_cancel();
+        const EpdWaveform *wave=display_settings_scroll_waveform();
         guard_draw_result(ctx->hl, update_display_area_diff_with(ctx->hl,wave,MODE_GL16,area));
         return true;
     }
@@ -2452,7 +2451,7 @@ static bool settings_present(app_ctx_t *ctx, app_redraw_t redraw) {
 }
 
 const app_desc_t app_device_settings = {
-    .binary_ui = true,
+    .binary_ui = false,
     .title = "设置 Settings", .detail = "显示、连接与设备", .enter_full = false,
     .owns_keys = true, .menu_handle_enabled = no_menu_handle,
     .main_page_visible = main_page_visible, .edge_back_enabled = settings_edge_back,

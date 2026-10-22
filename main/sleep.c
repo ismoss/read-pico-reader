@@ -141,6 +141,96 @@ static void periph_resume(void) {
     s_acc_was_on = false;
 }
 
+// 单击提示只保留一个小区域；等待双击窗口结束才绘制，触摸仅临时唤醒三秒。
+// Retain one small hint region; draw after the double-click window and wake touch for only three seconds.
+static EpdiyHighlevelState *s_lock_hint_hl;
+static struct {
+    uint8_t *pixels;
+    EpdRect area;
+    uint32_t serial;
+    int64_t pending_at, touch_until;
+    bool touch_awake;
+} s_lock_hint;
+
+static uint8_t lock_hint_pixel(uint8_t *fb,int x,int y) {
+    int px=x,py=y;
+    switch(epd_get_rotation()) {
+        case EPD_ROT_PORTRAIT:px=epd_width()-y-1;py=x;break;
+        case EPD_ROT_INVERTED_LANDSCAPE:px=epd_width()-x-1;py=epd_height()-y-1;break;
+        case EPD_ROT_INVERTED_PORTRAIT:px=y;py=epd_height()-x-1;break;
+        default:break;
+    }
+    return epd_get_pixel(px,py,epd_width(),epd_height(),fb);
+}
+
+static void lock_hint_present(void) {
+    epd_poweron();
+    enum EpdDrawError result=update_display_area_diff_with(s_lock_hint_hl,&E0470_WAVEFORM,MODE_GL16,s_lock_hint.area);
+    guard_draw_result(s_lock_hint_hl,result);
+    epd_poweroff();
+}
+
+static void lock_hint_finish(bool restore) {
+    if(s_lock_hint.pixels) {
+        uint8_t *fb=epd_hl_get_framebuffer(s_lock_hint_hl);
+        EpdRect r=s_lock_hint.area;
+        for(int y=0;y<r.height;++y)for(int x=0;x<r.width;++x) {
+            size_t i=(size_t)y*r.width+x;
+            uint8_t v=(s_lock_hint.pixels[i/2]>>((i&1)*4))&15;
+            epd_draw_pixel(r.x+x,r.y+y,(uint8_t)(v*17),fb);
+        }
+        if(restore)lock_hint_present();
+        heap_caps_free(s_lock_hint.pixels);s_lock_hint.pixels=NULL;
+    }
+    if(s_lock_hint.touch_awake && s_tp) (void)cst836u_set_mode(s_tp,CST836U_MODE_DEEPSLEEP);
+    s_lock_hint.touch_awake=false;s_lock_hint.pending_at=s_lock_hint.touch_until=0;
+}
+
+static void lock_hint_service(void) {
+    if(!s_lock_hint_hl)return;
+    int64_t now=esp_timer_get_time()/1000;
+    uint32_t serial=read_pico_pmu_lock_key_serial();
+    if(serial!=s_lock_hint.serial) {
+        s_lock_hint.serial=serial;s_lock_hint.pending_at=now+650;
+    }
+    if(s_lock_hint.pending_at && now>=s_lock_hint.pending_at) {
+        s_lock_hint.pending_at=0;s_lock_hint.touch_until=now+3000;
+        if(!s_lock_hint.pixels) {
+            uint8_t *fb=epd_hl_get_framebuffer(s_lock_hint_hl);
+            const int w=epd_rotated_display_width(),h=epd_rotated_display_height();
+            s_lock_hint.area=(EpdRect){(w-448)/2,h-196,448,72};
+            if(fb && w>=448 && h>=268)
+                s_lock_hint.pixels=heap_caps_calloc(1,448u*72u/2u,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+            if(s_lock_hint.pixels) {
+                EpdRect r=s_lock_hint.area;
+                for(int y=0;y<r.height;++y)for(int x=0;x<r.width;++x) {
+                    size_t i=(size_t)y*r.width+x;
+                    s_lock_hint.pixels[i/2]|=(lock_hint_pixel(fb,r.x+x,r.y+y)>>4)<<((i&1)*4);
+                }
+                ui_fill_round_rect(fb,r,28,UI_GRAY_WHITE);
+                ui_draw_round_rect(fb,r,28,UI_GRAY_BLACK);
+                ui_text_fixed_vc(fb,w/2,r.y+r.height/2,28,"双击电源键解锁",EPD_DRAW_ALIGN_CENTER,false);
+                lock_hint_present();
+            }
+        }
+        if(!s_lock_hint.touch_awake && s_tp && cst836u_wake(s_tp)==ESP_OK)s_lock_hint.touch_awake=true;
+    }
+    if(s_lock_hint.touch_until && now>=s_lock_hint.touch_until)lock_hint_finish(true);
+    if(s_lock_hint.touch_awake && s_tp) {
+        cst836u_touch_t touch={0};
+        // 窗口内点屏保留同一提示，不重绘、不累计延时，也绝不触发解锁。
+        // Screen taps retain this hint without redraws or extending the window, and can never unlock.
+        (void)cst836u_read(s_tp,&touch);
+    }
+}
+
+static bool lock_wait_key(void) {
+    bool wake = app_settings_wake_presses() == 1
+        ? read_pico_pmu_take_key_wakeup_single() : read_pico_pmu_take_key_wakeup();
+    if(wake)return true;
+    lock_hint_service();return false;
+}
+
 static void lock_arm_ioe_wakeup(void) {
     gpio_config_t io = {
         .pin_bit_mask = 1ULL << READ_PICO_IOE_INT_GPIO,
@@ -212,14 +302,6 @@ static bool pickup_wait_quiet(sc7a20h_handle_t acc, int quiet_ms, int timeout_ms
     return false;
 }
 
-// 单击开机：一次短按即醒；双击开机：600ms 内两次，包里不易误触。两条等待路径共用。
-// Single-press boot wakes on one short press; double-click boot needs two within 600 ms so a bag cannot wake it.
-static bool key_wake_pending(void) {
-    return app_settings_wake_presses() == 1
-        ? read_pico_pmu_take_key_wakeup_single()
-        : read_pico_pmu_take_key_wakeup();
-}
-
 app_wake_source_t app_light_sleep_wait_timed(sc7a20h_handle_t acc, uint32_t timeout_ms) {
     bool covers_idle=book_cover_jobs_quiesce(2000);
     bool avatar_idle=ui_avatar_quiesce(2000);
@@ -285,7 +367,7 @@ app_wake_source_t app_light_sleep_wait_timed(sc7a20h_handle_t acc, uint32_t time
         // The PMU event is authoritative even if the IOE edge was missed.
         // Timer wakeups below provide a bounded fallback poll for that case.
         // 即使漏掉 IOE 中断，也由定时唤醒轮询 PMU 按键事件。
-        if (key_wake_pending()) {
+        if (lock_wait_key()) {
             wake = APP_WAKE_KEY;
             break;
         }
@@ -313,6 +395,7 @@ app_wake_source_t app_light_sleep_wait_timed(sc7a20h_handle_t acc, uint32_t time
             continue;
         }
         int64_t sleep_us = APP_LOCK_KEY_POLL_US;
+        if(s_lock_hint.pending_at || s_lock_hint.touch_until)sleep_us=100000;
         if (deadline_us) {
             int64_t remaining_us = deadline_us - esp_timer_get_time();
             if (remaining_us < sleep_us) sleep_us = remaining_us;
@@ -331,7 +414,7 @@ app_wake_source_t app_light_sleep_wait_timed(sc7a20h_handle_t acc, uint32_t time
         esp_err_t sleep_error = esp_light_sleep_start();
         int64_t dt_ms = (esp_timer_get_time() - t0) / 1000;
         read_pico_clear_ioe_int();
-        if (key_wake_pending()) {
+        if (lock_wait_key()) {
             wake = APP_WAKE_KEY;
             break;
         }
@@ -380,6 +463,7 @@ app_wake_source_t app_light_sleep_wait_timed(sc7a20h_handle_t acc, uint32_t time
         sc7a20h_power_down(acc);
         sc7a20h_int1_begin(acc);
     }
+    lock_hint_finish(wake!=APP_WAKE_KEY);
     periph_resume();
     app_settings_set_last_wake((uint8_t)(wake == APP_WAKE_TIMEOUT ? APP_WAKE_NONE : wake));
     return wake;
@@ -499,6 +583,7 @@ void enter_lock_and_sleep(
     // Locks light-sleep first, enter deep sleep after ten minutes and wake through the saved page checkpoint.
     ESP_LOGI(TAG, "lock LIGHT");
     epd_poweroff();
+    s_lock_hint_hl=hl;s_lock_hint.serial=read_pico_pmu_lock_key_serial();
     app_wake_source_t wake = APP_WAKE_KEY;
     if (lock_pin_enabled()) lock_screen_authenticate(hl, touch, acc, false);
     else wake = app_light_sleep_wait_timed(NULL, APP_LOCK_LIGHT_SLEEP_MS);
@@ -510,6 +595,7 @@ void enter_lock_and_sleep(
         wake=app_light_sleep_wait_timed(NULL,APP_LOCK_LIGHT_SLEEP_MS);
     }
     pico_boot_clear_resume();
+    s_lock_hint_hl=NULL;
     if (system_lock) app_font_end_lock(&lock_font);
     read_pico_transfer_resume_after_sleep();
 
@@ -527,12 +613,13 @@ void enter_lock_and_sleep(
 }
 
 void app_lock_boot_gate(EpdiyHighlevelState *hl, cst836u_handle_t touch, sc7a20h_handle_t acc) {
+    s_lock_hint_hl=hl;s_lock_hint.serial=0;
     if (!lock_pin_enabled()) {
         if(pico_boot_has_resume()) {
             pico_boot_ready();pico_boot_hold_resume();
             (void)app_light_sleep_wait_timed(NULL,0);
         }
-        return;
+        s_lock_hint_hl=NULL;return;
     }
     // 卡挂载有界等待仅为了字体/锁屏图；没有卡仍必须验证。
     // Bound mount waiting for the face/art only; absent media still requires authentication.
@@ -551,5 +638,6 @@ void app_lock_boot_gate(EpdiyHighlevelState *hl, cst836u_handle_t touch, sc7a20h
         if (!drawn) ui_lock_fallback_draw(fb);
     }
     lock_screen_authenticate(hl, touch, acc, true);
+    s_lock_hint_hl=NULL;
     app_font_end_lock(&saved);
 }

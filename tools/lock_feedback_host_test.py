@@ -28,11 +28,11 @@ static int rotation, transfer, result, white_result;
 static bool online, missing, small, s_lock_feedback_visible;
 #define EPD_DRAW_SUCCESS 0
 static const int E0470_FOLLOW_WAVEFORM=1;
-int epd_rotated_display_width(void){return small?70:rotation&1?684:1216;}
-int epd_rotated_display_height(void){return small?70:rotation&1?1216:684;}
 int epd_width(void){return 1216;}
 int epd_height(void){return 684;}
 enum EpdRotation epd_get_rotation(void){return EPD_ROT_LANDSCAPE;}
+int epd_rotated_display_width(void){return small?70:rotation&1?684:1216;}
+int epd_rotated_display_height(void){return small?70:rotation&1?1216:684;}
 static size_t offset(int x,int y){
  int px=x,py=y;
  if(rotation==1){px=1215-y;py=x;}
@@ -45,17 +45,26 @@ void epd_draw_pixel(int x,int y,uint8_t c,uint8_t *fb){
  size_t at=offset(x,y);unsigned shift=(at&1)*4;
  fb[at/2]=(fb[at/2]&~(15u<<shift))|((c>>4)<<shift);++touches;
 }
-// 圆盘用像素循环代替 epdiy 的 vline 实现，只保留可测的覆盖范围。
-// Fill the disc with a pixel loop instead of epdiy's vline path; only the coverage matters here.
-void epd_fill_circle(int x0,int y0,int r,uint8_t c,uint8_t *fb){
- for(int y=-r;y<=r;++y)for(int x=-r;x<=r;++x)if(x*x+y*y<=r*r)epd_draw_pixel(x0+x,y0+y,c,fb);
+static unsigned pixel(const uint8_t *fb,int x,int y){size_t at=offset(x,y);return(fb[at/2]>>((at&1)*4))&15;}
+void epd_fill_circle(int cx,int cy,int radius,uint8_t gray,uint8_t *fb){
+ for(int y=-radius;y<=radius;++y)for(int x=-radius;x<=radius;++x)
+  if(x*x+y*y<=radius*radius)epd_draw_pixel(cx+x,cy+y,gray,fb);
 }
 uint8_t epd_get_pixel(int x,int y,int width,int height,const uint8_t *fb){
- (void)width;(void)height;size_t at=offset(x,y);
- return (uint8_t)(((fb[at/2]>>((at&1)*4))&15)<<4);
+ (void)width;(void)height;return (uint8_t)(pixel(fb,x,y)<<4);
 }
-static unsigned pixel(const uint8_t *fb,int x,int y){size_t at=offset(x,y);return(fb[at/2]>>((at&1)*4))&15;}
 int app_settings_system_contrast(void){return 100;}
+static void verify_badge(void){
+ int cx=(epd_rotated_display_width()-97)/2+48,cy=(epd_rotated_display_height()-97)/2+48;
+ int ring=0,glyph=0,mid=0,hole=0;
+ for(int y=0;y<epd_rotated_display_height();++y)for(int x=0;x<epd_rotated_display_width();++x){
+  int dx=x-cx,dy=y-cy,d=dx*dx+dy*dy,v=(int)pixel(frame,x,y);
+  if(d>52*52)assert(v==15);
+  else if(d>=44*44&&d<=50*50){if(!v)++ring;}
+  else if(d<40*40){if(!v)++glyph;else if(v<15)++mid;else ++hole;}
+ }
+ assert(ring>300&&glyph>200&&mid>100&&hole>1500);
+}
 static unsigned app_settings_lock_style(void){return style;}
 static bool pico_online_busy(void){return online;}
 static void read_pico_transfer_get_status(read_pico_transfer_status_t *s){s->state=transfer;}
@@ -74,12 +83,9 @@ static int update_display_area_diff_with(EpdiyHighlevelState *h,const int *w,int
  ++pushes;if(!result)memcpy(back,frame,sizeof(frame));return result;
 }
 '''
-# 徽标本体由图标库的锁形合成，这里带上真实的合成与圆形绘制。
-# The badge composites the icon set's lock, so pull in the real compositing and circle drawing.
-for name in ('ui_read_pixel', 'icon_nibble', 'ui_draw_icon', 'ui_contrast_gray'):
-    unit += function(name, ROOT/'main/ui/ui_kit.c') + '\n'
-for name in ('epd_draw_circle',):
-    unit += function(name, ROOT/'components/epdiy/src/epdiy.c') + '\n'
+for name in ('ui_read_pixel','icon_nibble','ui_draw_icon','ui_contrast_gray'):
+    unit += function(name,ROOT/'main/ui/ui_kit.c')+'\n'
+unit += function('epd_draw_circle',ROOT/'components/epdiy/src/epdiy.c')+'\n'
 unit += function('app_lock_feedback', ROOT/'main/sleep.c')
 unit += r'''
 static void reset(void){memset(frame,0x57,sizeof(frame));memcpy(original,frame,sizeof(frame));memcpy(back,original,sizeof(frame));pushes=white_pushes=cancels=touches=0;style=2;online=missing=small=s_lock_feedback_visible=false;transfer=result=white_result=0;}
@@ -88,16 +94,7 @@ int main(int argc,char **argv){
  for(rotation=0;rotation<4;++rotation){
   reset();app_lock_feedback(&hl);assert(pushes==1&&white_pushes==1&&cancels==1&&touches>0&&s_lock_feedback_visible&&!memcmp(frame,back,sizeof(frame)));
   int cx=(epd_rotated_display_width()-97)/2+48,cy=(epd_rotated_display_height()-97)/2+48;
-  int ring=0,glyph=0,ink_mid=0,hole=0,outside=0;
-  for(int y=0;y<epd_rotated_display_height();++y)for(int x=0;x<epd_rotated_display_width();++x){
-   int dx=x-cx,dy=y-cy,d=dx*dx+dy*dy,value=(int)pixel(frame,x,y);
-   if(d>52*52){assert(value==15);++outside;}
-   else if(d>=44*44&&d<=50*50){if(!value)++ring;else if(value<15)++ink_mid;}
-   else if(d<40*40){if(!value)++glyph;else if(value<15)++ink_mid;else ++hole;}
-  }
-  // 四像素圆环、图标库锁形的描边与抗锯齿灰阶都在；徽标外和盘内留白不被涂黑。
-  // The four-pixel ring, the icon set's stroke and its antialiased grays are present; outside stays white and the disc keeps its holes.
-  assert(ring>300&&glyph>200&&ink_mid>100&&hole>1500&&outside>0);
+  verify_badge();
   assert(pixel(frame,cx,cy-30)==15&&pixel(frame,cx+47,cy)==0);
 
   if(rotation==1&&argc>1){FILE *f=fopen(argv[1],"wb");assert(f);for(int y=0;y<1216;++y)for(int x=0;x<684;++x)assert(fputc((int)pixel(frame,x,y)*17,f)!=EOF);assert(!fclose(f));}
@@ -111,11 +108,16 @@ int main(int argc,char **argv){
  reset();result=1;app_lock_feedback(&hl);assert(white_pushes==1&&pushes==1&&cancels==1&&!s_lock_feedback_visible);for(size_t at=0;at<sizeof(frame);++at)assert(back[at]==255);
  reset();small=true;app_lock_feedback(&hl);assert(!pushes&&!white_pushes&&!touches&&!cancels);
  reset();online=true;s_lock_feedback_visible=true;app_lock_feedback(&hl);assert(!s_lock_feedback_visible&&!white_pushes);
- puts("PASS: one calibrated white page precedes a local round lock badge in four rotations; the badge composites the icon set's lock over a four-pixel ring; real back history; white/icon faults never commit readiness; other-style/OTA/upload/missing-frame/undersize guards");
+ for(rotation=0;rotation<4;++rotation){
+  reset();ui_lock_fallback_draw(frame);
+  verify_badge();assert(!white_pushes&&!pushes);
+ }
+ ui_lock_fallback_draw(NULL);
+ puts("PASS: one calibrated white page precedes a local binary round lock in four rotations; real back history; white/icon faults never commit readiness; other-style/OTA/upload/missing-frame/undersize guards");
  return 0;
 }
 '''
-with tempfile.TemporaryDirectory(prefix='kiikoread-lock-feedback-') as folder:
+with tempfile.TemporaryDirectory(prefix='kiikoread-lock-feedback-', dir='/private/tmp') as folder:
     work = Path(folder)
     (work/'test.c').write_text(unit)
     subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-g','-fsanitize=address,undefined',

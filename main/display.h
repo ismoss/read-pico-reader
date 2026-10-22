@@ -61,12 +61,6 @@ enum EpdDrawError update_display_fast_page(EpdiyHighlevelState* hl);
 /// 为下一次主页面输出启用固定底栏；标记书架切出与真正切页，避免同页重绘播放动画。
 /// Arm fixed navigation for the next main-screen output; tag shelf exit and actual navigation so same-page repaints do not animate.
 void display_main_transition_arm(const void* owner, bool leaving_shelf, bool changing_page);
-/// Pico文件/设置推屏复用快刷差分，返回旧作用域；不影响阅读、手动全刷或故障恢复。
-/// Scope Pico Files/Settings to fast differences; return the old scope without affecting reading, explicit full output or recovery.
-bool display_system_fast_set(bool enabled);
-/// 二值化系统内容，保留指定头像矩形及根页灰底栏；不改后缓冲。
-/// Binarize system content, retaining the avatar rectangle and gray root navigation without editing back history.
-void display_system_content(uint8_t* fb, bool navigation, EpdRect gray);
 /// 系统侧滑用主页灰阶水波纹，独立于阅读文字序列；区域必须是逻辑坐标。
 /// System edge returns use main-gray ripple independently of reader text; the area uses logical coordinates.
 enum EpdDrawError update_display_main_turn(EpdiyHighlevelState* hl, EpdRect area, e0470_turn_dir_t dir);

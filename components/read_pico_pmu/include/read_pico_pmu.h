@@ -167,6 +167,8 @@ esp_err_t read_pico_pmu_init(i2c_master_bus_handle_t bus_handle, const read_pico
 esp_err_t read_pico_pmu_deinit(void);
 bool read_pico_pmu_ready(void);
 const pmu_snapshot_t* read_pico_pmu_get(void);
+/// Pico锁屏消费过的短按序号，仅作提示；不能据此解锁。/ Pico locked short-input serial for hints only, never an unlock signal.
+uint32_t read_pico_pmu_lock_key_serial(void);
 
 /// 读 IDENTITY / STATUS / DIAG / 事件 / 配置 / 时间 / 闹钟。
 /// / Read IDENTITY / STATUS / DIAG / event / config / time / alarm.
@@ -206,11 +208,8 @@ bool read_pico_pmu_take_key_short(void);
 /// 抽干队列；两次有效短按释放相距60..600ms才解锁，按下/长按不计入。
 /// / Wake only after two distinct short releases 60..600 ms apart; DOWN/holds do not count.
 bool read_pico_pmu_take_key_wakeup(void);
-/// 抽干队列；任意一次电源键短按即算唤醒，用于“单击开机”。
-/// / Drain the queue; any single power-key short release wakes, for one-press power-on.
+/// 一次短按即可唤醒；开机证据只能消费一次。/ One short press wakes; boot evidence is consumed once.
 bool read_pico_pmu_take_key_wakeup_single(void);
-/// 本次启动握手期间是否收到过电源键短按；取一次后清零。
-/// / Whether a power-key short press arrived during this boot's handshake; consumed once.
 bool read_pico_pmu_take_boot_short_press(void);
 /// 保证 RUNNING 后发 HOST_SOFT_SLEEP，等到 STATUS 为 SOFT_SLEEP（随后 EN=0）。
 /// / After RUNNING, send HOST_SOFT_SLEEP and wait for STATUS SOFT_SLEEP (then EN=0).

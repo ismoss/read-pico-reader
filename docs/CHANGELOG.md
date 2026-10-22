@@ -9,6 +9,19 @@ User-visible changes by release; see [README](../README.md) for usage.
   Prefer GitHub Pages OTA metadata/images, retaining website metadata fallback, Range resumes, retries, full verification and inactive-slot protection.
 
 
+## 0.3.3-rc99 / 2026-10-22
+
+- 基于已确认本地版本51e7d8d发布。恢复设置、文件管理及二级页面文字抗锯齿，调整设置列表灰阶刷新，保留头像与底栏灰阶。
+  Release the confirmed 51e7d8d baseline with antialiased system/file text and adjusted settings scrolling, retaining avatar/navigation grays.
+- 修正充电状态判断，改善图标与百分比更新；新增单击/双击电源键唤醒选项，默认双击，密码验证与原解锁提示保持。此项保存在设备，尚未加入现有配置备份格式。
+  Correct charging-state interpretation and add one/two-press wake, defaulting to two. Retain PIN checks and the existing hint. Store this preference on-device; existing backups do not include it yet.
+- 锁屏白底徽标、关机取消按钮使用图标库素材；阅读辅助线按实际文字范围裁剪，横排与竖排的缩进和行尾空白不画线。
+  Use icon-set lock/cancel marks and limit reading guides to text spans, leaving indentation/trailing space clear in both layouts.
+- 进入阅读正文时完整清理旧画面；普通文字翻页保留校准灰阶与连续预读，正文和底部进度合并输出。
+  Clean the preceding screen on reader entry and fuse ordinary body/progress output while retaining calibrated gray transitions and prefetch.
+- 固件优先使用GitHub Pages OTA源，保留官网清单备用与下载校验；官网保留原rc98及更早正式版，继续提供USB全量包与TF完整应用升级包。
+  Prefer GitHub Pages OTA with website metadata fallback and verification; retain original rc98/older web choices with USB base and complete TF application packages.
+
 ## 0.3.3-rc98 / 2026-10-21
 
 - 透明书封采用按行读取与缓存合成，减少与书内字体、插图争用大块内存，并加快阴影和PNG图案读取；保留透明度和边缘连通去白规则。锁屏图片不可用时显示白底锁标志。

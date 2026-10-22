@@ -341,9 +341,7 @@ static void app_present_impl(app_ctx_t* ctx, const app_desc_t* app, app_redraw_t
 // 将系统页策略限制在实际推屏作用域；下拉玻璃、锁屏及阅读不继承它。
 // Scope system policy to presentation so quick-menu glass, lock and reader do not inherit it.
 void app_present(app_ctx_t* ctx,const app_desc_t* app,app_redraw_t redraw) {
-    bool previous_fast=display_system_fast_set(app->binary_ui || (app->persistent_navigation && !main_page_ready(ctx,app)));
     app_present_impl(ctx,app,redraw);
-    display_system_fast_set(previous_fast);
 }
 
 // 反馈只推控件附近，失败后重新绘制当前页面；不占用底栏切页许可。

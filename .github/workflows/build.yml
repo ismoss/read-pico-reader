@@ -21,6 +21,15 @@ jobs:
           python3 tools/boot_panel_actions_host_test.py
           python3 tools/lock_pin_host_test.py
           python3 tools/lock_screen_host_test.py
+          python3 tools/settings_scroll_host_test.py
+          python3 tools/pico_system_aa_host_test.py
+          python3 tools/power_double_click_host_test.py
+          python3 tools/pico_lock_hint_host_test.py
+          python3 tools/pico_lock_wait_host_test.py
+          python3 tools/pico_wake_option_host_test.py
+          python3 tools/lock_feedback_host_test.py
+          python3 tools/reader_refresh_release_host_test.py
+          python3 tools/reader_idle_prefetch_host_test.py
           python3 tools/reader_spacing_host_test.py
           python3 tools/test_book_toc.py
           node tools/flasher_integrity_host_test.cjs

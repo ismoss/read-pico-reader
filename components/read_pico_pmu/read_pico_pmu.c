@@ -28,6 +28,7 @@ static pmu_snapshot_t s_snap;
 static pico_soc_filter_t s_soc_filter;
 static uint16_t s_seq = 1;
 static bool s_ready;
+static uint32_t s_lock_key_serial;
 static uint8_t s_last_payload[PMU_FRAME_PAYLOAD_SIZE];
 static uint8_t s_last_plen;
 
@@ -385,8 +386,7 @@ esp_err_t read_pico_pmu_event_ack(uint16_t event_id) {
 }
 
 static power_double_click_t s_wake_click;
-// 最近一次事件扫描见过短按；握手时转存为本次启动的按键证据。
-// A short press was seen in the latest scan; the handshake stores it as this boot's key evidence.
+// 记录握手扫描中真正收到的短按，避免充电或定时唤醒跳过锁屏。/ Record real handshake short presses so charging/timers cannot skip the lock.
 static bool s_scan_short;
 static bool s_boot_short;
 void read_pico_pmu_drain_events(void) {
@@ -434,8 +434,9 @@ bool read_pico_pmu_take_key_wakeup(void) {
         uint8_t type = s_snap.event.type;
         uint16_t id = s_snap.event.event_id;
         if (type == PMU_EVT_KEY_SHORT) {
-            power_double_click_push(&s_wake_click,s_snap.event.timestamp_ms);
+            ++s_lock_key_serial;
             s_scan_short = true;
+            power_double_click_push(&s_wake_click,s_snap.event.timestamp_ms);
             ESP_LOGI(TAG, "key wake %s id=%u", pmu_event_name(type), (unsigned)id);
         } else if (type == PMU_EVT_KEY_LONG) {
             s_wake_click=(power_double_click_t){0};
@@ -446,22 +447,21 @@ bool read_pico_pmu_take_key_wakeup(void) {
     return power_double_click_take(&s_wake_click);
 }
 
-// 单击开机：任意一次短按就算醒来，不再等第二次；长按仍按原样取消。
-// One-press power-on: any short press wakes without waiting for a second one; a hold cancels as before.
+uint32_t read_pico_pmu_lock_key_serial(void) { return s_lock_key_serial; }
+
 bool read_pico_pmu_take_key_wakeup_single(void) {
-    for (int i = 0; i < PMU_EVENT_FIFO_DEPTH; i++) {
+    bool pressed = false;
+    s_wake_click = (power_double_click_t){0};
+    for (int i = 0; i < PMU_EVENT_FIFO_DEPTH; ++i) {
         if (read_pico_pmu_poll() != ESP_OK) break;
-        if (!s_snap.event_ok || s_snap.pending_events == 0) break;
+        if (!s_snap.event_ok || !s_snap.pending_events) break;
         uint8_t type = s_snap.event.type;
         uint16_t id = s_snap.event.event_id;
-        s_scan_short = type == PMU_EVT_KEY_SHORT;
-        if (s_scan_short) ESP_LOGI(TAG, "key wake single id=%u", (unsigned)id);
-        if (s_scan_short || type == PMU_EVT_KEY_LONG) s_wake_click = (power_double_click_t){0};
-        if (id == 0) break;
-        if (read_pico_pmu_event_ack(id) != ESP_OK) break;
-        if (s_scan_short) return true;
+        if (!id || read_pico_pmu_event_ack(id) != ESP_OK) break;
+        if (type == PMU_EVT_KEY_SHORT) pressed = true;
+        else if (type == PMU_EVT_KEY_LONG) pressed = false;
     }
-    return false;
+    return pressed;
 }
 
 bool read_pico_pmu_take_boot_short_press(void) {
@@ -685,8 +685,11 @@ static esp_err_t refresh_core(bool full) {
     s_snap.display_soc_valid=valid&&raw<=1000;
     if(s_snap.display_soc_valid){
         uint8_t charge=use_quick?s_snap.qb_charge:s_snap.charge_state;
+        // 与状态栏使用同一个有效充电位；状态枚举滞后不能冻结高段上升。
+        // Use the same valid charging bit as the header; a lagging state enum must not freeze upper-SOC increases.
+        bool charging=use_quick?(s_snap.qb_flags&4)!=0:(s_snap.flags&PMU_STATUS_CHARGING_ACTIVE)!=0;
         s_snap.display_soc_permille=pico_soc_filter_update(&s_soc_filter,raw,use_quick?s_snap.qb_mv:s_snap.battery_mv,
-            charge==PMU_CHARGE_CHARGING||charge==PMU_CHARGE_FULL_INFERRED,charge==PMU_CHARGE_FULL_INFERRED,
+            charging||charge==PMU_CHARGE_FULL_INFERRED,charge==PMU_CHARGE_FULL_INFERRED,
             s_snap.status_ok&&(s_snap.flags&(PMU_STATUS_BATTERY_LOW|PMU_STATUS_BATTERY_CRITICAL)),(uint32_t)(esp_timer_get_time()/1000));
     }
     s_snap.last_err = ESP_OK;
@@ -774,8 +777,6 @@ esp_err_t read_pico_pmu_init(i2c_master_bus_handle_t bus_handle, const read_pico
     if (s_ready) {
         // 保留开机期间已完成的双击；普通启动的主循环随后正常丢弃这些事件。
         // Retain a completed boot-time double click for deep-lock resume; normal UI drains it later.
-        // 同时记下开机期间是否真的按过电源键，供“单击开机”跳过解锁等待。
-        // Also record whether the power key was really pressed during boot, so one-press power-on can skip the unlock wait.
         bool boot_double=read_pico_pmu_take_key_wakeup();
         s_wake_click.ready=boot_double;
         s_boot_short = s_scan_short;
@@ -793,6 +794,7 @@ esp_err_t read_pico_pmu_deinit(void) {
     s_bus = NULL;
     s_dev = NULL;
     s_ready = false;
+    s_scan_short = s_boot_short = false;
     memset(&s_snap, 0, sizeof(s_snap));
     memset(&s_soc_filter,0,sizeof(s_soc_filter));
     return ESP_OK;
