@@ -175,7 +175,7 @@ int main(void){
  puts("PASS: reader entry cleans once with complete GC16 including images/backgrounds, retaining failure retry; ordinary text/progress fuse erase-preserving gray differences; periodic GC16, ripple, local controls, clock and cancellation retain their paths");
 }
 '''
-with tempfile.TemporaryDirectory(prefix='kiikoread-reader-release-',dir='/private/tmp') as folder:
+with tempfile.TemporaryDirectory(prefix='kiikoread-reader-release-') as folder:
  c=Path(folder)/'test.c';binary=Path(folder)/'test';c.write_text(unit)
  subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-Wno-unused-variable','-g','-fsanitize=address,undefined',str(c),'-o',str(binary)],check=True)
  subprocess.run([str(binary)],check=True)
