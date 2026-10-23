@@ -7,6 +7,8 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 - 联网OTA优先使用GitHub Pages清单与固件下载，官网清单保留备用；保留断点续传、失败重试、完整校验及空闲分区写入保护。
   Prefer GitHub Pages OTA metadata/images, retaining website metadata fallback, Range resumes, retries, full verification and inactive-slot protection.
+- 阅读页不再给没有目录条目的页编造「第 N 节」占位标题：题头与底栏只显示真实目录名或正文题头，没有就留空；按 spine 生成的备用目录仍保留该标签，旧 EPUB 索引缓存自动重建。
+  Drop the invented "第 N 节" label from pages without a TOC entry: the heading and footer show only a real TOC label or body heading, otherwise nothing. Spine-generated spare TOCs keep the label, and old EPUB index caches rebuild.
 
 
 ## 0.3.3-rc99 / 2026-10-22

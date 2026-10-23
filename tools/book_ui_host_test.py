@@ -547,7 +547,7 @@ int main(void) {
     reader_footer_strip_number(footer_name,sizeof(footer_name),"扉页");
     assert(!strcmp(footer_name,"扉页"));
     reader_footer_strip_number(footer_name,sizeof(footer_name),"第1章");
-    assert(!strcmp(footer_name,"未命名章节"));
+    assert(!strcmp(footer_name,""));
     s_jump_page=1;s_jump_offset=145;
     assert(reader_page_offset(1)==145&&reader_page_offset(2)==200);
     s_jump_offset=SIZE_MAX;
