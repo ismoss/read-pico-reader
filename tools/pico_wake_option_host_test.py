@@ -34,13 +34,17 @@ end=ui.index('    if (s_page == SETTINGS_CONFIG)',start)
 unit+=ui[start:end]+'return -1;}\n'
 unit+=r'''
 static bool read_pico_pmu_take_boot_short_press(void){bool value=boot_press;boot_press=false;return value;}
+static bool late_press;
+static bool read_pico_pmu_take_key_wakeup_single(void){bool value=late_press;late_press=false;return value;}
+static void vTaskDelay(unsigned ticks){(void)ticks;}
+#define pdMS_TO_TICKS(ms) (ms)
 static bool lock_pin_enabled(void){return pin;}
 static void pico_boot_ready(void){++ready;}
 static void pico_boot_hold_resume(void){++held;}
 static void app_lock_boot_gate(void *a,int b,int c){(void)a;(void)b;(void)c;++gate;}
-static void boot_gate(bool resuming){int hl=0;struct {int touch,sensor;}hw={0};
+static void boot_gate(bool resuming){int hl=0;struct {int touch,sensor;bool pmu_ready;}hw={0};hw.pmu_ready=1;
 '''
-start=boot.index('    const bool boot_press = read_pico_pmu_take_boot_short_press();')
+start=boot.index('    const bool one_press_boot = resuming && !lock_pin_enabled() && hw.pmu_ready &&')
 end=boot.index('    rp_boot_mark("lock");',start)
 unit+=boot[start:end]+'}\n'
 unit+=r'''
@@ -61,11 +65,17 @@ int main(void){
  assert(setting_tap(414)==APP_REDRAW_PAGE&&staged);
  for(unsigned resume=0;resume<2;++resume)for(unsigned password=0;password<2;++password)
  for(unsigned key=0;key<2;++key)for(unsigned count=1;count<=2;++count){
-  s_wake_presses=count;pin=password;boot_press=key;gate=ready=held=0;
+  s_wake_presses=count;pin=password;boot_press=key;late_press=false;gate=ready=held=0;
   boot_gate(resume);bool direct=resume&&!password&&key&&count==1;
   assert(gate==!direct&&ready==direct&&held==direct&&!boot_press);
  }
- puts("PASS: wake default/invalid values/idempotent writes, exact setting hit gaps, power evidence consumed once, charger/timer/PIN cannot bypass boot authentication");
+ // 事件比握手晚到（按住稍久）时，单击模式仍按一次就进入阅读。
+ // A press event that lands after the handshake still boots directly in one-press mode.
+ s_wake_presses=1;pin=false;boot_press=false;late_press=true;gate=ready=held=0;
+ boot_gate(true);assert(!gate&&ready==1&&held==1&&!late_press);
+ s_wake_presses=2;pin=false;boot_press=false;late_press=true;gate=ready=held=0;
+ boot_gate(true);assert(gate&&!ready&&!held);
+ puts("PASS: wake default/invalid values/idempotent writes, exact setting hit gaps, power evidence consumed once, late press still boots once, charger/timer/PIN cannot bypass boot authentication");
 }
 '''
 with tempfile.TemporaryDirectory() as folder:

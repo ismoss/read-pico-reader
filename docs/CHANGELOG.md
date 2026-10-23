@@ -11,6 +11,8 @@ User-visible changes by release; see [README](../README.md) for usage.
   Open EPUBs whose chapter file names contain colons: a first-segment colon still marks a scheme or drive, while one inside an entry name resolves like any other character.
 - 修复长按删除书籍对 books 子目录及 TF 卡其他位置的书籍失效：删除改按已挂载根受理，仍拒绝目录穿越、目录/链接替换与非书籍扩展名。
   Delete books kept in books subfolders or elsewhere on the card: deletion now accepts any book file under a mounted root while still refusing traversal, directories, links and non-book extensions.
+- 修复「单击开机」偶发需要再按一次：按住稍久被 PMU 记成长按、或按键事件晚于开机握手时，现在都算作那一次按键；双击开机仍停在锁屏等第二次。
+  Stop one-press boot from occasionally asking for a second press: a slightly long hold and a key event that lands after the boot handshake both count as that press, while two-press boot still waits at the lock face.
 
 
 ## 0.3.3-rc99 / 2026-10-22
