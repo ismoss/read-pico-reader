@@ -7,6 +7,8 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 - 联网OTA优先使用GitHub Pages清单与固件下载，官网清单保留备用；保留断点续传、失败重试、完整校验及空闲分区写入保护。
   Prefer GitHub Pages OTA metadata/images, retaining website metadata fallback, Range resumes, retries, full verification and inactive-slot protection.
+- 修复章节文件名含冒号的 EPUB 打不开：只有路径首段的冒号仍按协议/盘符分隔处理，条目名内部的冒号按普通字符解析。
+  Open EPUBs whose chapter file names contain colons: a first-segment colon still marks a scheme or drive, while one inside an entry name resolves like any other character.
 
 
 ## 0.3.3-rc99 / 2026-10-22
