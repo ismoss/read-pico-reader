@@ -15,6 +15,8 @@ User-visible changes by release; see [README](../README.md) for usage.
   Stop one-press boot from occasionally asking for a second press: a slightly long hold and a key event that lands after the boot handshake both count as that press, while two-press boot still waits at the lock face.
 - 阅读页不再给没有目录条目的页编造「第 N 节」占位标题：题头与底栏只显示真实目录名或正文题头，没有就留空；按 spine 生成的备用目录仍保留该标签，旧 EPUB 索引缓存自动重建。
   Drop the invented "第 N 节" label from pages without a TOC entry: the heading and footer show only a real TOC label or body heading, otherwise nothing. Spine-generated spare TOCs keep the label, and old EPUB index caches rebuild.
+- 整页只有一张插图的页面把插图上下居中，不再贴阅读区顶端；图文同页的插图位置不变。
+  Center a lone full-page illustration vertically instead of pinning it to the top of the reading area; pages that mix text and images keep their current placement.
 
 
 ## 0.3.3-rc99 / 2026-10-22
