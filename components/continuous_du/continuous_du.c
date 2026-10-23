@@ -245,7 +245,7 @@ enum EpdDrawError continuous_du_scan(EpdiyHighlevelState* hl, EpdRect area) {
     bool any = false;
     for (int y = y0; y <= y1; y++) {
         const size_t offset = (size_t)y * width;
-        const int8_t* state_row = s_states + offset;
+        int8_t* state_row = s_states + offset;
         uint8_t* diff_row = difference + offset;
         for (int x = x0; x <= x1; x++) {
             const int8_t state = state_row[x];
@@ -254,11 +254,15 @@ enum EpdDrawError continuous_du_scan(EpdiyHighlevelState* hl, EpdRect area) {
             // / difference is (dest gray << 4) | src gray. 0x0F is 15→0 darken,
             // 0xF0 is 0→15 erase; 0x88 hits a mid-gray LUT row and does not drive.
             diff_row[x] = state > 0 ? 0x0F : (state < 0 ? 0xF0 : 0x88);
-            if (state != 0) {
-                hl->dirty_lines[y] = true;
-                hl->dirty_columns[x / 2] |= (x & 1) ? 0xF0 : 0x0F;
-                any = true;
-            }
+            if (state == 0) continue;
+            hl->dirty_lines[y] = true;
+            hl->dirty_columns[x / 2] |= (x & 1) ? 0xF0 : 0x0F;
+            any = true;
+            // 这一调用必定驱动它，所以这里就能把剩余相位减一：省掉扫完再走一遍整块区域。
+            // This call is about to drive the pixel, so the leftover phase can drop here, saving a
+            // second pass over the whole region after the scan.
+            if (state > 0) { if (state_row[x] == 1) s_pending--; state_row[x] = (int8_t)(state - 1); }
+            else { if (state_row[x] == -1) s_pending--; state_row[x] = (int8_t)(state + 1); }
         }
     }
     if (!any) return EPD_DRAW_SUCCESS;
@@ -268,7 +272,7 @@ enum EpdDrawError continuous_du_scan(EpdiyHighlevelState* hl, EpdRect area) {
     // frames feel better. Same-profile calls are no-ops.
     read_pico_epd_use_scan(READ_PICO_EPD_SCAN_FAST);
 
-    enum EpdDrawError err = epd_draw_base(
+    return epd_draw_base(
         epd_full_screen(),
         difference,
         epd_full_screen(),
@@ -278,18 +282,4 @@ enum EpdDrawError continuous_du_scan(EpdiyHighlevelState* hl, EpdRect area) {
         hl->dirty_columns,
         &continuous_du_waveform
     );
-    if (err != EPD_DRAW_SUCCESS) return err;
-
-    for (int y = y0; y <= y1; y++) {
-        int8_t* state_row = s_states + (size_t)y * width;
-        for (int x = x0; x <= x1; x++) {
-            int8_t* state = &state_row[x];
-            if (*state > 0) {
-                if (--*state == 0) s_pending--;
-            } else if (*state < 0) {
-                if (++*state == 0) s_pending--;
-            }
-        }
-    }
-    return EPD_DRAW_SUCCESS;
 }
