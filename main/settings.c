@@ -92,7 +92,7 @@
 
 static app_sleep_mode_t s_sleep = APP_SLEEP_DEEP;
 static bool s_staged_shutdown;
-static uint8_t s_wake_presses = 2;
+static uint8_t s_wake_presses = 1;
 static bool s_home_full_refresh;
 static app_home_component_t s_home_component = APP_HOME_FOLDER;
 static uint8_t s_home_goal_minutes = 30;
@@ -197,8 +197,8 @@ void app_settings_init(void) {
     raw = 0;
     if (nvs_get_u8(h, NVS_KEY_SHUTDOWN_MODE, &raw) == ESP_OK)
         s_staged_shutdown = raw == 1;
-    raw = 2;
-    if (nvs_get_u8(h, NVS_KEY_WAKE_PRESSES, &raw) != ESP_OK || (raw != 1 && raw != 2)) raw = 2;
+    raw = 1;
+    if (nvs_get_u8(h, NVS_KEY_WAKE_PRESSES, &raw) != ESP_OK || (raw != 1 && raw != 2)) raw = 1;
     s_wake_presses = raw;
     raw = 0;
     if (nvs_get_u8(h, NVS_KEY_HOME_FULL, &raw) == ESP_OK) s_home_full_refresh = raw == 1;
@@ -398,7 +398,7 @@ void app_settings_set_staged_shutdown(bool staged) {
 }
 uint8_t app_settings_wake_presses(void) { return s_wake_presses; }
 void app_settings_set_wake_presses(uint8_t presses) {
-    if (presses != 1) presses = 2;
+    if (presses != 2) presses = 1;
     if (presses == s_wake_presses) return;
     s_wake_presses = presses;
     nvs_put_u8(NVS_KEY_WAKE_PRESSES, presses);

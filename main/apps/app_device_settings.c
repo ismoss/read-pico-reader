@@ -326,7 +326,7 @@ static int settings_main_row_height(void) {
 }
 #define SETTINGS_ROW_H settings_main_row_height()
 #define SETTINGS_WIRELESS_ROWS 3
-#define SETTINGS_DISPLAY_ROWS 6
+#define SETTINGS_DISPLAY_ROWS 7
 #define SETTINGS_PERSONAL_ROWS 4
 #define SETTINGS_MAINTENANCE_ROWS 5
 #define SETTINGS_WIRELESS_Y (180 + settings_profile_height() + 77)
@@ -335,6 +335,7 @@ static int settings_main_row_height(void) {
 #define SETTINGS_MAINTENANCE_Y (SETTINGS_PERSONAL_Y + SETTINGS_PERSONAL_ROWS * SETTINGS_ROW_H + 78)
 // 设置行图标：32 像素盒，在行高 68 里垂直居中；墨色统一，避免一行一个灰度。
 // Setting row icons: a 32 px box centred in the 68 px row with one shared ink level.
+#define SETTINGS_UNLOCK_ICON 18
 #define SETTINGS_ICON_PX 32
 #define SETTINGS_ICON_INK 0x58
 // 主页面滚动上限：把最后一组的最后一行刚好推到导航栏之上，多留 8px 余量。
@@ -755,6 +756,7 @@ static void setting_icon(uint8_t *fb, int index, int cx, int cy) {
         UI_ICON_SLIDERS_HORIZONTAL, // 15 主页刷新模式 / Main refresh mode
         UI_ICON_LOCK,              // 16 锁屏密码 / lock screen password
         UI_ICON_ROTATE_CW,         // 17 屏幕修复 / panel repair
+        UI_ICON_LOCK,              // 18 双击解锁 / double-press unlock
     };
     if (index < 0 || index >= (int)(sizeof(icons) / sizeof(icons[0]))) return;
     ui_draw_icon(fb, cx, cy, SETTINGS_ICON_PX, icons[index], SETTINGS_ICON_INK);
@@ -766,6 +768,14 @@ static void settings_fit_text(char *value, int px, int width) {
     }
 }
 static void fit_value(char *value, int width) { settings_fit_text(value,20,width); }
+
+static void settings_switch(uint8_t *fb, int center_y, bool active) {
+    EpdRect track = {555, center_y - 19, 69, 39};
+    ui_fill_round_rect(fb, track, 19, active ? 0x58 : 0xc4);
+    int cx = active ? track.x + 49 : track.x + 20;
+    epd_fill_circle(cx, track.y + 19, 16, UI_GRAY_WHITE, fb);
+    epd_draw_circle(cx, track.y + 19, 16, 0x78, fb);
+}
 
 static void setting_group(uint8_t *fb, int title_y, const char *title,
                           int card_y, const int icons[], const char *const labels[],
@@ -785,6 +795,11 @@ static void setting_group(uint8_t *fb, int title_y, const char *title,
         if (y + row_height <= 160 || y >= settings_viewport_end()) continue;
         if (i) settings_divider(fb, y, 88, 544);
         setting_icon(fb, icons[i], 67, y + row_height / 2);
+        if (icons[i] == SETTINGS_UNLOCK_ICON) {
+            ui_text_vc(fb, 100, y + row_height / 2, 25, labels[i], EPD_DRAW_ALIGN_LEFT, false);
+            settings_switch(fb, y + row_height / 2, app_settings_wake_presses() == 2);
+            continue;
+        }
         char shown[128]; snprintf(shown,sizeof(shown),"%s",values[i]);
         int value_width = 594 - 100 - 20 - ui_text_fixed_width_px(ui_text_effective_px(25),labels[i]);
         if (value_width > 215) value_width = 215;
@@ -802,11 +817,7 @@ static void setting_toggle(uint8_t *fb, int y, const char *title, const char *de
     settings_card(fb, (EpdRect){36, y, 612, 126}, 22, UI_GRAY_WHITE, 0x70);
     ui_text(fb, 59, y + 24, 27, title, EPD_DRAW_ALIGN_LEFT, false);
     ui_text(fb, 59, y + 75, 19, detail, EPD_DRAW_ALIGN_LEFT, false);
-    EpdRect track = {555, y + 43, 69, 39};
-    ui_fill_round_rect(fb, track, 19, active ? 0x58 : 0xc4);
-    int cx = active ? track.x + 49 : track.x + 20;
-    epd_fill_circle(cx, track.y + 19, 16, UI_GRAY_WHITE, fb);
-    epd_draw_circle(cx, track.y + 19, 16, 0x78, fb);
+    settings_switch(fb, y + 62, active);
 }
 
 static void draw_style_thumbnail(uint8_t *fb, int style, int top) {
@@ -1196,12 +1207,6 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
         }
         ui_text(fb, 54, 558, 21, "浅睡时按键直接返回，深睡时会重新开机。", EPD_DRAW_ALIGN_LEFT, false);
         ui_text(fb, 54, 594, 21, "锁屏样式同时适用于壁纸与阅读票根。", EPD_DRAW_ALIGN_LEFT, false);
-        section(fb, 650, "解锁方式");
-        setting_toggle(fb, 704, "双击解锁", "", app_settings_wake_presses() == 2);
-        ui_text(fb, 59, 788, 19, app_settings_wake_presses() == 2 ?
-            "连续按两次电源键解锁" : "按一次电源键解锁", EPD_DRAW_ALIGN_LEFT, false);
-        ui_text(fb, 54, 894, 21, "同样适用于深睡后的唤醒。", EPD_DRAW_ALIGN_LEFT, false);
-        ui_text(fb, 54, 938, 21, "已设置的锁屏密码仍需验证。", EPD_DRAW_ALIGN_LEFT, false);
         settings_navigation(fb);
         return;
     }
@@ -1414,11 +1419,11 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
     snprintf(contrast,sizeof(contrast),"%u%%",app_settings_system_contrast());
     unsigned minutes=app_settings_auto_lock_minutes();
     if(minutes)snprintf(idle,sizeof(idle),"%u 分钟",minutes);else strcpy(idle,"关闭");
-    const char *display_labels[]={"系统字体","系统对比度","主页刷新模式","首页强刷","自动休眠锁屏","关机睡眠"};
+    const char *display_labels[]={"系统字体","系统对比度","主页刷新模式","首页强刷","自动休眠锁屏","双击解锁","关机睡眠"};
     const char *display_values[]={font_name,contrast,
         app_settings_main_refresh_mode()==APP_MAIN_REFRESH_FAST?"快刷":app_settings_main_refresh_mode()==APP_MAIN_REFRESH_WATER?"水波纹":"普通",
-        app_settings_home_full_refresh()?"开启":"关闭",idle,app_settings_staged_shutdown()?"先浅后深":"彻底断电"};
-    const int display_icons[]={2,7,15,11,14,9};
+        app_settings_home_full_refresh()?"开启":"关闭",idle,"",app_settings_staged_shutdown()?"先浅后深":"彻底断电"};
+    const int display_icons[]={2,7,15,11,14,SETTINGS_UNLOCK_ICON,9};
     setting_group(fb,SETTINGS_DISPLAY_Y-49,"显示",SETTINGS_DISPLAY_Y,
                   display_icons,display_labels,display_values,SETTINGS_DISPLAY_ROWS);
     snprintf(signature,sizeof(signature),"%s",app_settings_status_signature()[0]?app_settings_status_signature():"未设置");
@@ -2112,10 +2117,6 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
             app_settings_set_staged_shutdown(true);
             return APP_REDRAW_PAGE;
         }
-        if (ui_rect_hit((EpdRect){36, 704, 612, 126}, ev->x0, ev->y0)) {
-            app_settings_set_wake_presses(app_settings_wake_presses() == 2 ? 1 : 2);
-            return APP_REDRAW_PAGE;
-        }
         return APP_REDRAW_NONE;
     }
     if (s_page == SETTINGS_CONFIG) {
@@ -2287,6 +2288,7 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         else if(row==2)s_page=SETTINGS_MAIN_REFRESH;
         else if(row==3)app_settings_set_home_full_refresh(!app_settings_home_full_refresh());
         else if(row==4)s_page=SETTINGS_AUTO_LOCK;
+        else if(row==5)app_settings_set_wake_presses(app_settings_wake_presses()==2?1:2);
         else s_page=SETTINGS_POWER_SLEEP;
         return APP_REDRAW_PAGE;
     }

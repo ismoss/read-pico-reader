@@ -30,8 +30,8 @@ const char* app_sleep_mode_name(app_sleep_mode_t mode);
 /// Power-menu shutdown: false powers fully off; true light-sleeps for 10 minutes, then PMU soft-sleeps.
 bool app_settings_staged_shutdown(void);
 void app_settings_set_staged_shutdown(bool staged);
-/// 电源键开机次数：1 单击开机，2 双击开机；默认 2，放在包里不易误开机。
-/// Power-key boot presses: 1 boots on a single press, 2 needs a double click; defaults to 2 so a bag cannot wake it.
+/// 电源键解锁/深睡唤醒次数：默认 1；设置首页开启“双击解锁”后为 2。
+/// Power-key unlock/deep-wake presses: defaults to 1; enable double-press unlock on Settings home for 2.
 uint8_t app_settings_wake_presses(void);
 void app_settings_set_wake_presses(uint8_t presses);
 /// 首页进入时强制全刷；默认关闭。/ Full refresh when entering Home; off by default.
