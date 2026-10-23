@@ -9,6 +9,8 @@ User-visible changes by release; see [README](../README.md) for usage.
   Prefer GitHub Pages OTA metadata/images, retaining website metadata fallback, Range resumes, retries, full verification and inactive-slot protection.
 - 修复章节文件名含冒号的 EPUB 打不开：只有路径首段的冒号仍按协议/盘符分隔处理，条目名内部的冒号按普通字符解析。
   Open EPUBs whose chapter file names contain colons: a first-segment colon still marks a scheme or drive, while one inside an entry name resolves like any other character.
+- 修复长按删除书籍对 books 子目录及 TF 卡其他位置的书籍失效：删除改按已挂载根受理，仍拒绝目录穿越、目录/链接替换与非书籍扩展名。
+  Delete books kept in books subfolders or elsewhere on the card: deletion now accepts any book file under a mounted root while still refusing traversal, directories, links and non-book extensions.
 
 
 ## 0.3.3-rc99 / 2026-10-22
