@@ -522,7 +522,7 @@ static void xml_reader(xml_t *xml, const char *text, size_t n) {
 /* ---- ZIP 路径及内容 / ZIP paths and content ---- */
 
 static bool resolve_path(const char *base, const char *href, char out[EPUB_PATH_CAP]) {
-    char decoded[EPUB_PATH_CAP]; size_t used = 0;
+    char decoded[EPUB_PATH_CAP]; size_t used = 0; bool first_segment = true;
     for (size_t i = 0; href[i] && href[i] != '#'; ++i) {
         unsigned char c = (unsigned char)href[i];
         if (c == '%') {
@@ -530,7 +530,14 @@ static bool resolve_path(const char *base, const char *href, char out[EPUB_PATH_
             int a = hex(href[i + 1]), b = hex(href[i + 2]); if (a < 0 || b < 0) return false;
             c = (unsigned char)((a << 4) | b); i += 2;
         }
-        if (c < 32 || c == 127 || c == '\\' || c == ':' || c == '?' || used + 1 >= sizeof(decoded)) return false;
+        // 只拒绝首段里的冒号：那位置只可能是协议或盘符。段中是合法的 ZIP 条目名，部分工具
+        // 会把章节文件名打散成 `*` 与 `:` 的组合，整本按原规则会解析失败。
+        // Only a colon in the first segment is refused: there it can only be a scheme or drive
+        // letter. Inside a segment it is a legal ZIP entry name, and some tools scatter chapter
+        // names into `*` and `:` patterns that the old rule rejected wholesale.
+        if (c == ':' && first_segment) return false;
+        if (c == '/') first_segment = false;
+        if (c < 32 || c == 127 || c == '\\' || c == '?' || used + 1 >= sizeof(decoded)) return false;
         decoded[used++] = (char)c;
     }
     decoded[used] = 0;
