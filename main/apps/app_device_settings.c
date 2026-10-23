@@ -1196,21 +1196,12 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
         }
         ui_text(fb, 54, 558, 21, "浅睡时按键直接返回，深睡时会重新开机。", EPD_DRAW_ALIGN_LEFT, false);
         ui_text(fb, 54, 594, 21, "锁屏样式同时适用于壁纸与阅读票根。", EPD_DRAW_ALIGN_LEFT, false);
-        // 用户修订：开机按键次数可选，单击更快、双击防误触；深睡唤醒与锁屏解锁共用。
-        // User revision: the boot press count is selectable; one press is faster, two resist accidental wake. Deep-sleep wake and lock unlock share it.
-        section(fb, 650, "按电源键开机");
-        const char *wake_labels[] = {"单击开机", "双击开机"};
-        const char *wake_details[] = {"按一次电源键就开机，更快", "连续按两次，放在包里不易误开机"};
-        for (int i = 0; i < 2; ++i) {
-            int y = 692 + i * 124;
-            bool active = app_settings_wake_presses() == (uint8_t)(i + 1);
-            settings_card(fb, (EpdRect){36, y, 612, 112}, 22, active ? 0xd0 : UI_GRAY_WHITE, 0x70);
-            ui_text(fb, 64, y + 16, 27, wake_labels[i], EPD_DRAW_ALIGN_LEFT, false);
-            ui_text(fb, 64, y + 64, 20, wake_details[i], EPD_DRAW_ALIGN_LEFT, false);
-            if (active) epd_fill_circle(609, y + 56, 8, UI_GRAY_BLACK, fb);
-        }
-        ui_text(fb, 54, 948, 21, "深睡唤醒与锁屏解锁都按这个次数。", EPD_DRAW_ALIGN_LEFT, false);
-        ui_text(fb, 54, 984, 21, "双击更防误触；单击一按即用。", EPD_DRAW_ALIGN_LEFT, false);
+        section(fb, 650, "解锁方式");
+        setting_toggle(fb, 704, "双击解锁", "", app_settings_wake_presses() == 2);
+        ui_text(fb, 59, 788, 19, app_settings_wake_presses() == 2 ?
+            "连续按两次电源键解锁" : "按一次电源键解锁", EPD_DRAW_ALIGN_LEFT, false);
+        ui_text(fb, 54, 894, 21, "同样适用于深睡后的唤醒。", EPD_DRAW_ALIGN_LEFT, false);
+        ui_text(fb, 54, 938, 21, "已设置的锁屏密码仍需验证。", EPD_DRAW_ALIGN_LEFT, false);
         settings_navigation(fb);
         return;
     }
@@ -2121,12 +2112,8 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
             app_settings_set_staged_shutdown(true);
             return APP_REDRAW_PAGE;
         }
-        if (y >= 692 && y < 804) {
-            app_settings_set_wake_presses(1);
-            return APP_REDRAW_PAGE;
-        }
-        if (y >= 816 && y < 928) {
-            app_settings_set_wake_presses(2);
+        if (ui_rect_hit((EpdRect){36, 704, 612, 126}, ev->x0, ev->y0)) {
+            app_settings_set_wake_presses(app_settings_wake_presses() == 2 ? 1 : 2);
             return APP_REDRAW_PAGE;
         }
         return APP_REDRAW_NONE;

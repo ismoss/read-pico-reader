@@ -638,7 +638,7 @@ void app_loop_run(const app_loop_config_t* config) {
     quick_reset();
     bool menu_open = false;
     ui_gesture_t gesture = {0};
-    bool pinching = false;
+    bool pinching = false, pinch_input_owned = false, pinch_drain = false;
     ui_power_dialog_t power_dialog = {0};
     bool power_dialog_open = false;
     int menu_pressed = UI_MENU_HIT_NONE;
@@ -722,42 +722,6 @@ void app_loop_run(const app_loop_config_t* config) {
         bool quick_lock_requested = false;
         bool quick_input_owned = false;
 
-        // 整页插图的双指缩放：只有明确要原始双指的页面走这里，其它页面维持原来的多指取消。
-        // 两指期间不走单指手势、按键与快捷面板；松手那一刻交给页面收尾成灰度。
-        // Two-contact zoom for whole-page illustrations: only pages that ask for raw two contacts
-        // come here; others keep the multitouch-cancel rule. Single-finger gestures, keys and the
-        // quick panel stay out of the way, and the release tick is the page's chance to settle
-        // back to grayscale.
-        if (err == ESP_OK && !power_input_owned && !quick_input_owned && !menu_open &&
-            current->wants_pinch != NULL && current->wants_pinch(&ctx)) {
-            if (touch.count >= 2) {
-                if (!pinching) { pinching = true; held_key = -1; cancel_gesture(&ctx, current, &gesture); }
-                app_pinch_t pinch = {
-                    .active = true,
-                    .ax = touch.points[0].x, .ay = touch.points[0].y,
-                    .bx = touch.points[1].x, .by = touch.points[1].y,
-                };
-                app_redraw_t redraw = current->on_pinch ? current->on_pinch(&ctx, &pinch) : APP_REDRAW_NONE;
-                if (redraw != APP_REDRAW_NONE) app_present(&ctx, current, redraw);
-                ctx.consumed = true;
-                was_touched = touch.touched;
-                vTaskDelay(pdMS_TO_TICKS(LOOP_TICK_MS));
-                continue;
-            }
-            if (pinching) {
-                pinching = false;
-                app_pinch_t pinch = { .active = false, .ax = touch.x, .ay = touch.y,
-                                      .bx = touch.x, .by = touch.y };
-                app_redraw_t redraw = current->on_pinch ? current->on_pinch(&ctx, &pinch) : APP_REDRAW_NONE;
-                if (redraw != APP_REDRAW_NONE) app_present(&ctx, current, redraw);
-                ctx.consumed = true;
-                was_touched = touch.touched;
-                ui_gesture_reset(&gesture);
-                vTaskDelay(pdMS_TO_TICKS(LOOP_TICK_MS));
-                continue;
-            }
-        }
-
         if (ctx.now_ms - last_media_poll_ms >= MEDIA_POLL_INTERVAL_MS) {
             last_media_poll_ms = ctx.now_ms;
             if (poll_media(&ctx, current, &media_mounted, &media_invalidated)) {
@@ -780,7 +744,37 @@ void app_loop_run(const app_loop_config_t* config) {
             }
         }
 
-        if (!power_input_owned && !menu_open) {
+        if (!touch.touched) pinch_drain = false;
+        pinch_input_owned = pinch_drain;
+        bool pinch_ready = err == ESP_OK && !power_input_owned && !s_quick.open && !menu_open &&
+            !ctx.request_app && current->wants_pinch && current->on_pinch && current->wants_pinch(&ctx);
+        if (pinching && (!pinch_ready || touch.count < 2)) {
+            pinching = false;
+            if (!power_input_owned && !s_quick.open && !menu_open && !ctx.request_app &&
+                current->wants_pinch && current->on_pinch && current->wants_pinch(&ctx)) {
+                app_pinch_t end = {.active = false};
+                app_redraw_t redraw = current->on_pinch(&ctx, &end);
+                if (redraw != APP_REDRAW_NONE) app_present(&ctx, current, redraw);
+            }
+            ui_gesture_reset(&gesture);
+            pinch_input_owned = true;
+            pinch_drain = touch.touched;
+        } else if (pinch_ready && touch.count >= 2) {
+            if (!pinching) {
+                held_key = -1; cancel_gesture(&ctx, current, &gesture); pinching = true;
+            }
+            app_pinch_t pinch = {.active = true,
+                .ax = touch.points[0].x, .ay = touch.points[0].y,
+                .bx = touch.points[1].x, .by = touch.points[1].y};
+            app_redraw_t redraw = current->on_pinch(&ctx, &pinch);
+            if (redraw != APP_REDRAW_NONE) app_present(&ctx, current, redraw);
+            pinch_input_owned = true;
+        }
+        // 双指只占输入，不跳过电源、媒体、后台任务与页面请求。
+        // Pinch owns input only: power, media, background work and navigation still run.
+        if (pinch_input_owned) { ctx.consumed = true; ctx.pressed = ctx.released = false; quick_input_owned = true; }
+
+        if (!pinch_input_owned && !power_input_owned && !menu_open) {
             if (err != ESP_OK) {
                 ui_quick_menu_cancel_input(&s_quick);
                 quick_input_owned=s_quick.open;
@@ -995,7 +989,7 @@ void app_loop_run(const app_loop_config_t* config) {
                 }
             }
         }
-        if (!power_input_owned && !quick_input_owned && !menu_open && current->on_gesture && err == ESP_OK) {
+        if (!pinch_input_owned && !power_input_owned && !quick_input_owned && !menu_open && current->on_gesture && err == ESP_OK) {
             ui_gesture_event_t event;
             if (ui_gesture_feed(&gesture, &ctx, &event)) {
                 app_redraw_t redraw =

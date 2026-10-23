@@ -18,6 +18,11 @@ User-visible changes by release; see [README](../README.md) for usage.
 - 整页只有一张插图的页面把插图上下居中，不再贴阅读区顶端；图文同页的插图位置不变。
   Center a lone full-page illustration vertically instead of pinning it to the top of the reading area; pages that mix text and images keep their current placement.
 
+- 设置 → 显示 → 关机睡眠新增「双击解锁」开关；默认开启，关闭后单击电源键解锁，深睡唤醒沿用同一选择，锁屏密码验证保持。
+  Add a double-press unlock switch under Display / Power sleep; on by default, off selects a single power press. Deep wake shares the choice and PIN validation remains required.
+- 插图缩放校验缓存所属页与布局，兼容解码失败；缩放期间保持媒体与电源处理，支持安全的旋转和局部铺帧。连续 DU 刷新失败时保留待驱动相位以便重试。
+  Validate image page/layout ownership and decoding failures during zoom; keep media/power services responsive and clip rotated packed blits safely. Failed continuous-DU draws retain phases for retry.
+
 
 ## 0.3.3-rc99 / 2026-10-22
 

@@ -242,6 +242,7 @@ enum EpdDrawError continuous_du_scan(EpdiyHighlevelState* hl, EpdRect area) {
     memset(hl->dirty_lines, 0, sizeof(bool) * height);
     memset(hl->dirty_columns, 0, width / 2);
 
+    const int pending_before = s_pending;
     bool any = false;
     for (int y = y0; y <= y1; y++) {
         const size_t offset = (size_t)y * width;
@@ -258,9 +259,8 @@ enum EpdDrawError continuous_du_scan(EpdiyHighlevelState* hl, EpdRect area) {
             hl->dirty_lines[y] = true;
             hl->dirty_columns[x / 2] |= (x & 1) ? 0xF0 : 0x0F;
             any = true;
-            // 这一调用必定驱动它，所以这里就能把剩余相位减一：省掉扫完再走一遍整块区域。
-            // This call is about to drive the pixel, so the leftover phase can drop here, saving a
-            // second pass over the whole region after the scan.
+            // 先预减相位节省正常帧的第二遍遍历，失败时再回滚。
+            // Speculatively decrement to save a pass on successful draws; roll back failures.
             if (state > 0) { if (state_row[x] == 1) s_pending--; state_row[x] = (int8_t)(state - 1); }
             else { if (state_row[x] == -1) s_pending--; state_row[x] = (int8_t)(state + 1); }
         }
@@ -272,7 +272,7 @@ enum EpdDrawError continuous_du_scan(EpdiyHighlevelState* hl, EpdRect area) {
     // frames feel better. Same-profile calls are no-ops.
     read_pico_epd_use_scan(READ_PICO_EPD_SCAN_FAST);
 
-    return epd_draw_base(
+    enum EpdDrawError err = epd_draw_base(
         epd_full_screen(),
         difference,
         epd_full_screen(),
@@ -282,4 +282,17 @@ enum EpdDrawError continuous_du_scan(EpdiyHighlevelState* hl, EpdRect area) {
         hl->dirty_columns,
         &continuous_du_waveform
     );
+    // 失败没有交付相位；按差分方向回滚预减计数，正常帧仍只遍历一次。
+    // A failed draw delivered no phase: undo the speculative decrement only on failure.
+    if (err != EPD_DRAW_SUCCESS) {
+        for (int y = y0; y <= y1; ++y) {
+            size_t offset = (size_t)y * width;
+            for (int x = x0; x <= x1; ++x) {
+                if (difference[offset + x] == 0x0f) ++s_states[offset + x];
+                else if (difference[offset + x] == 0xf0) --s_states[offset + x];
+            }
+        }
+        s_pending = pending_before;
+    }
+    return err;
 }
