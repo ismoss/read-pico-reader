@@ -166,6 +166,7 @@
 #include "ui_image_dither.h"
 #include "ui_reader_background.h"
 #include "ui_gesture.h"
+#include "continuous_du.h"
 #include "ui_menu.h"
 #include "ui_nav.h"
 #include "ui_click_feedback.h"
@@ -370,6 +371,30 @@ static size_t s_page_images_for = SIZE_MAX;
 static uint32_t s_page_images_generation;
 static size_t s_block_count;
 static size_t s_text_len, s_chapter, s_page;
+// 整页插图的双指缩放：1000 为原始大小；缩放与位置只属于当时那一页，换页自动还原。
+// 图像中心用屏幕坐标保存，双指中点既是缩放锚点也是平移把手；单指拖动同样平移。
+// Two-finger zoom for a whole-page illustration: 1000 is original size, and the scale plus
+// position belong to the page they were made on. The image centre is kept in screen
+// coordinates; the contact midpoint anchors the scale and doubles as the pan handle, and a
+// one-finger drag pans as well.
+#define READER_IMAGE_ZOOM_MAX 4000
+#define READER_IMAGE_ZOOM_MIN 1000
+static int s_image_zoom = READER_IMAGE_ZOOM_MIN;
+static size_t s_image_zoom_page = SIZE_MAX;
+// 正文插图缩放模式：双击正文里的一张图后，单独按整页方式缩放它。
+// Inline image zoom mode: after double-tapping an illustration inside the text, that image is
+// zoomed as if it were a whole-page sheet.
+static bool s_zoom_active;
+static int s_zoom_slot;
+static int s_image_zoom_cx, s_image_zoom_cy;
+static uint32_t s_image_zoom_start_distance;
+static int s_image_zoom_start_scale = READER_IMAGE_ZOOM_MIN;
+static int s_image_zoom_start_cx, s_image_zoom_start_cy;
+static int s_image_zoom_anchor_dx, s_image_zoom_anchor_dy;
+static int64_t s_image_zoom_draw_ms;
+static bool s_image_zoom_bw;
+static bool s_image_pan_active;
+static uint16_t s_image_pan_x, s_image_pan_y;
 static size_t s_selected_toc = SIZE_MAX;
 static bool s_toc_jump_open, s_toc_jump_drag;
 static int s_toc_jump_percent;
@@ -2890,11 +2915,312 @@ static bool reader_image_slot(size_t page, int slot, int *index, int *y, int *wi
     if (height) *height = band.height;
     return true;
 }
+// 整数平方根：双指距离只用来比比例，不必引入浮点。
+// Integer square root: pinch distance only feeds a ratio, so no floating point is needed.
+static uint32_t reader_sqrt(uint32_t v) {
+    uint32_t r = 0, bit = 1u << 30;
+    while (bit > v) bit >>= 2;
+    while (bit) {
+        if (v >= r + bit) { v -= r + bit; r = (r >> 1) + bit; }
+        else r >>= 1;
+        bit >>= 2;
+    }
+    return r;
+}
+
+// 这一页是不是整屏只有一张插图，且它的灰阶位图已经就绪。
+// Whether this page is one illustration and nothing else, with its gray bitmap decoded.
+static bool reader_single_image_page(void) {
+    return s_view == READING && s_reader_panel == READER_PANEL_NONE && !s_toolbar &&
+           book_layout_page_image(s_page) >= 0 && reader_image_slots(s_page) == 1 &&
+           s_page_images != NULL && s_page_image_count == 1 && s_page_images[0].gray != NULL;
+}
+
+// 当前缩放目标：整页插图的唯一一张，或正文里双击进入缩放的那一张。
+// Zoom target: the sole illustration of a whole-page sheet, or the inline image a double tap
+// opened in zoom mode.
+static const reader_image_t *reader_zoom_image(void) {
+    if (!s_page_images || s_page_image_count <= 0) return NULL;
+    if (s_zoom_active)
+        return s_zoom_slot >= 0 && s_zoom_slot < s_page_image_count ? &s_page_images[s_zoom_slot] : NULL;
+    return reader_single_image_page() ? &s_page_images[0] : NULL;
+}
+// 有可缩放目标（整页插图，或已进入正文插图缩放模式）。
+// Whether a zoom surface is available: a whole-page illustration, or an inline image already
+// opened in zoom mode.
+static bool reader_zoom_mode(void) { return s_zoom_active || reader_single_image_page(); }
+
+// 1:1 时缩放目标在插图区域里的显示尺寸：等比缩小到能放下，不放大。
+// The display size of the zoom target at 1:1: aspect-fit into the illustration region, never
+// upscaled.
+static void reader_image_base_size(int *out_w, int *out_h) {
+    const reader_image_t *image = reader_zoom_image();
+    EpdRect band = book_layout_image_rect();
+    int64_t w = image ? image->width : 1, h = image ? image->height : 1;
+    if (w > band.width) { h = h * band.width / w; w = band.width; }
+    if (h > band.height) { w = w * band.height / h; h = band.height; }
+    if (w < 1) w = 1;
+    if (h < 1) h = 1;
+    *out_w = (int)w;
+    *out_h = (int)h;
+}
+
+// 正文里按点选中的插图槽；不在任何插图矩形里返回 false。
+// The inline illustration slot under a tap, or false when the tap misses every image rectangle.
+static bool reader_inline_image_at(uint16_t x, uint16_t y, int *slot) {
+    EpdRect band = book_layout_image_rect();
+    for (int i = 0; i < reader_image_slots(s_page); ++i) {
+        int iy = 0, width = 0, height = 0;
+        if (!reader_image_slot(s_page, i, NULL, &iy, &width, &height)) continue;
+        const reader_image_t *image = &s_page_images[i];
+        if (!image->gray) continue;
+        int left = band.x + (band.width - image->width) / 2;
+        int top = band.y + iy + (height - image->height) / 2;
+        if (iy == 0) top = reader_area().y;
+        if (x >= left && x < left + image->width && y >= top && y < top + image->height) {
+            *slot = i;
+            return true;
+        }
+    }
+    return false;
+}
+
+// 这一页上点到的是不是一张插图（正文插图或整页插图）。
+// Whether a tap landed on an illustration of the current page.
+static bool reader_page_image_hit(uint16_t x, uint16_t y) {
+    int slot = 0;
+    return reader_inline_image_at(x, y, &slot);
+}
+
+// 图片中心活动范围：图比区域大时图像边缘不能缩进区域里，比区域小时固定在中心。
+// Where the image centre may sit: while the image is larger than the region its edges must not
+// pull inside it, and while it is smaller the centre stays put.
+static void reader_image_clamp_center(int *cx, int *cy, int w, int h, EpdRect band) {
+    if (w <= band.width) *cx = band.x + band.width / 2;
+    else {
+        int low = band.x + band.width - w / 2, high = band.x + w / 2;
+        if (*cx < low) *cx = low;
+        if (*cx > high) *cx = high;
+    }
+    if (h <= band.height) *cy = band.y + band.height / 2;
+    else {
+        int low = band.y + band.height - h / 2, high = band.y + h / 2;
+        if (*cy < low) *cy = low;
+        if (*cy > high) *cy = high;
+    }
+}
+
+// 4x4 有序抖动点阵：连续 DU 只认纯黑/纯白，靠点的密度表现灰阶。
+// 4x4 ordered-dither matrix: continuous DU only drives pure black and white, so dot density
+// carries the gray level.
+static const uint8_t s_bayer4[16] = {0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5};
+
+// 把 0=黑…255=白 的一档灰度摊成纯黑/白点阵。/ Turn a 0=black..255=white tone into black/white dots.
+static uint8_t reader_bw_tone(uint8_t gray, int x, int y) {
+    unsigned threshold = (unsigned)s_bayer4[((y & 3) << 2) | (x & 3)] * 16u + 8u;    return gray >= threshold ? 0xff : 0x00;
+}
+
+// 双线性取样：放大时比最近邻平滑，缩小时也不会出现整片跳变。
+// Bilinear sampling: smoother than nearest neighbour when enlarging, without whole-pixel jumps
+// when shrinking.
+static uint8_t reader_sample_bilinear(const reader_image_t *image, int sx_fp, int sy_fp) {
+    int x0 = sx_fp >> 16, y0 = sy_fp >> 16;
+    if (x0 < 0) x0 = 0;
+    if (y0 < 0) y0 = 0;
+    if (x0 >= image->width) x0 = image->width - 1;
+    if (y0 >= image->height) y0 = image->height - 1;
+    int x1 = x0 + 1 < image->width ? x0 + 1 : x0;
+    int y1 = y0 + 1 < image->height ? y0 + 1 : y0;
+    unsigned fx = ((unsigned)sx_fp >> 8) & 0xffu, fy = ((unsigned)sy_fp >> 8) & 0xffu;
+    const uint8_t *p = image->gray;
+    unsigned top = (unsigned)p[(size_t)y0 * image->width + x0] * (256u - fx) +
+                   (unsigned)p[(size_t)y0 * image->width + x1] * fx;
+    unsigned bottom = (unsigned)p[(size_t)y1 * image->width + x0] * (256u - fx) +
+                      (unsigned)p[(size_t)y1 * image->width + x1] * fx;
+    return (uint8_t)((top * (256u - fy) + bottom * fy) >> 16);
+}
+
+// 缩放并平移到位的插图，采样用双线性；bw=true 时用点阵出纯黑白，专供跟手快刷。
+// The zoom target at the current scale and centre, sampled bilinearly. With bw=true it renders
+// pure black/white dots for the interactive fast frames.
+static void draw_zoomed_image(uint8_t *fb, EpdRect band, int scale, int cx, int cy, bool bw) {
+    const reader_image_t *image = reader_zoom_image();
+    if (!image) return;
+    int base_w = 0, base_h = 0;
+    reader_image_base_size(&base_w, &base_h);
+    int w = (int)((int64_t)base_w * scale / READER_IMAGE_ZOOM_MIN);
+    int h = (int)((int64_t)base_h * scale / READER_IMAGE_ZOOM_MIN);
+    if (w < 1 || h < 1) return;
+    int left = cx - w / 2, top = cy - h / 2;
+    int64_t step_x = ((int64_t)image->width << 16) / w;
+    int64_t step_y = ((int64_t)image->height << 16) / h;
+    int64_t max_x = (int64_t)(image->width - 1) << 16;
+    int64_t max_y = (int64_t)(image->height - 1) << 16;
+    // 只走屏幕与图片的交集，避免每像素再做越界判断。
+    // Walk only the intersection of the sheet and the image, so no per-pixel bounds test is needed.
+    int x0 = band.x > left ? band.x : left;
+    int y0 = band.y > top ? band.y : top;
+    int x1 = band.x + band.width < left + w ? band.x + band.width : left + w;
+    int y1 = band.y + band.height < top + h ? band.y + band.height : top + h;
+    if (x0 < band.x) x0 = band.x;
+    if (y0 < band.y) y0 = band.y;
+    if (x1 > band.x + band.width) x1 = band.x + band.width;
+    if (y1 > band.y + band.height) y1 = band.y + band.height;
+    for (int py = y0; py < y1; ++py) {
+        int64_t sy_fp = (int64_t)(py - top) * step_y;
+        if (sy_fp > max_y) continue;
+        for (int px = x0; px < x1; ++px) {
+            int64_t sx_fp = (int64_t)(px - left) * step_x;
+            if (sx_fp > max_x) continue;
+            uint8_t gray = reader_sample_bilinear(image, (int)sx_fp, (int)sy_fp);
+            epd_draw_pixel(px, py, bw ? reader_bw_tone(gray, px, py)
+                                      : ui_image_dither_gray(inline_ink_gray(gray), px, py), fb);
+        }
+    }
+}
+/* ---- 跟手帧：1bit 目标帧 / Gesture frames from a 1-bit target ---- */
+// 物理像素反解成逻辑坐标，与 epdiy 的 _rotate 一一对应。
+// Map a physical pixel back to logical coordinates, mirroring epdiy's _rotate().
+static void reader_phys_to_logical(int px, int py, int *lx, int *ly) {
+    switch (epd_get_rotation()) {
+        case EPD_ROT_PORTRAIT: *lx = py; *ly = epd_width() - 1 - px; break;
+        case EPD_ROT_INVERTED_LANDSCAPE: *lx = epd_width() - 1 - px; *ly = epd_height() - 1 - py; break;
+        case EPD_ROT_INVERTED_PORTRAIT: *lx = epd_height() - 1 - py; *ly = px; break;
+        default: *lx = px; *ly = py; break;
+    }
+}
+
+// 旋转把两个轴整体对调或翻转，所以各建一张轴映射表，逐像素只剩数组取值；点阵图按物理行
+// 顺序写，顺序内存访问比逐像素 nibble 读写快得多。灰度双线性只在松手后做。
+// Rotation swaps or flips whole axes, so one map per axis turns per-pixel work into a lookup.
+// The bit rows are written in physical order; sequential memory beats per-pixel nibble access.
+// Bilinear grayscale runs only after the fingers leave.
+static uint8_t *s_zoom_bits;
+static size_t s_zoom_bits_bytes;
+
+
+// 按区域大小准备两块 1bit 帧缓冲：一块是这一帧的目标，一块是上一帧，用来算差分。
+// Prepare two 1-bit frame buffers sized to the region: this frame's target and the previous one
+// used for the difference.
+static bool zoom_bits_ready(EpdRect phys) {
+    size_t bytes = (size_t)((phys.width + 7) / 8) * (size_t)phys.height;
+    if (bytes == s_zoom_bits_bytes && s_zoom_bits) return true;
+    free(s_zoom_bits);
+    s_zoom_bits = NULL;
+    s_zoom_bits_bytes = 0;
+    uint8_t *a = heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!a) return false;
+    memset(a, 0, bytes);
+    s_zoom_bits = a;
+    s_zoom_bits_bytes = bytes;
+    return true;
+}
+
+// 逻辑坐标正解成物理坐标，与 epdiy 的 _rotate 一致。
+// Map a logical pixel to physical coordinates, matching epdiy's _rotate().
+static void reader_logical_to_phys(int lx, int ly, int *px, int *py) {
+    switch (epd_get_rotation()) {
+        case EPD_ROT_PORTRAIT: *px = epd_width() - 1 - ly; *py = lx; break;
+        case EPD_ROT_INVERTED_LANDSCAPE: *px = epd_width() - 1 - lx; *py = epd_height() - 1 - ly; break;
+        case EPD_ROT_INVERTED_PORTRAIT: *px = ly; *py = epd_height() - 1 - lx; break;
+        default: *px = lx; *py = ly; break;
+    }
+}
+
+// 生成一帧：按逻辑坐标遍历，源图行顺序读，写出的点落在物理内存里的小块中；
+// 逻辑→物理是仿射映射（系数只有 0/±1），所以每次取样只做两次乘法。
+// 逐像素取样再按有序抖动摊成黑白：跟手帧用细抖动保持画面连续，灰度定稿另走双线性。
+// Build one frame by walking logical coordinates: source rows read sequentially and the dots land
+// in a small physical tile. Logical-to-physical is affine with 0/±1 coefficients, so a sample
+// costs two multiplies. Every pixel is sampled and ordered-dithered, so the motion frame keeps a
+// continuous look instead of 4x4 blocks; the grayscale settle still uses bilinear.
+#define ZOOM_BITS_STEP 1
+static void zoom_bits_build(uint8_t *bits, EpdRect phys, EpdRect band, int iw, int ih,
+                            int w, int h, int left, int top) {
+    const int width_bytes = (phys.width + 7) / 8;
+    memset(bits, 0, (size_t)width_bytes * (size_t)phys.height);
+    // 只遍历"图片 ∩ 插图区域"：放大后图片比屏幕大得多，多算的部分全在屏幕外。
+    // Walk only the image ∩ region: a zoomed image reaches far past the sheet, and anything
+    // outside it would be sampled and discarded.
+    int lx0 = left > band.x ? left : band.x;
+    int ly0 = top > band.y ? top : band.y;
+    int lx1 = left + w < band.x + band.width ? left + w : band.x + band.width;
+    int ly1 = top + h < band.y + band.height ? top + h : band.y + band.height;
+    if (lx1 > left + w) lx1 = left + w;
+    if (ly1 > top + h) ly1 = top + h;
+    if (lx1 <= lx0 || ly1 <= ly0) return;
+    // 仿射系数：px = ax*lx + ay*ly + px0，py = dx*lx + dy*ly + py0。
+    // Affine coefficients: px = ax*lx + ay*ly + px0 and py = dx*lx + dy*ly + py0.
+    int px0 = 0, py0 = 0, e1x = 0, e1y = 0, e2x = 0, e2y = 0;
+    reader_logical_to_phys(0, 0, &px0, &py0);
+    reader_logical_to_phys(1, 0, &e1x, &e1y);
+    reader_logical_to_phys(0, 1, &e2x, &e2y);
+    const int ax = e1x - px0, ay = e2x - px0, ddx = e1y - py0, ddy = e2y - py0;
+    // 采样步长用定点：每像素 64 位除法太贵，这里只乘一次再移位。
+    // Fixed-point sampling steps: a 64-bit division per pixel is far too costly, so multiply once
+    // and shift.
+    const int64_t step_x = ((int64_t)iw << 16) / w;
+    const int64_t step_y = ((int64_t)ih << 16) / h;
+    const int step = ZOOM_BITS_STEP;
+    const reader_image_t *zoom_image = reader_zoom_image();
+    if (!zoom_image) return;
+    for (int ly = ly0; ly < ly1; ly += step) {
+        const int sy = (int)(((int64_t)(ly - top) * step_y) >> 16);
+        if (sy < 0 || sy >= ih) continue;
+        const uint8_t *src = zoom_image->gray + (size_t)sy * iw;
+        for (int lx = lx0; lx < lx1; lx += step) {
+            const int sx = (int)(((int64_t)(lx - left) * step_x) >> 16);
+            if (sx < 0 || sx >= iw) continue;
+            const uint8_t gray = src[sx];
+            const int lxe = lx + step < lx1 ? lx + step : lx1;
+            const int lye = ly + step < ly1 ? ly + step : ly1;
+            for (int lv = ly; lv < lye; ++lv) {
+                const int py = py0 + ddx * lx + ddy * lv;
+                if (py < phys.y || py >= phys.y + phys.height) continue;
+                uint8_t *row = bits + (size_t)(py - phys.y) * (size_t)width_bytes;
+                for (int lv2 = lx; lv2 < lxe; ++lv2) {
+                    const int px = px0 + ax * lv2 + ay * lv;
+                    if (px < phys.x || px >= phys.x + phys.width) continue;
+                    const int xx = px - phys.x;
+                    if (gray < (unsigned)s_bayer4[((py & 3) << 2) | (px & 3)] * 16u + 8u)
+                        row[xx >> 3] |= (uint8_t)(0x80u >> (xx & 7));
+                }
+            }
+        }
+    }
+}
+
 static void draw_reader_images(uint8_t *fb, size_t page, EpdRect body) {
     // 位图和布局代次必须匹配；预渲染另一页不能复用当前页插图。
     // Match page and layout generation; a prefetched page must never borrow current-page bitmaps.
     if (!app_settings_reader_hide_images() && page == s_page &&
         s_page_images_for == page && s_page_images_generation == book_layout_generation()) {
+        // 缩放只属于缩放时的那一页；换页后回到原始大小与居中位置。
+        // The scale belongs to the page it was made on; a page change returns to 1:1 and centre.
+        if (s_image_zoom_page != page) {
+            // 换页时丢掉还没扫完的相位，别把上一页的点阵带到新页。
+            // Drop phases still in flight on a page change so no dots carry over.
+            if (s_image_zoom_bw) continuous_du_reset();
+            s_image_zoom = READER_IMAGE_ZOOM_MIN;
+            s_image_zoom_bw = false;
+            s_image_pan_active = false;
+            s_zoom_active = false;
+            EpdRect reset_band = book_layout_image_rect();
+            s_image_zoom_cx = reset_band.x + reset_band.width / 2;
+            s_image_zoom_cy = reset_band.y + reset_band.height / 2;
+        }
+        // 正文插图缩放模式：整块插图区域只画那一张，其他内容不参与。
+        // Inline zoom mode: the illustration region shows that one image and nothing else.
+        if (s_zoom_active) {
+            draw_zoomed_image(fb, book_layout_image_rect(), s_image_zoom,
+                              s_image_zoom_cx, s_image_zoom_cy, s_image_zoom_bw);
+            return;
+        }
+        if (s_image_zoom > READER_IMAGE_ZOOM_MIN && reader_single_image_page()) {
+            draw_zoomed_image(fb, book_layout_image_rect(), s_image_zoom,
+                              s_image_zoom_cx, s_image_zoom_cy, s_image_zoom_bw);
+            return;
+        }
         // 横向按插图区域居中：通栏时图片铺满整屏，不再留正文边距。
         // Center horizontally in the illustration region: with full bleed the image spans the
         // panel and no longer carries the body margins.
@@ -2990,7 +3316,7 @@ static void draw_reader_outer(uint8_t *fb,size_t page) {
 }
 static void draw_reader(uint8_t *fb,size_t page) {
     ui_text_set_system_scale(false);ui_clear_page(fb);
-    book_layout_draw_page(fb,page,body_rect(),s_px);
+    if (!s_zoom_active) book_layout_draw_page(fb,page,body_rect(),s_px);
     draw_reader_outer(fb,page);
 }
 // 预绘只在同步推屏期间借用字体；结束前逐行停止并交还，输入回调不等待整页预绘。
@@ -4498,6 +4824,9 @@ static bool reader_turn_chrome(app_ctx_t *ctx) {
     return changed;
 }
 static app_redraw_t turn_page(app_ctx_t* ctx, int dir) {
+    // 翻页即离开正文插图缩放模式。
+    // Turning a page leaves inline zoom mode.
+    if (s_zoom_active) { s_zoom_active = false; s_image_zoom = READER_IMAGE_ZOOM_MIN; continuous_du_reset(); }
     if (!s_text || s_clear_confirm) return APP_REDRAW_NONE;
     // 页面图片表可能随跨章加载替换，旧页资格以实际成功显示的画面为准。
     // Chapter loads may replace the image table; the old-page eligibility comes from the displayed frame.
@@ -5623,6 +5952,65 @@ static int bulk_control_at(app_ctx_t* ctx, uint16_t x, uint16_t y, EpdRect* rect
     }
     return -1;
 }
+// 整页插图的定点缩放：把点到的那一点当作锚，直接跳到目标倍率并整屏刷灰度。
+// Point-anchored jump zoom for a whole-page illustration: the tapped point stays under the
+// finger, the target scale is applied at once, and the panel is fully refreshed in grayscale.
+static app_redraw_t zoom_jump(app_ctx_t* ctx, int scale, int fx, int fy) {
+    EpdRect band = book_layout_image_rect();
+    int base_w = 0, base_h = 0;
+    reader_image_base_size(&base_w, &base_h);
+    s_image_zoom_page = s_page;
+    s_image_zoom_start_distance = 0;
+    s_image_pan_active = false;
+    s_image_zoom_bw = false;
+    continuous_du_reset();
+    if (scale > READER_IMAGE_ZOOM_MIN) {
+        const int cx0 = band.x + band.width / 2, cy0 = band.y + band.height / 2;
+        int cx = fx - (int)((int64_t)(fx - cx0) * scale / READER_IMAGE_ZOOM_MIN);
+        int cy = fy - (int)((int64_t)(fy - cy0) * scale / READER_IMAGE_ZOOM_MIN);
+        int w = (int)((int64_t)base_w * scale / READER_IMAGE_ZOOM_MIN);
+        int h = (int)((int64_t)base_h * scale / READER_IMAGE_ZOOM_MIN);
+        reader_image_clamp_center(&cx, &cy, w, h, band);
+        s_image_zoom = scale;
+        s_image_zoom_cx = cx;
+        s_image_zoom_cy = cy;
+    } else {
+        s_image_zoom = READER_IMAGE_ZOOM_MIN;
+        s_image_zoom_cx = band.x + band.width / 2;
+        s_image_zoom_cy = band.y + band.height / 2;
+    }
+    render(ctx, ctx->fb);
+    guard_draw_result(ctx->hl, update_display_area_full_with(
+        ctx->hl, &E0470_FULL_WAVEFORM, MODE_GC16,
+        (EpdRect){0, 0, UI_LOCK_WIDTH, UI_LOCK_HEIGHT}));
+    return APP_REDRAW_DONE;
+}
+
+// 双击正文里的插图：进入缩放模式并以点到的位置为锚放大到 2 倍；再双击退出回到正文。
+// Double tap on an inline illustration enters zoom mode at 2x anchored on the tap; another
+// double tap leaves zoom mode and returns to the text.
+static app_redraw_t inline_zoom_toggle(app_ctx_t* ctx, uint16_t x, uint16_t y) {
+    if (s_zoom_active) {
+        s_zoom_active = false;
+        s_image_zoom = READER_IMAGE_ZOOM_MIN;
+        s_image_zoom_bw = false;
+        s_image_zoom_start_distance = 0;
+        s_image_zoom_page = SIZE_MAX;
+        s_image_pan_active = false;
+        continuous_du_reset();
+        render(ctx, ctx->fb);
+        guard_draw_result(ctx->hl, update_display_area_full_with(
+            ctx->hl, &E0470_FULL_WAVEFORM, MODE_GC16,
+            (EpdRect){0, 0, UI_LOCK_WIDTH, UI_LOCK_HEIGHT}));
+        return APP_REDRAW_DONE;
+    }
+    int slot = -1;
+    if (!reader_inline_image_at(x, y, &slot)) return APP_REDRAW_NONE;
+    s_zoom_active = true;
+    s_zoom_slot = slot;
+    return zoom_jump(ctx, 2000, x, y);
+}
+
 static app_redraw_t action_at(app_ctx_t* ctx, uint16_t x, uint16_t y) {
     if (s_view == BULK) return bulk_action(ctx, x, y);
     if (s_view == IMPORT) {
@@ -5735,10 +6123,38 @@ static app_redraw_t action_at(app_ctx_t* ctx, uint16_t x, uint16_t y) {
         EpdRect tap_area = body_rect();
         if (reader_image_slots(s_page)) tap_area = ui_rect_union(tap_area, book_layout_image_rect());
         if (!ui_rect_hit(tap_area, x, y)) return APP_REDRAW_NONE;
-        int target = book_reader_tap_feed(&s_reader_tap, tap_area, x, y,
-                                         app_settings_reader_vertical_turn(),
-                                         app_settings_book_vertical(), ctx->now_ms);
-        if (target == BOOK_READER_TAP_FULLSCREEN) return toggle_reader_fullscreen(ctx);
+        // 整页插图任意位置双击都算双击（用于定点缩放），单击延后到双击窗口后再翻页；
+        // 其它页面仍是原来的中间双击全屏、两侧单击翻页。
+        // On a whole-page illustration a double tap counts anywhere (point-anchored zoom) and a
+        // single tap is deferred; other pages keep centre double tap and side taps turning pages.
+        // 点在插图上时同样延后单击：只有这样才能把双击插图和单击翻页分开。
+        // A tap on an illustration defers the single tap too; that is the only way a double tap
+        // on the image can be told apart from a page turn.
+        int target = (reader_zoom_mode() || reader_page_image_hit(x, y))
+            ? book_reader_tap_feed_any(&s_reader_tap, tap_area, x, y,
+                                       app_settings_reader_vertical_turn(),
+                                       app_settings_book_vertical(), ctx->now_ms)
+            : book_reader_tap_feed(&s_reader_tap, tap_area, x, y,
+                                   app_settings_reader_vertical_turn(),
+                                   app_settings_book_vertical(), ctx->now_ms);
+        if (target == BOOK_READER_TAP_FULLSCREEN) {
+            // 整页插图：双击以点到的那一点为中心放大到 2 倍，再双击回到原始大小；
+            // 正文插图：双击进入缩放模式（该图居中 2 倍），再双击退出回正文；
+            // 其它位置保持原来的全屏切换。
+            // A whole-page illustration zooms to 2x centred on the double-tapped point and a
+            // second double tap returns to 1:1. An inline illustration opens zoom mode on that
+            // image (2x, centred) and closes it again. Blank text keeps the full-screen toggle.
+            if (s_zoom_active) return inline_zoom_toggle(ctx, x, y);
+            if (reader_single_image_page()) {
+                const bool zoomed = s_image_zoom_page == s_page && s_image_zoom > READER_IMAGE_ZOOM_MIN;
+                return zoom_jump(ctx, zoomed ? READER_IMAGE_ZOOM_MIN : 2000, x, y);
+            }
+            if (s_view == READING) {
+                app_redraw_t opened = inline_zoom_toggle(ctx, x, y);
+                if (opened != APP_REDRAW_NONE) return opened;
+            }
+            return toggle_reader_fullscreen(ctx);
+        }
         if (target) return turn_page(ctx, target);
         return APP_REDRAW_NONE;
     }
@@ -5870,6 +6286,14 @@ static void on_enter(app_ctx_t* ctx) {
 }
 static void book_on_exit(app_ctx_t* ctx) {
     reader_indent_hold_cancel();
+    // 离开阅读页时丢掉未扫完的连续 DU 相位并还原缩放状态。
+    // Leaving the reader drops unfinished continuous-DU phases and the zoom state.
+    if (s_image_zoom_bw) continuous_du_reset();
+    s_zoom_active = false;
+    s_image_zoom = READER_IMAGE_ZOOM_MIN;
+    s_image_zoom_bw = false;
+    s_image_pan_active = false;
+    s_image_zoom_page = SIZE_MAX;
     s_shelf_key_mode=s_shelf_key_paint_pending=false;s_shelf_key_delta=s_shelf_key_pressed=0;
     book_cover_jobs_cancel(s_cover_generation);s_cover_generation=0;
     shelf_category_remember(ctx);
@@ -6062,7 +6486,213 @@ static int reader_swipe_direction(ui_gesture_type_t type, bool vertical) {
     return direction;
 }
 
+// 交互中的一帧：只生成 1bit 点阵，把它按字节铺进 4bpp 帧缓冲，再用跟随 DU 波形一次刷出。
+// 不重采样双线性、不画文字，灰度渲染整个挪到松手之后；跟随波形把整幅黑白一次推完，
+// 所以动起来看得到画面，而不是只有停手后才出图。
+// One interactive frame: build a 1-bit pattern, blit it byte-wise into the 4bpp framebuffer and
+// present it with one follow-DU waveform. No bilinear resample and no text drawing; the grayscale
+// render waits for the release. A single waveform push shows the whole frame, so motion is
+// visible instead of only the final still.
+static void zoom_blit_bits(uint8_t *fb, const uint8_t *bits, EpdRect phys) {
+    const int width_bytes = (phys.width + 7) / 8;
+    const int stride = epd_width() / 2;
+    for (int y = 0; y < phys.height; ++y) {
+        const uint8_t *src = bits + (size_t)y * (size_t)width_bytes;
+        uint8_t *dst = fb + (size_t)(phys.y + y) * (size_t)stride + (size_t)phys.x / 2;
+        for (int b = 0; b < width_bytes; ++b) {
+            const uint8_t v = src[b];
+            // 每字节 8 个点 → 4 个 4bpp 像素字节；点=1 是黑(0x0)，否者白(0xF)。
+            // Eight dots per byte become four 4bpp pixel bytes; dot=1 is black (0x0), else white (0xF).
+            uint8_t p0 = (v & 0x80u) ? 0x00 : 0x0F;
+            uint8_t p1 = (v & 0x40u) ? 0x00 : 0x0F;
+            uint8_t p2 = (v & 0x20u) ? 0x00 : 0x0F;
+            uint8_t p3 = (v & 0x10u) ? 0x00 : 0x0F;
+            uint8_t p4 = (v & 0x08u) ? 0x00 : 0x0F;
+            uint8_t p5 = (v & 0x04u) ? 0x00 : 0x0F;
+            uint8_t p6 = (v & 0x02u) ? 0x00 : 0x0F;
+            uint8_t p7 = (v & 0x01u) ? 0x00 : 0x0F;
+            dst[b * 4 + 0] = (uint8_t)((p0 << 4) | p1);
+            dst[b * 4 + 1] = (uint8_t)((p2 << 4) | p3);
+            dst[b * 4 + 2] = (uint8_t)((p4 << 4) | p5);
+            dst[b * 4 + 3] = (uint8_t)((p6 << 4) | p7);
+        }
+    }
+}
+static app_redraw_t zoom_frame(app_ctx_t* ctx) {
+    s_image_zoom_bw = true;
+    s_image_zoom_draw_ms = ctx->now_ms;
+    EpdRect band = book_layout_image_rect();
+    EpdRect phys = continuous_du_rect_from_logical(band);
+    int base_w = 0, base_h = 0;
+    reader_image_base_size(&base_w, &base_h);
+    int w = (int)((int64_t)base_w * s_image_zoom / READER_IMAGE_ZOOM_MIN);
+    int h = (int)((int64_t)base_h * s_image_zoom / READER_IMAGE_ZOOM_MIN);
+    int left = s_image_zoom_cx - w / 2, top = s_image_zoom_cy - h / 2;
+    if (!zoom_bits_ready(phys)) {
+        // 内存不够时退回 4bpp 重绘的老路，绝不卡住手势。
+        // Without memory for the pattern, fall back to the older 4bpp repaint.
+        ui_fill_rect_fast(band, 0xFF, ctx->fb);
+        draw_zoomed_image(ctx->fb, band, s_image_zoom, s_image_zoom_cx, s_image_zoom_cy, true);
+        guard_draw_result(ctx->hl, update_display_area_diff_with(
+            ctx->hl, &E0470_FOLLOW_WAVEFORM, MODE_DU, reader_area()));
+        return APP_REDRAW_DONE;
+    }
+    int64_t t_build = esp_timer_get_time();
+    zoom_bits_build(s_zoom_bits, phys, band, reader_zoom_image()->width, reader_zoom_image()->height,
+                    w, h, left, top);
+    int64_t t_build_end = esp_timer_get_time();
+    zoom_blit_bits(ctx->fb, s_zoom_bits, phys);
+    rails_keepalive();
+    epd_poweron();
+    // 跟随 DU：一次波形把整幅黑白推完（8 帧短波形），画面完整可见。
+    // Follow DU: one waveform pushes the whole black/white frame (eight short frames), so the
+    // picture is fully visible.
+    guard_draw_result(ctx->hl, update_display_area_diff_with(
+        ctx->hl, &E0470_FOLLOW_WAVEFORM, MODE_DU, band));
+    int64_t t_done = esp_timer_get_time();
+    ESP_LOGI(TAG, "zoom %d build=%.1f blit+du=%.1f ms",
+             s_image_zoom, (t_build_end - t_build) / 1000.0, (t_done - t_build_end) / 1000.0);
+    return APP_REDRAW_DONE;
+}
+
+// 松手定稿：把黑白交互帧换成灰阶整页图；缩回原始大小时也走这里，避免半灰残影。
+// Settle after the fingers leave: replace the black/white frames with the grayscale page. Zooming
+// all the way back lands here too, which is what clears the half-tone ghosting.
+static app_redraw_t zoom_settle(app_ctx_t* ctx) {
+    s_image_zoom_start_distance = 0;
+    s_image_pan_active = false;
+    if (!s_image_zoom_bw && s_image_zoom <= READER_IMAGE_ZOOM_MIN) return APP_REDRAW_NONE;
+    s_image_zoom_bw = false;
+    continuous_du_reset();
+    render(ctx, ctx->fb);
+    // 松手后整屏全刷：黑白帧留下的光学状态要整个驱动一遍，差分只剩插图区域会留下残影。
+    // Full-screen settle after release: the black/white frames leave optical state that a
+    // picture-only difference cannot clear, so drive every pixel of the panel.
+    guard_draw_result(ctx->hl, update_display_area_full_with(
+        ctx->hl, &E0470_FULL_WAVEFORM, MODE_GC16,
+        (EpdRect){0, 0, UI_LOCK_WIDTH, UI_LOCK_HEIGHT}));
+    return APP_REDRAW_DONE;
+}
+
+static bool wants_pinch(app_ctx_t* ctx) {
+    (void)ctx;
+    return reader_zoom_mode();
+}
+
+// 双指缩放与平移：两指中点是缩放锚点，中点移动连同单指拖动都直接平移图片。
+// Two-finger zoom and pan: the contact midpoint anchors the scale, and moving that midpoint --
+// or dragging with one finger -- pans the image.
+static app_redraw_t on_pinch(app_ctx_t* ctx, const app_pinch_t* pinch) {
+    if (!pinch || !reader_zoom_mode()) return APP_REDRAW_NONE;
+    EpdRect band = book_layout_image_rect();
+    if (!pinch->active) return zoom_settle(ctx);
+    int dx = (int)pinch->bx - (int)pinch->ax, dy = (int)pinch->by - (int)pinch->ay;
+    uint32_t distance = reader_sqrt((uint32_t)(dx * dx + dy * dy));
+    int mx = ((int)pinch->ax + (int)pinch->bx) / 2;
+    int my = ((int)pinch->ay + (int)pinch->by) / 2;
+    if (s_image_zoom_page != s_page) {
+        s_image_zoom_page = s_page;
+        s_image_zoom = READER_IMAGE_ZOOM_MIN;
+        s_image_zoom_cx = band.x + band.width / 2;
+        s_image_zoom_cy = band.y + band.height / 2;
+        s_image_zoom_start_distance = 0;
+    }
+    // 起点太近时比值不可靠，等两指张开一点再记基准；锚点存成 1:1 基准像素下的偏移。
+    // A too-near start makes the ratio unreliable, so wait for the fingers to spread; the
+    // anchor is stored as an offset in 1:1 base pixels.
+    if (!s_image_zoom_start_distance) {
+        if (distance < 24) return APP_REDRAW_NONE;
+        s_image_zoom_start_distance = distance;
+        s_image_zoom_start_scale = s_image_zoom;
+        s_image_zoom_start_cx = s_image_zoom_cx;
+        s_image_zoom_start_cy = s_image_zoom_cy;
+        s_image_zoom_anchor_dx = (mx - s_image_zoom_cx) * READER_IMAGE_ZOOM_MIN / s_image_zoom;
+        s_image_zoom_anchor_dy = (my - s_image_zoom_cy) * READER_IMAGE_ZOOM_MIN / s_image_zoom;
+        return APP_REDRAW_NONE;
+    }
+    int scale = (int)((int64_t)s_image_zoom_start_scale * distance / s_image_zoom_start_distance);
+    if (scale > READER_IMAGE_ZOOM_MAX) scale = READER_IMAGE_ZOOM_MAX;
+    // 缩回原始大小就立刻出一次灰阶：黑白帧留在屏上会变成一片残影。
+    // Landing back at 1:1 settles grayscale right away; black/white frames left on the panel
+    // would read as ghosting.
+    if (scale <= READER_IMAGE_ZOOM_MIN) {
+        s_image_zoom = READER_IMAGE_ZOOM_MIN;
+        s_image_zoom_cx = band.x + band.width / 2;
+        s_image_zoom_cy = band.y + band.height / 2;
+        return zoom_settle(ctx);
+    }
+    int cx = mx - (int)((int64_t)s_image_zoom_anchor_dx * scale / READER_IMAGE_ZOOM_MIN);
+    int cy = my - (int)((int64_t)s_image_zoom_anchor_dy * scale / READER_IMAGE_ZOOM_MIN);
+    int base_w = 0, base_h = 0;
+    reader_image_base_size(&base_w, &base_h);
+    int w = (int)((int64_t)base_w * scale / READER_IMAGE_ZOOM_MIN);
+    int h = (int)((int64_t)base_h * scale / READER_IMAGE_ZOOM_MIN);
+    reader_image_clamp_center(&cx, &cy, w, h, band);
+    int moved = cx - s_image_zoom_cx, moved_y = cy - s_image_zoom_cy;
+    if (moved < 0) moved = -moved;
+    if (moved_y < 0) moved_y = -moved_y;
+    int step = scale > s_image_zoom ? scale - s_image_zoom : s_image_zoom - scale;
+    // 状态先落地，再决定这一帧要不要推屏：节流只应该省掉刷新，不能吞掉手势。
+    // Commit the state first and only then decide whether to present this frame: throttling may
+    // skip a refresh, never the gesture itself.
+    s_image_zoom = scale;
+    s_image_zoom_cx = cx;
+    s_image_zoom_cy = cy;
+    // 单帧要重采样整块插图，按变化量与时间节流；连续 DU 每扫一个相位约 6 ms，阈值放低也稳。
+    // A frame resamples the whole illustration, so throttle by change and time; one continuous-DU
+    // phase is about 6 ms, so the thresholds can stay low.
+    if (step < 20 && moved + moved_y < 4) return APP_REDRAW_NONE;
+    if (ctx->now_ms - s_image_zoom_draw_ms < 40) return APP_REDRAW_NONE;
+    return zoom_frame(ctx);
+}
+
+// 缩放后单指拖动平移；拖动结束吃掉这次滑动，不翻页也不切工具栏。
+// One-finger pan while zoomed; the ending swipe is swallowed so it neither turns the page nor
+// toggles the toolbar.
+static app_redraw_t image_zoom_gesture(app_ctx_t* ctx, const ui_gesture_event_t* ev, bool* handled) {
+    *handled = false;
+    if (!reader_zoom_mode() || s_image_zoom_page != s_page ||
+        s_image_zoom <= READER_IMAGE_ZOOM_MIN) {
+        s_image_pan_active = false;
+        return APP_REDRAW_NONE;
+    }
+    if (ev->type == UI_GESTURE_PRESS) {
+        s_image_pan_active = false;
+        s_image_pan_x = ev->x; s_image_pan_y = ev->y;
+        return APP_REDRAW_NONE;
+    }
+    if (ev->type == UI_GESTURE_MOVE) {
+        int dx = (int)ev->x - (int)s_image_pan_x, dy = (int)ev->y - (int)s_image_pan_y;
+        int ax = dx < 0 ? -dx : dx, ay = dy < 0 ? -dy : dy;
+        if (!s_image_pan_active && ax + ay < 8) return APP_REDRAW_NONE;
+        s_image_pan_active = true;
+        s_image_pan_x = ev->x; s_image_pan_y = ev->y;
+        EpdRect band = book_layout_image_rect();
+        int base_w = 0, base_h = 0;
+        reader_image_base_size(&base_w, &base_h);
+        int cx = s_image_zoom_cx + dx, cy = s_image_zoom_cy + dy;
+        reader_image_clamp_center(&cx, &cy,
+            (int)((int64_t)base_w * s_image_zoom / READER_IMAGE_ZOOM_MIN),
+            (int)((int64_t)base_h * s_image_zoom / READER_IMAGE_ZOOM_MIN), band);
+        *handled = true;
+        s_image_zoom_cx = cx; s_image_zoom_cy = cy;
+        if (ctx->now_ms - s_image_zoom_draw_ms < 60) return APP_REDRAW_NONE;
+        return zoom_frame(ctx);
+    }
+    if (s_image_pan_active) {
+        s_image_pan_active = false;
+        *handled = true;
+        return zoom_settle(ctx);
+    }
+    return APP_REDRAW_NONE;
+}
+
 static app_redraw_t gesture_event(app_ctx_t* ctx, const ui_gesture_event_t* ev) {
+    // 缩放后的单指拖动先于翻页、工具栏与面板解释手势。
+    // Panning a zoomed illustration is interpreted before page turns, toolbar and panels.
+    bool zoom_handled = false;
+    app_redraw_t zoom_redraw = image_zoom_gesture(ctx, ev, &zoom_handled);
+    if (zoom_handled) return zoom_redraw;
     bool indent_handled=false;
     app_redraw_t indent_redraw=reader_indent_gesture(ctx,ev,&indent_handled);
     if(indent_handled)return indent_redraw;
@@ -6076,7 +6706,9 @@ static app_redraw_t gesture_event(app_ctx_t* ctx, const ui_gesture_event_t* ev) 
     if (ev->type == UI_GESTURE_CANCEL || ev->type == UI_GESTURE_LONG_PRESS ||
         ev->type == UI_GESTURE_SWIPE_L || ev->type == UI_GESTURE_SWIPE_R ||
         ev->type == UI_GESTURE_SWIPE_U || ev->type == UI_GESTURE_SWIPE_D ||
-        (ev->type == UI_GESTURE_PRESS && !book_reader_center(body_rect(), ev->x0, ev->y0)))
+        (ev->type == UI_GESTURE_PRESS && !reader_zoom_mode() &&
+         !reader_page_image_hit(ev->x0, ev->y0) &&
+         !book_reader_center(body_rect(), ev->x0, ev->y0)))
         s_reader_tap.pending = false;
     if (reader_tools_swipe(ctx, ev)) return APP_REDRAW_PAGE;
     bool input_feedback = false;
@@ -6536,6 +7168,7 @@ const app_desc_t app_book = {
     .on_media_lost = book_on_media_lost, .on_media_ready = book_on_media_ready,
     .on_before_lock = before_lock, .on_main_key = shelf_main_key,
     .on_gesture = gesture_event, .on_key = on_key, .on_key_long = on_key_long,
+    .wants_pinch = wants_pinch, .on_pinch = on_pinch,
     .on_power_short = on_power_short,
     .on_tick = on_tick, .area_hint = area_hint,
 };
