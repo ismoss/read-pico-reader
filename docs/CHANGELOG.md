@@ -7,6 +7,8 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 - 联网OTA优先使用GitHub Pages清单与固件下载，官网清单保留备用；保留断点续传、失败重试、完整校验及空闲分区写入保护。
   Prefer GitHub Pages OTA metadata/images, retaining website metadata fallback, Range resumes, retries, full verification and inactive-slot protection.
+- 修复「单击开机」偶发需要再按一次：按住稍久被 PMU 记成长按、或按键事件晚于开机握手时，现在都算作那一次按键；双击开机仍停在锁屏等第二次。
+  Stop one-press boot from occasionally asking for a second press: a slightly long hold and a key event that lands after the boot handshake both count as that press, while two-press boot still waits at the lock face.
 
 
 ## 0.3.3-rc99 / 2026-10-22
