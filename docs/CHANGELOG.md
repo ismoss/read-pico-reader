@@ -7,6 +7,8 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 - 联网OTA优先使用GitHub Pages清单与固件下载，官网清单保留备用；保留断点续传、失败重试、完整校验及空闲分区写入保护。
   Prefer GitHub Pages OTA metadata/images, retaining website metadata fallback, Range resumes, retries, full verification and inactive-slot protection.
+- 修复长按删除书籍对 books 子目录及 TF 卡其他位置的书籍失效：删除改按已挂载根受理，仍拒绝目录穿越、目录/链接替换与非书籍扩展名。
+  Delete books kept in books subfolders or elsewhere on the card: deletion now accepts any book file under a mounted root while still refusing traversal, directories, links and non-book extensions.
 
 
 ## 0.3.3-rc99 / 2026-10-22
