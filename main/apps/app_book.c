@@ -1141,7 +1141,9 @@ static void reader_footer_strip_number(char *dst, size_t cap, const char *source
         }
         name = after;
     }
-    if (!*name || !strcmp(name, "本章") || !strcmp(name, "章节")) name = "未命名章节";
+    // 无名页不给占位名：底栏只留页码与全书进度。
+    // Unnamed pages get no placeholder label; the footer keeps only page and book progress.
+    if (!*name || !strcmp(name, "本章") || !strcmp(name, "章节")) name = "";
     copy_text(dst, cap, name);
 }
 static void reader_footer_chapter_name(char *dst, size_t cap) {
@@ -2633,8 +2635,7 @@ static void draw_reader_bookmarks(uint8_t* fb) {
         ui_fill_round_rect(fb, item, 14, selected ? 0xc0 : current ? 0xc8 : 0xe8);
         ui_draw_control_frame(fb, item, 14, current ? 0x50 : 0x98);
         char chapter[96];
-        if (book_chapter_title(mark->chapter, chapter, sizeof(chapter)) != ESP_OK)
-            snprintf(chapter, sizeof(chapter), "第 %u 节", (unsigned)mark->chapter + 1);
+        if (book_chapter_title(mark->chapter, chapter, sizeof(chapter)) != ESP_OK) chapter[0] = 0;
         char where[52];
         if (mark->chapter == s_chapter)
             snprintf(where, sizeof(where), "第 %u 页", (unsigned)book_layout_page_for_offset(mark->byte_off) + 1);
@@ -3623,10 +3624,9 @@ static bool load_chapter_at(app_ctx_t* ctx, size_t chapter, size_t offset,
     size_t lead_skip = 0;
     unsigned lead_height = 0;
     if (book_kind() == BOOK_KIND_EPUB && loaded.len) {
-        // 已识别的正文编号题头优先；没有时沿用书内导航或备用标题。
-        // Prefer a recognized numbered body heading, then authored navigation or a fallback title.
-        if (book_chapter_title(chapter, toc_title, sizeof(toc_title)) != ESP_OK)
-            snprintf(toc_title, sizeof(toc_title), "第 %u 节", (unsigned)chapter + 1);
+        // 已识别的正文编号题头优先；没有就不画题头，不用「第 N 节」占位。
+        // Prefer a recognized numbered body heading; without one no heading is drawn at all.
+        if (book_chapter_title(chapter, toc_title, sizeof(toc_title)) != ESP_OK) toc_title[0] = 0;
         copy_text(heading, sizeof(heading), toc_title);
         char *chapter_mark = strstr(heading, "章");
         if (chapter_mark && chapter_mark - heading < 24) {
@@ -3733,8 +3733,7 @@ static bool load_chapter_at(app_ctx_t* ctx, size_t chapter, size_t offset,
              book_layout_page_for_offset(anchor || source_offset != SIZE_MAX ? anchor_offset : offset);
     s_jump_offset = anchor || source_offset != SIZE_MAX ? anchor_offset : SIZE_MAX;
     s_jump_page = s_page;
-    if (book_chapter_title(chapter, s_title, sizeof(s_title)) != ESP_OK)
-        snprintf(s_title, sizeof(s_title), "第 %u 节", (unsigned)chapter + 1);
+    if (book_chapter_title(chapter, s_title, sizeof(s_title)) != ESP_OK) s_title[0] = 0;
     copy_text(s_font_path, sizeof(s_font_path), ttf_font_path());
     s_message[0] = 0;
     unlock_draw();
