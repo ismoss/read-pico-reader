@@ -109,7 +109,7 @@ int main(void){
   assert(feed(300,692,true,false,110)==APP_REDRAW_AREA&&s_main_scroll==204);
   assert(pushes==before+1&&paints==pushes&&paint_mode==mode&&pushed_mode==MODE_GL16);
   assert(cancels==before_cancel+1);
-  # 玻璃 dock：主页滚动推屏延到整屏，dock 之下的行随一次差分带走。/ Glass dock: main-page scroll pushes the full panel so under-dock rows ride one diff.
+  // 玻璃 dock：主页滚动推屏延到整屏，dock 之下的行随一次差分带走。/ Glass dock: main-page scroll pushes the full panel so under-dock rows ride one diff.
   assert(pushed.y==160&&pushed.y+pushed.height==UI_LOCK_HEIGHT);
   for(int i=1;i<=30;++i)assert(feed(300,692-i*10,true,false,110+i*10)==APP_REDRAW_NONE&&s_main_scroll==204);
   assert(feed(300,392,false,false,430)==APP_REDRAW_NONE&&s_main_scroll==204&&pushes==before+1&&row_taps==taps);
