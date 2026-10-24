@@ -12,6 +12,11 @@ int main(void) {
  assert(pico_version_compare("0.3.3-rc79","0.3.3-rc9")>0);
  assert(pico_version_compare("0.3.3","0.3.3-rc79")>0);
  assert(pico_version_compare("0.4.0-rc1","0.3.3")>0);
+ // 二改尾缀：代际优先于 rc 数值，mod 之间先比基数再比序号。/ Fork suffix: generation outranks rc; mods compare base then serial.
+ assert(pico_version_compare("0.3.3-rc100-mod1","0.3.3-rc202")>0);
+ assert(pico_version_compare("0.3.3-rc100-mod2","0.3.3-rc100-mod1")>0);
+ assert(pico_version_compare("0.3.3-rc100-mod1","0.3.3-rc100")>0);
+ assert(pico_version_compare("0.3.3-rc100","0.3.3-rc100-mod1")<0);
  assert(pico_release_url_valid("https://kiikoread.com/Pico-update-0.3.3-rc90.bin"));
  assert(!pico_release_url_valid("https://kiikoread.com.evil/a.bin"));
  assert(!pico_release_url_valid("https://kiikoread.com@evil/a.bin"));

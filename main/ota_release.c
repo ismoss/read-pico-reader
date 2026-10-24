@@ -10,10 +10,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-// 只接收正式版本号，拒绝截断、溢出和未知后缀。/ Accept bounded release versions without truncation or unknown suffixes.
-static bool version_parts(const char *s, unsigned parts[4]) {
+// 只接收正式版本号，拒绝截断、溢出和未知后缀；二改可带 -modN 尾缀。/ Accept bounded release versions without truncation or unknown suffixes; mods may add -modN.
+static bool version_parts(const char *s, unsigned parts[5]) {
     if (!s || !*s || strlen(s) > 32) return false;
-    memset(parts, 0, 4 * sizeof(*parts));
+    memset(parts, 0, 5 * sizeof(*parts));
     for (unsigned i = 0; i < 3; ++i) {
         if (!isdigit((unsigned char)*s)) return false;
         char *end; unsigned long n = strtoul(s, &end, 10);
@@ -30,9 +30,8 @@ static bool version_parts(const char *s, unsigned parts[4]) {
     char *end; unsigned long n = strtoul(s, &end, 10);
     if (n > 65535) return false;
     parts[3] = (unsigned)n;
-    // 二改尾缀 -modN：非零代表二改代际。不把 *end 提前判死，留给 mod 段继续解析。
-    // Mod suffix -modN: a nonzero value marks the fork generation. Keep parsing instead of
-    // rejecting at *end so the mod segment can consume the rest.
+    s = end;
+    // 二改尾缀 -modN：非零代表二改代际。/ Mod suffix -modN: a nonzero value marks the fork generation.
     if (!*s) return true;
     if (strncmp(s, "-mod", 4)) return false;
     s += 4;
