@@ -23,6 +23,12 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## 待发布 / Unreleased
 
+- 主页面渲染改为整屏画布：首页底部簇（书夹/时钟/月历/标签）下移，标签与月历伸进玻璃 dock；书架第四层板伸进 dock，列表样式增加玻璃下预览行；与设置/文件页共同构成"内容从玻璃下穿过"的统一模型，后续新页面按此渲染。
+  Main pages now render on a full-panel canvas: the home's bottom cluster (folder/clock, calendar, labels) moves down so labels and the calendar reach under the glass dock, the shelf grows a fourth board into the dock with a list-style preview row, joining settings and files in one model where content flows beneath the glass; future pages follow the same rule.
+- 密码页改纯白底，不再与锁屏画面互相透出；历史保存的"双击解锁"一次性迁移为单击（开关保留）。
+  The PIN page takes a solid white base instead of bleeding into the lock art, and a saved double-press preference migrates once to single press (the switch stays).
+- 修复文件管理根目录预览行与翻页器重叠（预览行移到第 6 行位置）。
+  Fix the files root preview row overlapping the pager (it now sits in slot six).
 - 快刷/水波纹下切换主页面时选中胶囊不再滞留：底栏目标真变化时跳过底栏冻结，黑白/波纹路径之外补一次整条底栏的灰阶差分。
   The active pill no longer lingers under fast/water refresh: a really changed bar skips the navigation freeze and one grayscale diff carries the whole strip beside the BW or ripple path.
 - 文件管理列表延伸到玻璃 dock 之下并显示下一页预览行（不可点，翻页交互不变）。
