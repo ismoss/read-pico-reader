@@ -30,3 +30,7 @@ Before publication verify the actual Pages TLS1.2 chain against released roots, 
 - 项目 `Kiikoread_Metalio_S31`，芯片 ID 32，布局 `metalio-s31-dual-5m-v1`。启动器 0x2000，应用槽 0x10000 / 0x510000，各 5 MiB，otadata 0xd000。不能使用 Pico 的启动地址或分区。
 - 网页更新校验既有分区和已确认启动记录，默认保留设置；只有明确选择重新安装及清除机内设置，才重写基础包。清除设置不擦除 TF 卡或整片 Flash。设备 OTA 只写空闲槽，整包验证后切换启动槽。
 - Metalio 固件源码仍私有；公开站点和 Release 只发布已验证二进制、安装工具和使用说明。每版使用独立 `metalio-s31-v版本` tag；Pico 的 `v版本` tag 不变。
+
+## rc100 交叉签名验证构建
+
+两款 rc100 均启用 `CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_CROSS_SIGNED_VERIFY`。生产构建前执行 `python3 tools/prepare_tls_bundle.py "$IDF_PATH"`，使 IDF 6.1 只对证书包生成的合成根处理缺失日期，真实叶证书和中间证书仍检查有效期；不加入过期/撤销根，不关闭主机名或签名校验。GitHub Pages 保持优先源。

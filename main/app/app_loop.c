@@ -533,16 +533,42 @@ static bool try_load_saved_sd_font(bool allow_probe) {
     return app_font_retry_active();
 }
 
-// 先停文件使用者，再换字体；此处只观察挂载，不卸载也不重新挂载。
-// Stop file consumers before font fallback; observe mounting without unmounting or remounting.
+static int64_t s_media_recovery_after_ms;
+static unsigned s_media_recovery_attempts;
+// 页面已释放句柄后才排队恢复；缺卡等待稳定插入，持续故障按1/3/10/30秒退避。
+// Queue recovery only after page handles close; wait for insertion and back off persistent faults by 1/3/10/30 seconds.
+static void recover_media(app_ctx_t *ctx, const read_pico_sd_info_t *info) {
+    if (s_media_recovery_attempts && !info->present) {
+        s_media_recovery_after_ms = ctx->now_ms; return;
+    }
+    if (!read_pico_sd_needs_recovery() || ctx->now_ms < s_media_recovery_after_ms || pico_online_busy()) return;
+    read_pico_transfer_status_t transfer = {0};
+    read_pico_transfer_get_status(&transfer);
+    if (transfer.state == READ_PICO_TRANSFER_UPLOADING) return;
+    bool covers_ready = book_cover_jobs_quiesce(0);
+    bool avatar_ready = ui_avatar_quiesce(0);
+    if (!covers_ready || !avatar_ready) return;
+    esp_err_t err = read_pico_sd_start_recovery();
+    if (err == ESP_ERR_NOT_FINISHED) return;
+    static const unsigned delays[] = {1000,3000,10000,30000};
+    unsigned index = s_media_recovery_attempts < 3 ? s_media_recovery_attempts : 3;
+    s_media_recovery_after_ms = ctx->now_ms + delays[index];
+    if (s_media_recovery_attempts < 4) ++s_media_recovery_attempts;
+}
+// 先停文件使用者和字体；Pico在后续轮询中等任务释放，再异步重挂。
+// Stop page/font consumers first; Pico waits for worker release on later polls before asynchronous remount.
 static bool poll_media(app_ctx_t* ctx, const app_desc_t* current,
                        bool* mounted, bool* invalidated) {
-    if (usb_storage_active()) { *mounted = false; *invalidated = false; return false; }
+    if (usb_storage_active()) {
+        s_media_recovery_attempts = 0; s_media_recovery_after_ms = 0;
+        *mounted = false; *invalidated = false; return false;
+    }
+    read_pico_sd_poll_health();
     read_pico_sd_info_t info = {0};
     esp_err_t err = read_pico_sd_get_info(&info);
     if (err == ESP_ERR_INVALID_STATE && info.present && !*invalidated) {
-        (void)read_pico_sd_start_probe();
-        return false;
+        esp_err_t probe = read_pico_sd_start_probe();
+        if (probe == ESP_ERR_NOT_FINISHED) return false;
     }
     if (err == ESP_ERR_NOT_FINISHED) return false;
     bool ready = err == ESP_OK && info.mounted;
@@ -550,9 +576,13 @@ static bool poll_media(app_ctx_t* ctx, const app_desc_t* current,
     bool gained = !*mounted && ready;
     *mounted = ready;
     if (ready) *invalidated = false;
+    if (ready) { s_media_recovery_attempts = 0; s_media_recovery_after_ms = 0; }
     if (gained || lost) { ui_avatar_invalidate(); (void)book_cover_jobs_quiesce(0); book_lock_collage_invalidate(); }
     if (gained && current->on_media_ready) current->on_media_ready(ctx);
-    if (!lost) return false;
+    if (!lost) {
+        if (!ready) recover_media(ctx,&info);
+        return false;
+    }
     *invalidated = true;
     if (current->on_media_lost) current->on_media_lost(ctx);
     if (ttf_font_ready() && !ttf_font_is_builtin()) ttf_font_open_builtin();
@@ -613,6 +643,7 @@ bool app_poll_main_navigation(app_ctx_t *ctx) {
 }
 
 void app_loop_run(const app_loop_config_t* config) {
+    s_media_recovery_attempts = 0; s_media_recovery_after_ms = 0;
     s_presented_main = NULL;
     s_nav_contact_down=s_nav_polled=false;
     const app_desc_t* current = config->first_app != NULL
@@ -775,6 +806,7 @@ void app_loop_run(const app_loop_config_t* config) {
         if (pinch_input_owned) { ctx.consumed = true; ctx.pressed = ctx.released = false; quick_input_owned = true; }
 
         if (!pinch_input_owned && !power_input_owned && !menu_open) {
+
             if (err != ESP_OK) {
                 ui_quick_menu_cancel_input(&s_quick);
                 quick_input_owned=s_quick.open;

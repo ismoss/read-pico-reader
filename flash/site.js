@@ -92,6 +92,7 @@
   };
   for (const [name, message] of [["loading", "正在读取所选版本的更新说明…"], ["unavailable", "所选版本暂不可用，请重选版本或刷新页面。"]]) {
     document.addEventListener(`kiikoread:release-${name}`, () => {
+      window.__kiikoreadReleaseEvent = null;
       document.getElementById("release-notes-title").textContent = "更新日志";
       document.getElementById("release-notes-list").replaceChildren(Object.assign(document.createElement("li"), {textContent:message}));
     });

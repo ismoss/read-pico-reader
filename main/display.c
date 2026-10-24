@@ -961,11 +961,38 @@ enum EpdDrawError update_display_main_turn(EpdiyHighlevelState* hl,EpdRect area,
     pico_online_display_end(held);LATENCY_DISPLAY_END();return result;
 }
 
-// 普通文字保持直接灰阶差分，使用保留原擦除的校准表，无单带等待或额外扫描。
-// Ordinary text keeps direct gray differences with calibrated erasure, without a one-band wait or extra scan.
+// 普通文字保持校准灰阶差分；可选速读黑白保留真实旧帧，原厂DU只提交一次。
+// Ordinary text keeps calibrated gray differences; optional Fast BW uses native DU once with the real history.
 enum EpdDrawError update_display_text_turn(EpdiyHighlevelState* hl,EpdRect area,e0470_turn_dir_t dir) {
     (void)dir;
-    return update_display_area_diff_with(hl,display_main_gray_waveform(),MODE_GL16,area);
+    if (app_settings_reader_turn_effect() != 2)
+        return update_display_area_diff_with(hl, display_main_gray_waveform(), MODE_GL16, area);
+    LATENCY_DISPLAY_BEGIN();
+    bool held = pico_online_display_begin();
+    enum EpdDrawError result;
+    if (display_needs_full()) result = update_display_full_unlocked(hl);
+    else if (main_before_update(hl, &result)) { /* 全局恢复优先。/ Global recovery takes priority. */ }
+    else if (!display_reader_fast_text_prepare(hl, area))
+        result = update_display_area_diff_with_unlocked(hl, display_main_gray_waveform(), MODE_GL16, area);
+    else {
+        const EpdWaveform* waveform = display_reader_fast_text_waveform();
+        // 本板DU按原FULL扫描一次提交20相，不用8相跟随表或水波纹逐拍补等。
+        // Submit native DU's 20 phases once with Pico FULL scanning, without FOLLOW8 or ripple tick padding.
+        use_scan_for(waveform, MODE_DU);
+        epd_lcd_set_prefill_lines(127);
+        epd_poweron();
+        epd_hl_waveform(hl, waveform);
+        result = epd_hl_update_area(hl, MODE_DU, 25, area);
+        epd_hl_waveform(hl, &E0470_WAVEFORM);
+        use_scan_for(&E0470_WAVEFORM, MODE_GL16);
+        rails_keepalive();
+        if (result == EPD_DRAW_NO_PHASES_AVAILABLE)
+            result = update_display_area_diff_with_unlocked(hl, display_main_gray_waveform(), MODE_GL16, area);
+        else if (result != EPD_DRAW_SUCCESS) result = main_recover(hl, result);
+    }
+    pico_online_display_end(held);
+    LATENCY_DISPLAY_END();
+    return result;
 }
 
 void guard_draw_result(EpdiyHighlevelState* hl, enum EpdDrawError result) {

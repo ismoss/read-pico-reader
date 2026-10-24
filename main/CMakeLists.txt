@@ -119,25 +119,11 @@ idf_component_register(
     REQUIRES ${main_requires}
     INCLUDE_DIRS "." "app" "apps" "font" "ui" "factory" "book"
     EMBED_FILES
-        "assets/lock_4bpp.bin"
-        "assets/loading_4bpp.bin"
         "assets/builtin.ttf"
         "assets/ui-hanzi.bin"
         "assets/reading.md"
         "assets/display-test.png"
 )
-
-# 应用槽只剩几十字节：书源解析与排版不在推屏时序上，按体积编译换回余量。
-# The app slot is nearly full: book parsing and layout are off the panel timing path, so build
-# them for size and keep the released dual-slot layout untouched.
-set_source_files_properties(
-    book/book_epub.c
-    book/book_layout.c
-    book/html_text.c
-    book/zip_reader.c
-    book/book_txt.c
-    book/gbk.c
-    PROPERTIES COMPILE_OPTIONS "-Os")
 
 # 包住 IDF 的 panic 处理器：崩溃现场在重启前落进 RTC，没有串口时那是唯一的现场。
 # 链接选项挂在 main 上，INTERFACE 会带到最终链接；写在 project() 之后的全局属性则太晚。
@@ -145,6 +131,7 @@ set_source_files_properties(
 # that is the only place it survives. The option hangs off main, whose INTERFACE carries it into
 # the final link; a global property set after project() is too late for the linker to see it.
 target_link_options(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=esp_panic_handler")
+
 # 本地 USB 测时入口，普通构建不包含。/ Local USB timing probe, omitted from ordinary product builds.
 if("$ENV{KIIKO_LOCAL_LATENCY}" STREQUAL "1")
     target_compile_definitions(${COMPONENT_LIB} PRIVATE KIIKO_LOCAL_LATENCY=1)

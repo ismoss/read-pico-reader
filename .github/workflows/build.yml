@@ -54,6 +54,7 @@ jobs:
         shell: bash
         run: |
           . $IDF_PATH/export.sh
+          python3 tools/prepare_tls_bundle.py "$IDF_PATH"
           idf.py -DSDKCONFIG_DEFAULTS=sdkconfig.ci set-target esp32s3
           idf.py -DSDKCONFIG_DEFAULTS=sdkconfig.ci build
 

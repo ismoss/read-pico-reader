@@ -2191,17 +2191,32 @@ esp_err_t book_epub_image_dimensions(book_epub_t *book, size_t chapter, const ch
     if (!resolve_path(zip_entry_name(book->zip, book->chapters[chapter].zip_index), src, path)) return ESP_ERR_INVALID_ARG;
     int entry = zip_find(book->zip, path);
     if (entry < 0) return ESP_ERR_NOT_FOUND;
-    size_t size = zip_entry_size(book->zip, entry);
-    if (!size) return ESP_ERR_INVALID_SIZE;
-    if (size > 65536) size = 65536;
-    uint8_t *header = psram(size);
-    if (!header) return ESP_ERR_NO_MEM;
-    esp_err_t err = zip_extract_prefix(book->zip, entry, header, size);
-    if (err == ESP_OK) {
-        bool png = size >= 8 && !memcmp(header, "\x89PNG\r\n\x1a\n", 8);
-        if (!book_image_dimensions(header, size, png, width, height)) err = ESP_ERR_NOT_SUPPORTED;
+    size_t resource_size = zip_entry_size(book->zip, entry);
+    if (!resource_size) return ESP_ERR_INVALID_SIZE;
+    // PNG的尺寸在前24字节；不要为每幅漫画读64KiB或完整图片。
+    // PNG dimensions fit in the first24 bytes; do not read64KiB or the full comic page for each probe.
+    uint8_t first[32];
+    size_t size = resource_size < sizeof(first) ? resource_size : sizeof(first);
+    esp_err_t err = zip_extract_prefix(book->zip, entry, first, size);
+    if (err != ESP_OK) return err;
+    bool png = size >= 8 && !memcmp(first, "\x89PNG\r\n\x1a\n", 8);
+    if (book_image_dimensions(first, size, png, width, height)) return ESP_OK;
+    if (size >= 2 && first[0] == 0xff && first[1] == 0xd8) {
+        // JPEG按需扩大到4KiB/64KiB；更晚帧头仍走原有有界完整提取。
+        // Grow JPEG probes to4KiB/64KiB only as needed; later frames retain bounded full extraction.
+        const size_t limits[] = {4096, 65536};
+        for (size_t i = 0; i < sizeof(limits) / sizeof(limits[0]) && size < resource_size; ++i) {
+            size = resource_size < limits[i] ? resource_size : limits[i];
+            uint8_t *header = psram(size);
+            if (!header) return ESP_ERR_NO_MEM;
+            err = zip_extract_prefix(book->zip, entry, header, size);
+            bool found = err == ESP_OK && book_image_dimensions(header, size, false, width, height);
+            free(header);
+            if (err != ESP_OK) return err;
+            if (found) return ESP_OK;
+        }
     }
-    free(header);
+    err = ESP_ERR_NOT_SUPPORTED;
     if (err == ESP_ERR_NOT_SUPPORTED) {
         // 头部不足或 SVG 包装时，复用插图读取路径；缓存到块中，避免每页重复读取。
         // For a late frame header or SVG wrapper, reuse image loading; callers cache dimensions in blocks.

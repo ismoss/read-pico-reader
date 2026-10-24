@@ -117,7 +117,7 @@ bool app_settings_set_book_background_path(const char *path);
 /// Full-screen cleanup every 5/10/15/30 turns; 0 disables periodic cleanup only.
 uint8_t app_settings_reader_full_pages(void);
 void app_settings_set_reader_full_pages(uint8_t pages);
-/// 阅读翻页效果：0普通，1水波纹；S31额外提供2速读黑白。/ Reader turn effect:0 ordinary,1 ripple; S31 additionally supports2 fast BW.
+/// 阅读翻页效果：0普通，1水波纹，2速读黑白；旧0/1配置不变。/ Reader effect:0 ordinary,1 ripple,2 fast BW; preserve legacy0/1 settings.
 uint8_t app_settings_reader_turn_effect(void);
 void app_settings_set_reader_turn_effect(uint8_t effect);
 /// 阅读正文里短按电源键翻下一页；默认关闭。/ Short power press turns forward only in reader body; off by default.
