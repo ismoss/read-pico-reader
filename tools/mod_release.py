@@ -19,6 +19,15 @@ ORIGIN = "https://ismoss.github.io/read-pico-reader"
 FEED = ORIGIN + "/update.json"
 VERSION_RE = re.compile(r"^\d+\.\d+\.\d+-rc\d+$")
 
+# 自建源上的公共 DNS 列表（「特殊功能」页在线获取）；设备端保留同样的内置兜底。
+# Public DNS list on the self-hosted origin (fetched by the special-features page); the firmware carries the same built-in fallback.
+DNS_LIST = [
+    {"name": "阿里公共 DNS", "main": "223.5.5.5", "backup": "223.6.6.6"},
+    {"name": "腾讯公共 DNS", "main": "119.29.29.29", "backup": "119.28.28.28"},
+    {"name": "114 公共 DNS", "main": "114.114.114.114", "backup": "114.114.115.115"},
+    {"name": "谷歌公共 DNS", "main": "8.8.8.8", "backup": "8.8.4.4"},
+]
+
 
 def rc_number(version: str) -> int:
     # 设备端版本解析只认 X.Y.Z-rcN；二改发布占用 rc2xx 段，高于官方 rc99 且不与其 rc1xx 冲突。
@@ -51,6 +60,7 @@ def build(dist: Path, out: Path, version: str, notes: str) -> None:
     (out / f"Pico-update-{version}.bin").write_bytes(data)
     (out / "Pico-update.bin").write_bytes(data)
     (out / "update.json").write_text(json.dumps(feed, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    (out / "dns.json").write_text(json.dumps(DNS_LIST, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     (out / ".nojekyll").touch()
     (out / "index.html").write_text(
         "<!doctype html><meta charset=\"utf-8\"><title>kiikoread mod feed</title>"

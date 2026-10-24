@@ -42,6 +42,7 @@
 #include "read_pico_pmu.h"
 #include "read_pico_pmu_protocol.h"
 #include "settings.h"
+#include "mod_dns.h"
 #include "sleep.h"
 #include "ttf_font.h"
 #include "usb_storage.h"
@@ -143,6 +144,8 @@ void app_main(void) {
     const esp_reset_reason_t reset = esp_reset_reason();
     ESP_LOGI(TAG, "startup reset=%d stack=%u", (int)reset, (unsigned)uxTaskGetStackHighWaterMark(NULL));
     app_settings_init();
+    // 应用「特殊功能」里保存的 DNS 选择，赶在任何联网之前。/ Apply the saved special-features DNS pick before any networking.
+    mod_dns_init();
     // 在大缓冲和字体之前读取小型锁屏设置；读取失败不阻塞，之后的检查仍可重试。
     // Read the tiny lock setting before large buffers/fonts; keep failures nonblocking and let subsequent checks retry.
     (void)lock_pin_enabled();

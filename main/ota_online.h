@@ -21,6 +21,8 @@
 // official origin, whose higher versions would push a stock image that wipes the mods.
 #define PICO_OTA_FEED_URL "https://ismoss.github.io/read-pico-reader/update.json"
 #define PICO_OTA_FEED_FALLBACK_URL "https://ismoss.github.io/read-pico-reader/update.json"
+// 自建源上的公共 DNS 列表，供「特殊功能」页在线获取。/ Public DNS list on the self-hosted origin for the special-features page.
+#define PICO_OTA_DNS_URL "https://ismoss.github.io/read-pico-reader/dns.json"
 
 typedef enum { PICO_UPDATE_IDLE, PICO_UPDATE_CHECKING, PICO_UPDATE_AVAILABLE,
                PICO_UPDATE_LATEST, PICO_UPDATE_DOWNLOADING, PICO_UPDATE_READY,

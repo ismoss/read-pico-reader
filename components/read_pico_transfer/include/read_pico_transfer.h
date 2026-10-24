@@ -107,6 +107,9 @@ esp_err_t read_pico_transfer_save_wifi(const char *ssid, const char *password);
 /// 已连接 STA 时复用网络；停服时临时联网。成功返回 UTC 秒，保留原本在线状态。
 /// Reuse a connected STA or connect briefly while stopped; return UTC seconds and preserve the prior online state.
 esp_err_t read_pico_transfer_sync_time(uint32_t *utc_seconds);
+/// 更换 DNS 覆盖服务地址；enable=false 时跟随路由器 DHCP 下发。立即作用于在线接口。
+/// Swap the DNS override pair; enable=false keeps the router's DHCP resolvers. Applies to a live interface at once.
+void read_pico_transfer_set_dns_servers(bool enable, const char *main_ip, const char *backup_ip);
 /// 已连接 STA 时对时，不断开 WiFi；供 HTTPS 页面校验证书。/ Sync time on connected STA without disconnecting WiFi for HTTPS certificate checks.
 esp_err_t read_pico_transfer_sync_time_online(uint32_t *utc_seconds);
 

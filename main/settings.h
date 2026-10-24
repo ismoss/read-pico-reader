@@ -34,6 +34,9 @@ void app_settings_set_staged_shutdown(bool staged);
 /// Power-key unlock/deep-wake presses: defaults to 1; enable double-press unlock on Settings home for 2.
 uint8_t app_settings_wake_presses(void);
 void app_settings_set_wake_presses(uint8_t presses);
+/// 二改「特殊功能」的 DNS 选择序号（0 路由器 / 1 默认公共对 / 2 起列表项）。/ Mod DNS pick (0 router / 1 default pair / 2+ list entries).
+uint8_t app_settings_dns_index(void);
+void app_settings_set_dns_index(uint8_t index);
 /// 首页进入时强制全刷；默认关闭。/ Full refresh when entering Home; off by default.
 bool app_settings_home_full_refresh(void);
 void app_settings_set_home_full_refresh(bool enabled);

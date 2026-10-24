@@ -76,6 +76,7 @@
 #include "display_main_waveform.h"
 #include "e0470_epaper_waveform.h"
 #include "pmu_selftest.h"
+#include "mod_dns.h"
 #include "soc/rtc_cntl_reg.h"
 
 static void fit_value(char *value, int width);
@@ -88,8 +89,9 @@ typedef enum { SETTINGS_MAIN, SETTINGS_WIFI, SETTINGS_TIME,
                SETTINGS_CONFIG, SETTINGS_UPGRADE, SETTINGS_BOOT, SETTINGS_FACTORY_RESET,
                SETTINGS_POWER_SLEEP, SETTINGS_AUTO_LOCK, SETTINGS_PROFILE, SETTINGS_AVATAR,
                SETTINGS_BLUETOOTH, SETTINGS_BLE_SCAN,
-               SETTINGS_LOCK_PIN, SETTINGS_PIN_ENTRY, SETTINGS_TEXT_EDIT } settings_page_t;
+               SETTINGS_LOCK_PIN, SETTINGS_PIN_ENTRY, SETTINGS_TEXT_EDIT, SETTINGS_SPECIAL } settings_page_t;
 static settings_page_t s_page;
+static bool s_dns_fetch_pending;  // 特殊功能页的在线 DNS 列表请求 / online DNS list request on the special page
 static int settings_content_end(void) {
     return UI_NAV_REFRESH_END;
 }
@@ -332,7 +334,7 @@ static int settings_main_row_height(void) {
 #define SETTINGS_ROW_H settings_main_row_height()
 #define SETTINGS_WIRELESS_ROWS 3
 #define SETTINGS_DISPLAY_ROWS 7
-#define SETTINGS_PERSONAL_ROWS 4
+#define SETTINGS_PERSONAL_ROWS 5
 #define SETTINGS_MAINTENANCE_ROWS 5
 #define SETTINGS_WIRELESS_Y (180 + settings_profile_height() + 77)
 #define SETTINGS_DISPLAY_Y (SETTINGS_WIRELESS_Y + SETTINGS_WIRELESS_ROWS * SETTINGS_ROW_H + 78)
@@ -762,6 +764,7 @@ static void setting_icon(uint8_t *fb, int index, int cx, int cy) {
         UI_ICON_LOCK,              // 16 锁屏密码 / lock screen password
         UI_ICON_ROTATE_CW,         // 17 屏幕修复 / panel repair
         UI_ICON_LOCK,              // 18 双击解锁 / double-press unlock
+    UI_ICON_ZAP,               // 19 特殊功能（二改）/ special features (mod)
     };
     if (index < 0 || index >= (int)(sizeof(icons) / sizeof(icons[0]))) return;
     ui_draw_icon(fb, cx, cy, SETTINGS_ICON_PX, icons[index], SETTINGS_ICON_INK);
@@ -1164,6 +1167,35 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
         settings_navigation(fb);
         return;
     }
+    if (s_page == SETTINGS_SPECIAL) {
+        back_header(fb, "特殊功能");
+        section(fb, 248, "DNS 解析 · 二改功能");
+        const int pitch = 84;
+        int count = mod_dns_count();
+        if (count > 8) count = 8;
+        for (int i = 0; i < count; ++i) {
+            EpdRect box = {36, 292 + i * pitch, 612, 74};
+            bool active = mod_dns_saved_index() == i;
+            settings_card(fb, box, 16, active ? 0xd0 : UI_GRAY_WHITE, 0x70);
+            const mod_dns_entry_t *entry = mod_dns_entry(i);
+            char detail[40];
+            if (entry->main_ip[0]) snprintf(detail, sizeof(detail), "%s / %s", entry->main_ip, entry->backup_ip);
+            else snprintf(detail, sizeof(detail), "不修改 · 用路由器下发");
+            ui_text(fb, 64, box.y + 15, 25, entry->name, EPD_DRAW_ALIGN_LEFT, false);
+            ui_text(fb, 64, box.y + 46, 18, detail, EPD_DRAW_ALIGN_LEFT, false);
+            if (active) epd_fill_circle(609, box.y + 37, 8, UI_GRAY_BLACK, fb);
+        }
+        // 在线列表：从自建源获取并覆盖内置扩展项；标题显示当前在线条数。
+        // Online list: fetched from the self-hosted origin over the built-in extras; the title shows the online count.
+        char refresh_value[24];
+        snprintf(refresh_value, sizeof(refresh_value), count > 2 ? "在线 %d 项" : "内置列表");
+        row(fb, 292 + count * pitch + 12, "联网更新 DNS 列表", refresh_value);
+        ui_text(fb, 54, 292 + count * pitch + 100, 20, "选择后立即生效；切换运营商 DNS 遇问题时可回到跟随路由器。",
+                EPD_DRAW_ALIGN_LEFT, false);
+        if (s_notice[0]) ui_text(fb, 54, 292 + count * pitch + 134, 21, s_notice, EPD_DRAW_ALIGN_LEFT, false);
+        settings_navigation(fb);
+        return;
+    }
     if (s_page == SETTINGS_TIME) {
         back_header(fb, "日期与时间");
         time_t now = time(NULL);
@@ -1436,11 +1468,12 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
     setting_group(fb,SETTINGS_DISPLAY_Y-49,"显示",SETTINGS_DISPLAY_Y,
                   display_icons,display_labels,display_values,SETTINGS_DISPLAY_ROWS);
     snprintf(signature,sizeof(signature),"%s",app_settings_status_signature()[0]?app_settings_status_signature():"未设置");
-    const char *personal_labels[]={"书架样式","锁屏样式","锁屏密码","状态栏签名"};
+    const char *personal_labels[]={"书架样式","锁屏样式","锁屏密码","状态栏签名","特殊功能"};
+    char dns_value[32]; snprintf(dns_value,sizeof(dns_value),"%s",mod_dns_entry(mod_dns_saved_index())->name);
     const char *personal_values[]={app_settings_shelf_style()==5?"列表书架":app_settings_shelf_style()==1?"深色书轨":"亚克力书架",
         app_settings_lock_style()==3?"透明书封":app_settings_lock_style()==2?"书架拼贴":app_settings_lock_style()==1?"壁纸":"阅读票根",
-        lock_pin_enabled()?"已开启":"已关闭",signature};
-    const int personal_icons[]={4,5,16,10};
+        lock_pin_enabled()?"已开启":"已关闭",signature,dns_value};
+    const int personal_icons[]={4,5,16,10,19};
     setting_group(fb,SETTINGS_PERSONAL_Y-49,"个性化功能",SETTINGS_PERSONAL_Y,
                   personal_icons,personal_labels,personal_values,SETTINGS_PERSONAL_ROWS);
     const char *maintenance_labels[]={"系统升级","保存与恢复","屏幕修复","BOOT 刷机","恢复出厂设置"};
@@ -1574,6 +1607,15 @@ static app_redraw_t on_tick(app_ctx_t *ctx) {
         }
     }
     if(s_reset_pending && s_page==SETTINGS_FACTORY_RESET)return reset_tick();
+    if (s_dns_fetch_pending && s_page == SETTINGS_SPECIAL) {
+        // 页面已把“正在获取”提示推上屏，这里阻塞完成联网与解析后一次性回报结果。
+        // The hint page is already presented; this blocking pass finishes networking and parsing, then reports once.
+        s_dns_fetch_pending = false;
+        char notice[80];
+        mod_dns_fetch_online(notice, sizeof(notice));
+        snprintf(s_notice, sizeof(s_notice), "%s", notice);
+        return APP_REDRAW_PAGE;
+    }
     if (s_page == SETTINGS_PIN_ENTRY) return pin_setup_tick(ctx);
     if (s_collage_prepare_pending && s_page == SETTINGS_LOCK_STYLE) {
         s_collage_prepare_pending = false;
@@ -2075,6 +2117,23 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         app_settings_set_system_contrast((uint8_t)(100 + index * 10));
         return APP_REDRAW_PAGE;
     }
+    if (s_page == SETTINGS_SPECIAL) {
+        // 卡片带与渲染的 84px 间距一致；刷新行走 on_tick 阻塞联网，先画提示再取列表。
+        // Card bands mirror the 84 px render pitch; the refresh row defers to a blocking on_tick fetch after painting the hint.
+        const int pitch = 84;
+        int count = mod_dns_count();
+        if (count > 8) count = 8;
+        if (y >= 292 && y < 292 + count * pitch) {
+            if (mod_dns_select((y - 292) / pitch)) return APP_REDRAW_PAGE;
+            return APP_REDRAW_NONE;
+        }
+        if (y >= 292 + count * pitch + 8 && y < 292 + count * pitch + 84) {
+            s_dns_fetch_pending = true;
+            snprintf(s_notice, sizeof(s_notice), "正在联网获取 DNS 列表…");
+            return APP_REDRAW_PAGE;
+        }
+        return APP_REDRAW_NONE;
+    }
     if (s_page == SETTINGS_LOCK_STYLE) {
         // 卡片命中带与渲染的 128px 间距一致；关闭档立即生效，壁纸/书封档先进选择器。
         // Hit bands mirror the 128 px render pitch; the off entry applies at once, art entries open pickers.
@@ -2315,7 +2374,8 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         if(row==0) {s_page=SETTINGS_SHELF_STYLE;s_style_scroll=0;}
         else if(row==1)s_page=SETTINGS_LOCK_STYLE;
         else if(row==2){s_page=SETTINGS_LOCK_PIN;s_notice[0]=0;}
-        else profile_editor_open(true);
+        else if(row==3) profile_editor_open(true);
+        else {s_page=SETTINGS_SPECIAL;s_notice[0]=0;}
         return APP_REDRAW_PAGE;
     }
     if(y>=SETTINGS_MAINTENANCE_Y && y<SETTINGS_MAINTENANCE_Y+SETTINGS_MAINTENANCE_ROWS*SETTINGS_ROW_H) {

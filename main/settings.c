@@ -15,6 +15,7 @@
  */
 
 #include "settings.h"
+#include "mod_dns.h"
 #include "kiiko_board_config.h"
 #define READER_TURN_EFFECT_MAX 1
 #include "book/book_font_size.h"
@@ -39,6 +40,7 @@
 #define NVS_KEY_SLEEP "sleep"
 #define NVS_KEY_SHUTDOWN_MODE "shutdown"
 #define NVS_KEY_WAKE_PRESSES "wake_press"
+#define NVS_KEY_DNS_INDEX "dns_idx"
 #define NVS_KEY_HOME_FULL "home_full"
 #define NVS_KEY_HOME_COMPONENT "home_widget"
 #define NVS_KEY_HOME_GOAL "home_goal"
@@ -93,6 +95,7 @@
 static app_sleep_mode_t s_sleep = APP_SLEEP_DEEP;
 static bool s_staged_shutdown;
 static uint8_t s_wake_presses = 1;
+static uint8_t s_dns_index = 1;  // 二改特殊功能：DNS 选择序号 / mod special-features DNS pick
 static bool s_home_full_refresh;
 static app_home_component_t s_home_component = APP_HOME_FOLDER;
 static uint8_t s_home_goal_minutes = 30;
@@ -200,6 +203,8 @@ void app_settings_init(void) {
     raw = 1;
     if (nvs_get_u8(h, NVS_KEY_WAKE_PRESSES, &raw) != ESP_OK || (raw != 1 && raw != 2)) raw = 1;
     s_wake_presses = raw;
+    raw = 1;
+    if (nvs_get_u8(h, NVS_KEY_DNS_INDEX, &raw) == ESP_OK && raw < MOD_DNS_MAX) s_dns_index = raw;
     raw = 0;
     if (nvs_get_u8(h, NVS_KEY_HOME_FULL, &raw) == ESP_OK) s_home_full_refresh = raw == 1;
     raw = 0;
@@ -404,6 +409,15 @@ void app_settings_set_wake_presses(uint8_t presses) {
     if (presses == s_wake_presses) return;
     s_wake_presses = presses;
     nvs_put_u8(NVS_KEY_WAKE_PRESSES, presses);
+}
+// 二改「特殊功能」的 DNS 选择：0 跟随路由器，1 默认公共对，2 起列表序号；越界按 1 处理。
+// Mod special-features DNS choice: 0 router passthrough, 1 default public pair, 2+ list index; out-of-range reads as 1.
+uint8_t app_settings_dns_index(void) { return s_dns_index < MOD_DNS_MAX ? s_dns_index : 1; }
+void app_settings_set_dns_index(uint8_t index) {
+    if (index >= MOD_DNS_MAX) index = 1;
+    if (index == s_dns_index) return;
+    s_dns_index = index;
+    nvs_put_u8(NVS_KEY_DNS_INDEX, index);
 }
 
 app_home_component_t app_settings_home_component(void) { return s_home_component; }

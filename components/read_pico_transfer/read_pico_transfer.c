@@ -953,15 +953,46 @@ static void wifi_event(void *arg, esp_event_base_t base, int32_t id, void *data)
 
 // 公共 DNS 替换 DHCP 下发的主备解析器：路由器 DNS 对 github.io/NTP 的解析不可靠或被污染时，
 // OTA 与对时仍能拿到正确地址。每次拿到 IP 都重设一次，DHCP 续租改回也能自愈。
+// 主应用可通过 set_dns_servers 更换服务地址或整体停用（跟随路由器）。
 // Replace the DHCP-provided resolvers with public DNS so OTA and NTP keep resolving
 // when the router's DNS is unreliable or poisoned; re-applying on every got-IP self-heals renewals.
+// The main app may swap the addresses or disable the override entirely via set_dns_servers.
+static bool s_dns_override = true;
+static ip4_addr_t s_dns_main_ip, s_dns_backup_ip;
 static void apply_public_dns(esp_netif_t *netif) {
+    if (!s_dns_override) return;
+    // 未被上层改过时用默认公共对：223.5.5.5 / 119.29.29.29。
+    // Seed the default public pair 223.5.5.5 / 119.29.29.29 until the app overrides it.
+    static bool seeded = false;
+    if (!seeded) {
+        IP4_ADDR(&s_dns_main_ip, 223, 5, 5, 5);
+        IP4_ADDR(&s_dns_backup_ip, 119, 29, 29, 29);
+        seeded = true;
+    }
     esp_netif_dns_info_t dns = {0};
     dns.ip.type = IPADDR_TYPE_V4;
-    IP4_ADDR(&dns.ip.u_addr.ip4, 223, 5, 5, 5);
+    dns.ip.u_addr.ip4 = s_dns_main_ip;
     (void)esp_netif_set_dns_info(netif, ESP_NETIF_DNS_MAIN, &dns);
-    IP4_ADDR(&dns.ip.u_addr.ip4, 119, 29, 29, 29);
+    dns.ip.u_addr.ip4 = s_dns_backup_ip;
     (void)esp_netif_set_dns_info(netif, ESP_NETIF_DNS_BACKUP, &dns);
+}
+
+void read_pico_transfer_set_dns_servers(bool enable, const char *main_ip, const char *backup_ip) {
+    if (enable) {
+        ip4_addr_t main_addr, backup_addr;
+        if (main_ip && backup_ip && ip4addr_aton(main_ip, &main_addr) && ip4addr_aton(backup_ip, &backup_addr)) {
+            s_dns_main_ip = main_addr;
+            s_dns_backup_ip = backup_addr;
+            s_dns_override = true;
+        } else {
+            // 无效地址视作关闭，保留 DHCP 结果。/ Invalid addresses mean off; keep DHCP results.
+            s_dns_override = false;
+        }
+    } else {
+        s_dns_override = false;
+    }
+    // 网络已在时立即改写当前接口，不必等下次拿 IP。/ Rewrite the live interface now when online.
+    if (s_netif && s_dns_override) apply_public_dns(s_netif);
 }
 
 static void ip_event(void *arg, esp_event_base_t base, int32_t id, void *data) {

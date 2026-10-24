@@ -148,20 +148,24 @@ static void icon(uint8_t *fb, int tab, int cx, int y) {
 void ui_nav_draw(uint8_t *fb, int active) {
     const EpdRect dock = {UI_NAV_DOCK_INSET, UI_NAV_DOCK_TOP,
                           UI_LOCK_WIDTH - 2 * UI_NAV_DOCK_INSET, UI_NAV_DOCK_BOTTOM - UI_NAV_DOCK_TOP};
+    // 胶囊统一加深一档并加深色描边：纯白底上玻璃与旧实心条只差一个灰阶，不描边几乎看不出。
+    // The capsule drops one gray step and gains a dark outline: over pure white the glass is barely
+    // one gray step off the old solid strip and reads as unchanged without a visible rim.
     if (app_settings_main_refresh_mode() == APP_MAIN_REFRESH_NORMAL) {
         // 只画胶囊本体：采样 dock 之下的页面内容，胶囊外（四角与四周留白）保留页面内容自然穿过。
         // Glass paints the capsule only: it samples the page beneath, and content around the pill
         // (box corners and margins) keeps flowing naturally instead of being masked white.
-        if (!ui_glass_panel(fb, dock, UI_NAV_DOCK_RADIUS, 58, 40)) {
-            ui_fill_round_rect(fb, dock, UI_NAV_DOCK_RADIUS, 0xe0);
+        if (!ui_glass_panel(fb, dock, UI_NAV_DOCK_RADIUS, 40, 48)) {
+            ui_fill_round_rect(fb, dock, UI_NAV_DOCK_RADIUS, 0xd0);
         }
     } else {
         // 快刷/水波纹用固定浅灰胶囊：像素稳定不随内容重驱，整条底栏保持白底与横条预留。
         // Fast/water keep a fixed light capsule whose pixels never re-drive with content; the strip stays white with the marker reserve.
         ui_fill_rect_fast((EpdRect){0, UI_NAV_TOP, UI_LOCK_WIDTH, UI_LOCK_HEIGHT - UI_NAV_TOP}, UI_GRAY_WHITE, fb);
         ui_fill_rect_fast((EpdRect){0, UI_NAV_MARKER_TOP, UI_LOCK_WIDTH, UI_NAV_MARKER_BOTTOM - UI_NAV_MARKER_TOP}, UI_GRAY_WHITE, fb);
-        ui_fill_round_rect(fb, dock, UI_NAV_DOCK_RADIUS, 0xe0);
+        ui_fill_round_rect(fb, dock, UI_NAV_DOCK_RADIUS, 0xd0);
     }
+    ui_draw_round_rect(fb, dock, UI_NAV_DOCK_RADIUS, 0x30);
     for (int i = 0; i < 4; ++i) {
         int center = (i * 2 + 1) * UI_LOCK_WIDTH / 8;
         if (i == active) ui_fill_rect_fast((EpdRect){center - 28, UI_NAV_MARKER_TOP, 56, UI_NAV_MARKER_BOTTOM - UI_NAV_MARKER_TOP}, UI_GRAY_BLACK, fb);
