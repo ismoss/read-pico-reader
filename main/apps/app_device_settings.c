@@ -101,7 +101,7 @@ static int settings_viewport_end(void) {
 // 普通刷新模式主页列表延伸到悬浮玻璃 dock 之下透出内容；快刷/水波纹维持原 1096 边界。
 // In the ordinary refresh mode the main list flows beneath the floating glass dock; fast/water keep the old 1096 bound.
 static int settings_list_end(void) {
-    return app_settings_main_refresh_mode() == APP_MAIN_REFRESH_NORMAL ? UI_LOCK_HEIGHT : settings_viewport_end();
+    return settings_viewport_end();
 }
 static void settings_navigation(uint8_t *fb) {
     ui_nav_draw(fb,3);
@@ -932,7 +932,7 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
             // Grace: wakes inside the window skip the PIN; tapping cycles off/5min/1h/8h.
             const unsigned grace = app_settings_pin_grace_code();
             const char *grace_text = grace == 1 ? "5 分钟" : grace == 2 ? "1 小时" :
-                grace == 3 ? "8 小时" : "关闭";
+                grace == 3 ? "8 小时" : grace == 4 ? "24 小时" : "关闭";
             row(fb, 618, "解锁宽限期", grace_text);
         } else row(fb, 406, "开启密码", "设置四位密码  ›");
         if (s_notice[0]) ui_text_vc(fb, 342, 730, 23, s_notice, EPD_DRAW_ALIGN_CENTER, false);
@@ -1902,7 +1902,7 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
     }
     if (s_page == SETTINGS_LOCK_PIN && ev->type == UI_GESTURE_TAP && lock_pin_enabled() &&
         ui_rect_hit((EpdRect){36, 606, 612, 84}, ev->x0, ev->y0)) {
-        app_settings_set_pin_grace_code((app_settings_pin_grace_code() + 1) & 3);
+        app_settings_set_pin_grace_code((app_settings_pin_grace_code() + 1) & 4);
         return APP_REDRAW_PAGE;
     }
 
@@ -2535,10 +2535,7 @@ static bool settings_present(app_ctx_t *ctx, app_redraw_t redraw) {
         s_scroll_present_pending = false;
         render(ctx, ctx->fb);
         int top = s_page == SETTINGS_MAIN ? 160 : s_page == SETTINGS_SHELF_STYLE ? 242 : 190;
-        // 主页推屏延到整屏：玻璃 dock 之下的行随滚动一次差分带走；快刷/水波纹的 dock 目标恒定，扩展区无像素可驱动。
-        // The main page pushes to the full panel so under-dock rows ride one scroll diff; under fast/water the dock target is constant and the extension drives nothing.
-        int bottom = s_page == SETTINGS_MAIN ? UI_LOCK_HEIGHT : settings_content_end();
-        EpdRect area = {0, top, UI_LOCK_WIDTH, bottom - top};
+        EpdRect area = {0, top, UI_LOCK_WIDTH, settings_content_end() - top};
         // 只驱动变化像素，滚动次数不触发黑白清屏；题头与底栏保持稳定。
         // Drive changed pixels only; scroll counts never trigger a wipe, and header/nav stay stable.
         // 滚动已限定列表区域；取消主页替换许可，保留抗锯齿并去掉额外补白，不在松手后追加刷新。

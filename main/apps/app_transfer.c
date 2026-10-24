@@ -361,8 +361,13 @@ static void draw_networks(uint8_t* fb) {
         snprintf(name, sizeof(name), "%s", network->ssid);
         fit_label(name, 28, 520);
         ui_text(fb, 64, rect.y + 16, 28, name, EPD_DRAW_ALIGN_LEFT, false);
+        char known_password[65] = {0};
+        bool known = network->supported && network->requires_password &&
+            read_pico_transfer_known_wifi_password(network->ssid, known_password, sizeof(known_password));
+        memset(known_password, 0, sizeof(known_password));
         snprintf(detail, sizeof(detail), "%s · %s", network->rssi > -60 ? "信号强" : network->rssi > -75 ? "信号良好" : "信号一般",
-                 !network->supported ? "暂不支持" : network->requires_password ? "需要密码" : "开放网络");
+                 !network->supported ? "暂不支持" : known ? "已保存 · 轻点连接" :
+                 network->requires_password ? "需要密码" : "开放网络");
         ui_text(fb, 64, rect.y + 59, 21, detail, EPD_DRAW_ALIGN_LEFT, false);
         ui_text_vc(fb, 615, rect.y + 47, 27, "›", EPD_DRAW_ALIGN_CENTER, false);
     }
@@ -552,6 +557,15 @@ static app_redraw_t provisioning_action(int id) {
                 snprintf(s_network_message, sizeof(s_network_message), "开放网络保存失败，请重试");
                 return APP_REDRAW_PAGE;
             }
+            char known_password[65] = {0};
+            if (read_pico_transfer_known_wifi_password(s_selected.ssid, known_password, sizeof(known_password))) {
+                esp_err_t err = read_pico_transfer_save_wifi(s_selected.ssid, known_password);
+                memset(known_password, 0, sizeof(known_password));
+                if (err == ESP_OK) { queue_network_start(READ_PICO_TRANSFER_MODE_STA); return APP_REDRAW_PAGE; }
+                snprintf(s_network_message, sizeof(s_network_message), "连接信息保存失败，请重试");
+                return APP_REDRAW_PAGE;
+            }
+            memset(known_password, 0, sizeof(known_password));
             clear_password();
             s_network_message[0] = 0;
             ui_keyboard_begin(&s_password_input, true);

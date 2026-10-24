@@ -104,6 +104,9 @@ esp_err_t read_pico_transfer_forget_wifi(void);
 esp_err_t read_pico_transfer_scan_wifi(read_pico_transfer_network_t out[READ_PICO_TRANSFER_SCAN_MAX], size_t *count);
 /// 停服后保存设备输入的凭据，不自动连接；密码校验与网页相同。/ Save device-entered credentials while stopped without connecting; validation matches the webpage.
 esp_err_t read_pico_transfer_save_wifi(const char *ssid, const char *password);
+/// 查询已知网络库里是否存有该 SSID 的密码；有则拷贝返回 true（调用方用毕自行清零）。
+/// Whether the known-network library holds a password for this SSID; copies it out and the caller wipes it.
+bool read_pico_transfer_known_wifi_password(const char *ssid, char *password, size_t cap);
 /// 已连接 STA 时复用网络；停服时临时联网。成功返回 UTC 秒，保留原本在线状态。
 /// Reuse a connected STA or connect briefly while stopped; return UTC seconds and preserve the prior online state.
 esp_err_t read_pico_transfer_sync_time(uint32_t *utc_seconds);

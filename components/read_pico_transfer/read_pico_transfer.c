@@ -636,6 +636,7 @@ esp_err_t read_pico_transfer_save_wifi(const char *ssid, const char *password) {
     if (!claim_config()) { clear_secret(&next, sizeof(next)); return ESP_ERR_INVALID_STATE; }
     esp_err_t err = store_credentials(&next);
     if (err == ESP_OK) {
+        known_upsert(&next);
         publish_credentials(&next);
         ESP_LOGI("transfer", "wifi saved configured=1");
     }
@@ -902,11 +903,22 @@ esp_err_t read_pico_transfer_forget_wifi(void) {
         (status.mode == READ_PICO_TRANSFER_MODE_STA && (s_wifi || s_started || s_http || s_netif)))
         return ESP_ERR_INVALID_STATE;
     if (!claim_config()) return ESP_ERR_INVALID_STATE;
+    transfer_credentials_t saved = {0};
+    bool had = load_credentials(&saved) == ESP_OK && saved.version == 1;
     esp_err_t err = store_credentials(NULL);
+    if (err == ESP_OK && had) {
+        nvs_handle_t handle;
+        if (nvs_open("rp_wifi", NVS_READWRITE, &handle) == ESP_OK) {
+            known_forget(handle, saved.ssid);
+            (void)nvs_commit(handle);
+            nvs_close(handle);
+        }
+    }
     if (err == ESP_OK) {
         publish_credentials(NULL);
         ESP_LOGI("transfer", "wifi saved configured=0");
     }
+    clear_secret(&saved, sizeof(saved));
     release_config(); return err;
 }
 
@@ -1174,6 +1186,7 @@ static esp_err_t wifi_handler(httpd_req_t *req) {
     if (claim_config()) {
         err = store_credentials(&next);
         if (err == ESP_OK) {
+            known_upsert(&next);
             publish_credentials(&next);
             ESP_LOGI("transfer", "wifi saved configured=1");
         }
@@ -1940,6 +1953,62 @@ void read_pico_transfer_stop(void) {
     portEXIT_CRITICAL(&s_lock);
 }
 
+// 二改：已知网络库选优——库里有活动网络之外的已知网络时，连接前扫一次；
+// 活动网络不在场（换到家里/公司）就切到信号最好的已知网络。只有活动一个已知网络时不扫，零额外开销。
+// Mod: best-known pick — when the library holds known networks beyond the active one, scan once
+// before connecting; if the active network is absent (home/office switch), switch to the strongest
+// known one. With no other known networks the scan never runs, costing nothing.
+bool read_pico_transfer_known_wifi_password(const char *ssid, char *password, size_t cap) {
+    if (!ssid || !password || cap < sizeof(((transfer_credentials_t *)0)->password)) return false;
+    transfer_credentials_t net = {0};
+    bool found = known_find(ssid, &net);
+    if (found) memcpy(password, net.password, sizeof(net.password));
+    clear_secret(&net, sizeof(net));
+    return found;
+}
+
+static bool pick_best_known_wifi(wifi_config_t *wifi, transfer_credentials_t *active) {
+    if (!wifi || !active || active->version != 1) return false;
+    if (!known_has_other(active->ssid)) return false;
+    wifi_scan_config_t scan = {0};
+    if (esp_wifi_scan_start(&scan, true) != ESP_OK) return false;
+    uint16_t count = 0;
+    if (esp_wifi_scan_get_ap_num(&count) != ESP_OK || !count) return false;
+    wifi_ap_record_t *records = malloc((size_t)count * sizeof(*records));
+    if (!records) { esp_wifi_clear_ap_list(); return false; }
+    if (esp_wifi_scan_get_ap_records(&count, records) != ESP_OK) { free(records); return false; }
+    bool active_seen = false;
+    transfer_credentials_t best = {0};
+    int best_rssi = -128;
+    for (int i = 0; i < count; ++i) {
+        if (!strcmp((const char *)records[i].ssid, active->ssid)) active_seen = true;
+        transfer_credentials_t net = {0};
+        if (!known_find((const char *)records[i].ssid, &net)) continue;
+        if (records[i].rssi > best_rssi) {
+            best_rssi = records[i].rssi;
+            clear_secret(&best, sizeof(best));
+            best = net;
+            net.version = 0;
+        } else clear_secret(&net, sizeof(net));
+    }
+    free(records);
+    bool change = !active_seen && best.version == 1 && strcmp(best.ssid, active->ssid);
+    if (change) {
+        clear_secret(active, sizeof(*active));
+        *active = best;
+        memset(&wifi->sta, 0, sizeof(wifi->sta));
+        memcpy(wifi->sta.ssid, best.ssid, strlen(best.ssid));
+        memcpy(wifi->sta.password, best.password, strlen(best.password));
+        wifi->sta.threshold.authmode = best.password[0] ? WIFI_AUTH_WPA_PSK : WIFI_AUTH_OPEN;
+        wifi->sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
+        wifi->sta.sort_method = WIFI_CONNECT_AP_BY_SIGNAL;
+        wifi->sta.pmf_cfg.capable = true;
+        wifi->sta.sae_pwe_h2e = WPA3_SAE_PWE_BOTH;
+        ESP_LOGI("transfer", "wifi auto-pick %s rssi=%d", best.ssid, best_rssi);
+    } else clear_secret(&best, sizeof(best));
+    return change;
+}
+
 esp_err_t read_pico_transfer_start(const read_pico_transfer_cfg_t *cfg) {
     if (!cfg || (cfg->network_only && cfg->mode != READ_PICO_TRANSFER_MODE_STA) ||
         (!cfg->network_only && (!cfg->root_dir || !cfg->free_bytes_cb)) ||
@@ -2078,6 +2147,12 @@ esp_err_t read_pico_transfer_start(const read_pico_transfer_cfg_t *cfg) {
         set_error(ESP_OK);
         ESP_LOGI("transfer", "ap ready url=%s", READ_PICO_TRANSFER_URL);
     } else {
+        if (pick_best_known_wifi(&wifi, &saved)) {
+            if (esp_wifi_set_config(WIFI_IF_STA, &wifi) == ESP_OK) {
+                (void)store_credentials(&saved);
+                publish_credentials(&saved);
+            }
+        }
         int64_t now = esp_timer_get_time() / 1000;
         portENTER_CRITICAL(&s_lock); connection_begin(&s_connection, now); portEXIT_CRITICAL(&s_lock);
         read_pico_transfer_service_poll();

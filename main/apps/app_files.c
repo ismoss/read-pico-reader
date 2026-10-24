@@ -630,24 +630,6 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
             ui_text(fb, 640, y + 30, 22, "›", EPD_DRAW_ALIGN_RIGHT, false);
             file_rule(fb, 101, y + 82, 547);
         }
-        // 玻璃下的下一页预览行：普通列表才画，动作条/移动视图保持原布局；不可点。
-        // A next-page preview under the glass for plain listings only; action and move views
-        // keep their layout, and the row is untappable.
-        if (s_folder != 3 && s_view != FILE_VIEW_MOVE) {
-            int preview = s_page * visible_rows() + visible_rows();
-            if (preview < s_count) {
-                int y = 1072;
-                char name[128]; snprintf(name, sizeof(name), "%s", s_files[preview].name);
-                while (*name && ttf_text_width_px(ui_text_effective_px(23), name) > 450) {
-                    size_t n = strlen(name) - 1;
-                    while (n && ((unsigned char)name[n] & 0xc0) == 0x80) --n;
-                    name[n] = 0;
-                }
-                file_rule(fb, 101, y - 6, 547);
-                file_icon(fb, 48, y + 14, s_files[preview].is_dir);
-                ui_text(fb, 101, y + 5, 23, name, EPD_DRAW_ALIGN_LEFT, false);
-            }
-        }
         if (s_folder == 3 || s_view == FILE_VIEW_MOVE) {
             ui_draw_control_frame(fb, file_action_rect(0), 8, UI_GRAY_BLACK);
             ui_draw_control_frame(fb, file_action_rect(1), 8, UI_GRAY_BLACK);
@@ -703,10 +685,7 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
         int rows = s_count - first;
         if (rows > root_rows()) rows = root_rows();
         if (rows < 0) rows = 0;
-        // 卡片延伸进玻璃 dock 区（640 高），第 6 行只作下一页预览，命中带仍止于第 5 行。
-        // The card reaches under the glass dock (640 tall); row six is a next-page preview
-        // only, with hit bands still ending at row five.
-        EpdRect list = {36, 520, 612, 640};
+        EpdRect list = {36, 520, 612, root_rows() * 91};
         ui_fill_round_rect(fb, list, 24, UI_GRAY_WHITE);
         file_card_border(fb, list, 24);
         if (!s_count) ui_text_vc(fb, 342, 565, 22, s_message[0] ? s_message : "根目录为空", EPD_DRAW_ALIGN_CENTER, false);
@@ -727,19 +706,6 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
                 ui_text(fb, 101, y + 55, 19, detail, EPD_DRAW_ALIGN_LEFT, false);
                 ui_text_vc(fb, 624, y + 44, 22, "›", EPD_DRAW_ALIGN_RIGHT, false);
             }
-        }
-        // 玻璃下的下一页预览行：只画不可点，让 dock 折射出真实列表内容。
-        // A next-page preview under the glass: painted but untappable so the dock refracts real list content.
-        int preview = first + root_rows();
-        if (preview < s_count) {
-            // 跳过翻页器所在的一行间隙：预览行在第 6 行位置（520+6*91=1066），不与 1006..1056 的翻页器重叠。
-            // Skip the pager's row gap: the preview sits in slot six (520+6*91=1066), clear of the pager at 1006..1056.
-            int y = 520 + (root_rows() + 1) * 91;
-            char name[128]; copy_utf8(name, sizeof(name), s_files[preview].name); fit_name(name, 23, 430);
-            file_rule(fb, 96, y, 532);
-            file_icon(fb, 52, y + 24, s_files[preview].is_dir);
-            if (s_files[preview].is_dir) ui_text_vc(fb, 101, y + 46, 23, name, EPD_DRAW_ALIGN_LEFT, false);
-            else ui_text(fb, 101, y + 20, 23, name, EPD_DRAW_ALIGN_LEFT, false);
         }
     }
     draw_file_pager(fb);

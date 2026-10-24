@@ -23,6 +23,14 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## 待发布 / Unreleased
 
+- 回退"内容穿到玻璃底栏下"的整屏渲染试验（首页/书架/文件/设置恢复内容止于底栏上方）：墨水屏的分页式内容在底栏下没有持续流动的信息，试验只留下残影与翻页残留。底栏的玻璃观感、描边、阴影与选中胶囊保留。
+  Revert the full-canvas under-dock rendering trial (home/shelf/files/settings content stops above the dock again): paged e-ink content offers nothing continuously flowing beneath the bar, and the trial left ghosting and stale page fragments. The dock's glass tone, rim, shadow and active pill stay.
+- 密码页改为纯白底：锁屏画面不再垫在密码控件下面（此前版本宣称此改动但实际未编入，本次真实生效）。
+  The PIN page now takes a real solid white base so the lock art never sits beneath the controls (an earlier release claimed this change but never carried it; it is genuinely in now).
+- WiFi 多网络记忆：连接成功的网络进入已知库（最多 8 个）；发起连接时若库中有其他已知网络则扫描一次，活动网络不在场时自动切换到信号最好的已知网络；扫描列表对已知网络显示"已保存 · 轻点连接"，免密直连；遗忘网络同时移出库。
+  WiFi multi-network memory: successfully joined networks enter a known library (up to 8); starting a connection scans once when other known networks exist and auto-switches to the strongest one in range if the active network is absent; the scan list marks known networks "已保存 · 轻点连接" for password-free joining, and forgetting a network removes it from the library.
+- 锁屏密码解锁宽限期新增 24 小时档位。
+  The PIN unlock grace window gains a 24-hour step.
 - 主页面渲染改为整屏画布：首页底部簇（书夹/时钟/月历/标签）下移，标签与月历伸进玻璃 dock；书架第四层板伸进 dock，列表样式增加玻璃下预览行；与设置/文件页共同构成"内容从玻璃下穿过"的统一模型，后续新页面按此渲染。
   Main pages now render on a full-panel canvas: the home's bottom cluster (folder/clock, calendar, labels) moves down so labels and the calendar reach under the glass dock, the shelf grows a fourth board into the dock with a list-style preview row, joining settings and files in one model where content flows beneath the glass; future pages follow the same rule.
 - 密码页改纯白底，不再与锁屏画面互相透出；历史保存的"双击解锁"一次性迁移为单击（开关保留）。

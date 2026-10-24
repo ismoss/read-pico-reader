@@ -1073,7 +1073,7 @@ static void draw_list_row(uint8_t *fb, int row, const shelf_entry_t *item) {
         ui_fill_round_rect(fb, fill, 5, 0x40);
     }
     ui_draw_control_frame(fb, bar, 5, 0x50);
-    if (row < 4) ui_draw_separator(fb, card.y + 196, 50, 584, 0x60);
+    if (row < 3) ui_draw_separator(fb, card.y + 196, 50, 584, 0x60);
 }
 static void draw_shelf_furniture(uint8_t* fb) {
     uint8_t style = app_settings_shelf_style();
@@ -1088,18 +1088,6 @@ static void draw_shelf_furniture(uint8_t* fb) {
             EpdRect acrylic = {20, top + 136, 644, 90};
             draw_shelf_guard(fb, acrylic, row);
 
-        }
-    }
-    // 二改：第四层板伸进玻璃 dock 区，让底栏折射出书架的延续（护板截短避免越界）。
-    // Mod: a fourth board reaches into the glass dock so the bar refracts the shelf's
-    // continuation (the acrylic lip is shortened to stay on-panel).
-    if (s_view == SHELF) {
-        int top = 192 + 3 * 282;
-        if (style == 1) {
-            ui_fill_rect_fast((EpdRect){36, 1190, 612, 12}, 0x30, fb);
-            ui_hairline(fb, 1190, 36, 612, 0x58);
-        } else if (style == 2) {
-            draw_shelf_guard(fb, (EpdRect){20, 1174, 644, 40}, -1);
         }
     }
 }
@@ -3668,14 +3656,6 @@ static void render(app_ctx_t* ctx, uint8_t* fb) {
             r.y -= app_settings_shelf_style() == 5 ? SHELF_LIST_BOUNCE_PX : SHELF_BOOK_LIFT_PX;
         draw_shelf_cover(fb, r, row, name, s_shelf[i].favorite);
         if (app_settings_shelf_style() == 5) draw_list_row(fb, row, &s_shelf[i]);
-    }
-    // 二改：列表样式在玻璃 dock 下画下一页首行预览（纯文字+进度条，零解码，不可点）。
-    // Mod: list style previews the next page's first row under the glass dock (text and
-    // progress only, zero decoding, untappable).
-    if (s_view == SHELF && app_settings_shelf_style() == 5) {
-        int preview = ctx->leaf * 4 + 4;
-        if (preview < s_visible_count && !s_shelf[preview].removed)
-            draw_list_row(fb, 4, &s_shelf[preview]);
     }
     draw_shelf_furniture(fb);
     if(app_settings_main_refresh_mode()==APP_MAIN_REFRESH_NORMAL){

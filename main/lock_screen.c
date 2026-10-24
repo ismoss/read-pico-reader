@@ -98,6 +98,10 @@ void lock_screen_authenticate(EpdiyHighlevelState *hl,cst836u_handle_t touch,sc7
     uint8_t *fb=epd_hl_get_framebuffer(hl);
     (void)acc;
     (void)ble_pt_stop(2000);
+    // 二改：密码页用纯白底——锁屏画面不再垫在密码控件下面，杜绝票根与密码互相透出。
+    // Mod: the PIN page takes a solid white base so the lock art never sits beneath the pad
+    // controls and the ticket face cannot bleed through.
+    ui_fill_rect_fast((EpdRect){0,0,UI_LOCK_WIDTH,UI_LOCK_HEIGHT},UI_GRAY_WHITE,fb);
     // Pico由锁屏入口保存确认成功的样式；启动/PIN不得覆盖它。
     // Pico persists validated art at the lock entry; boot/PIN must not overwrite it.
     uint8_t *original=heap_caps_get_free_size(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT)>FRAME_BYTES+1024u*1024u

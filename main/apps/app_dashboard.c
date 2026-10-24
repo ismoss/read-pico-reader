@@ -438,8 +438,8 @@ static void clock_draw_region(uint8_t *fb,EpdRect bounds,const struct tm *date,b
 }
 static const char *component_name(app_home_component_t component) {return component==APP_HOME_FOLDER?"最近阅读书夹":ui_home_clock_name(clock_style(component));}
 static EpdRect time_clock_bounds(void) {return(EpdRect){122,275,460,503};}
-static EpdRect component_clock_bounds(void){return s_view==HOME_COMPONENT?(EpdRect){141,294,420,460}:(EpdRect){24,758,320,350};}
-static EpdRect component_clock_graphics(void){return s_view==HOME_COMPONENT?component_clock_bounds():(EpdRect){24,758,320,326};}
+static EpdRect component_clock_bounds(void){return s_view==HOME_COMPONENT?(EpdRect){141,294,420,460}:(EpdRect){24,640,320,350};}
+static EpdRect component_clock_graphics(void){return s_view==HOME_COMPONENT?component_clock_bounds():(EpdRect){24,640,320,326};}
 static bool visible_motion_clock(void){return s_view==HOME_ROOT&&ui_home_clock_has_motion(clock_style(app_settings_home_component()));}
 static void component_prepare_neighbor(app_ctx_t *ctx) {
     if(s_view!=HOME_COMPONENT||s_component_pending||!s_clock_base_cache||ctx->consumed||
@@ -648,25 +648,25 @@ static void render_root(uint8_t *fb) {
         track.width=358*(b->has_progress?b->progress.pct:0)/100;if(track.width)ui_fill_round_rect(fb,track,3,0x30);
     } else label_on(fb,342,410,23,"打开一本书后，会在这里继续阅读",EPD_DRAW_ALIGN_CENTER,0x60,card_gray);
     HOME_STAGE("card_body");
-    ui_draw_separator(fb,724,36,612,0x50);
+    ui_draw_separator(fb,606,36,612,0x50);
     if(app_settings_home_component()==APP_HOME_FOLDER) {
-        ui_home_folder_draw(fb,s_folder,s_folder_fast,(EpdRect){24,722,320,350});
-        label(fb,184,1103,22,"最近阅读",EPD_DRAW_ALIGN_CENTER,0x50);
+        ui_home_folder_draw(fb,s_folder,s_folder_fast,(EpdRect){24,604,320,350});
+        label(fb,184,985,22,"最近阅读",EPD_DRAW_ALIGN_CENTER,0x50);
     } else {
-        clock_draw_region(fb,(EpdRect){24,758,320,350},&s_date,app_settings_main_fast_refresh(),clock_style(app_settings_home_component()),(EpdRect){24,758,320,326},s_widget_phase);
-        label(fb,184,1103,22,component_name(app_settings_home_component()),EPD_DRAW_ALIGN_CENTER,0x50);
+        clock_draw_region(fb,(EpdRect){24,640,320,350},&s_date,app_settings_main_fast_refresh(),clock_style(app_settings_home_component()),(EpdRect){24,640,320,326},s_widget_phase);
+        label(fb,184,985,22,component_name(app_settings_home_component()),EPD_DRAW_ALIGN_CENTER,0x50);
     }
     HOME_STAGE("component");
     if(s_reading_days_valid) {
         static const char *const wd[]={"星期日","星期一","星期二","星期三","星期四","星期五","星期六"};
         snprintf(value,sizeof(value),"%d月%d日",s_date.tm_mon+1,s_date.tm_mday);
-        label(fb,354,783,30,value,EPD_DRAW_ALIGN_LEFT,0);
-        label(fb,642,783,24,wd[s_date.tm_wday],EPD_DRAW_ALIGN_RIGHT,0x50);
+        label(fb,354,665,30,value,EPD_DRAW_ALIGN_LEFT,0);
+        label(fb,642,665,24,wd[s_date.tm_wday],EPD_DRAW_ALIGN_RIGHT,0x50);
         int start=(s_date.tm_wday+7-(s_date.tm_mday-1)%7)%7;
         int rows=(start+month_length(&s_date)+6)/7;
-        calendar(fb,375,872,42,rows==6?38:48,26,app_settings_home_goal_minutes()*60);
-    } else label(fb,496,872,22,"请先设置日期与时间",EPD_DRAW_ALIGN_CENTER,0x60);
-    label(fb,642,1103,22,"· 已闭环",EPD_DRAW_ALIGN_RIGHT,0x50);
+        calendar(fb,375,754,42,rows==6?38:48,26,app_settings_home_goal_minutes()*60);
+    } else label(fb,496,754,22,"请先设置日期与时间",EPD_DRAW_ALIGN_CENTER,0x60);
+    label(fb,642,985,22,"· 已闭环",EPD_DRAW_ALIGN_RIGHT,0x50);
     HOME_STAGE("calendar");
     ui_nav_draw(fb,0);
     HOME_STAGE("nav");
@@ -813,7 +813,7 @@ static bool present(app_ctx_t *ctx,app_redraw_t redraw) {
         enum EpdDrawError result=update_display_area_diff_with(ctx->hl,&E0470_WAVEFORM,MODE_GL16,(EpdRect){24,18,156,44});
         if(result==EPD_DRAW_SUCCESS&&s_view==HOME_ROOT&&app_settings_home_component()!=APP_HOME_FOLDER) {
             date_now(&s_date);ui_home_clock_style_t style=clock_style(app_settings_home_component());
-            clock_draw_region(ctx->fb,(EpdRect){24,758,320,350},&s_date,app_settings_main_fast_refresh(),style,(EpdRect){24,758,320,326},s_widget_phase);
+            clock_draw_region(ctx->fb,(EpdRect){24,640,320,350},&s_date,app_settings_main_fast_refresh(),style,(EpdRect){24,640,320,326},s_widget_phase);
             result=present_clock_area(ctx,style==UI_HOME_CLOCK_PS1995?(EpdRect){78,684,198,198}:component_clock_graphics());
         }
         guard_draw_result(ctx->hl,result);if(result==EPD_DRAW_SUCCESS)s_clock_minute=minute;return true;
@@ -943,7 +943,7 @@ static app_redraw_t on_tick(app_ctx_t *ctx) {
     if(needs_folder&&!s_folder&&!s_folder_attempted) {
         if(prepare_folder()){
             if(folder_preview){s_component_pending=true;s_area=s_component_dirty=(EpdRect){36,260,612,812};}
-            else s_area=(EpdRect){24,722,320,350};
+            else s_area=(EpdRect){24,604,320,350};
             return APP_REDRAW_AREA;
         }
         s_folder_attempted=true;
@@ -983,7 +983,7 @@ static app_redraw_t on_gesture(app_ctx_t *ctx,const ui_gesture_event_t *ev) {
     if(ev->type==UI_GESTURE_MOVE) {if(s_press_pending&&!hit(continue_card_pressed()?continue_card_hit_rect():s_pressed,ev->x,ev->y)){s_press_pending=false;s_area=control_feedback_area(s_pressed);return APP_REDRAW_AREA;}return APP_REDRAW_NONE;}
     s_press_pending=false;
     s_component_warm_after_ms=ctx->now_ms+600;
-    if(ev->type==UI_GESTURE_LONG_PRESS&&s_view==HOME_ROOT&&hit((EpdRect){24,758,320,322},ev->x0,ev->y0)) {
+    if(ev->type==UI_GESTURE_LONG_PRESS&&s_view==HOME_ROOT&&hit((EpdRect){24,640,320,365},ev->x0,ev->y0)) {
         s_component_browse=app_settings_home_component();s_clock_base_attempted=false;s_view=HOME_COMPONENT;s_save_error=false;return APP_REDRAW_PAGE;
     }
     if(s_view==HOME_COMPONENT&&ev->y0>=250&&ev->y0<970){
@@ -1026,11 +1026,11 @@ static app_redraw_t on_gesture(app_ctx_t *ctx,const ui_gesture_event_t *ev) {
         if(old!=s_goal_draft){s_area=(EpdRect){36,198,612,830};return APP_REDRAW_AREA;}
     }else {
         int tab=ui_nav_hit(x,y);if(tab>=0){ui_nav_request(ctx,tab);return APP_REDRAW_NONE;}
-        if(hit((EpdRect){24,758,320,322},x,y)){
+        if(hit((EpdRect){24,640,320,365},x,y)){
             if(app_settings_home_component()==APP_HOME_FOLDER){ui_nav_request(ctx,1);return APP_REDRAW_NONE;}
             s_time_trail.valid=false;s_view=HOME_TIME;s_time_pending=false;s_time_stamp=-1;refresh_days();return APP_REDRAW_PAGE;
         }
-        if(hit((EpdRect){354,758,294,322},x,y)||hit((EpdRect){510,88,60,60},x,y)) {
+        if(hit((EpdRect){354,640,294,365},x,y)||hit((EpdRect){510,88,60,60},x,y)) {
             refresh_days();s_goal_draft=app_settings_home_goal_minutes();s_view=HOME_GOAL;s_save_error=false;return APP_REDRAW_PAGE;
         }
         if(hit(continue_card_hit_rect(),x,y)) {

@@ -215,7 +215,7 @@ void app_settings_init(void) {
     raw = 1;
     if (nvs_get_u8(h, NVS_KEY_DNS_INDEX, &raw) == ESP_OK && raw < MOD_DNS_MAX) s_dns_index = raw;
     raw = 0;
-    if (nvs_get_u8(h, NVS_KEY_PIN_GRACE, &raw) == ESP_OK && raw <= 3) s_pin_grace_minutes = raw;
+    if (nvs_get_u8(h, NVS_KEY_PIN_GRACE, &raw) == ESP_OK && raw <= 4) s_pin_grace_minutes = raw;
     s_pin_locked_at = 0;
     uint32_t locked_at = 0;
     if (nvs_get_u32(h, NVS_KEY_PIN_LOCK_AT, &locked_at) == ESP_OK) s_pin_locked_at = locked_at;
@@ -438,14 +438,14 @@ void app_settings_set_dns_index(uint8_t index) {
 // the next lock simply records a fresh timestamp.
 uint8_t app_settings_pin_grace_code(void) { return s_pin_grace_minutes; }
 void app_settings_set_pin_grace_code(uint8_t code) {
-    if (code > 3) code = 0;
+    if (code > 4) code = 0;
     if (code == s_pin_grace_minutes) return;
     s_pin_grace_minutes = code;
     nvs_put_u8(NVS_KEY_PIN_GRACE, code);
 }
 unsigned app_settings_pin_grace_minutes(void) {
-    static const unsigned minutes[4] = {0, 5, 60, 480};
-    return minutes[s_pin_grace_minutes & 3];
+    static const unsigned minutes[5] = {0, 5, 60, 480, 1440};
+    return minutes[s_pin_grace_minutes & 4];
 }
 uint32_t app_settings_pin_locked_at(void) { return s_pin_locked_at; }
 void app_settings_record_pin_lock(uint32_t unix_seconds) {
