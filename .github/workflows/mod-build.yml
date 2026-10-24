@@ -60,8 +60,11 @@ jobs:
           build/book-tests/layout
       - name: OTA TLS chain regression
         run: |
-          python3 -m pip install --quiet cryptography
-          python3 tools/ota_tls_host_test.py
+          # runner 系统自带的旧版 cryptography 缺 *_utc 属性；装到用户目录并优先加载。
+          # The runner's stock cryptography lacks the *_utc accessors; install to the user
+          # site and load it ahead of the shadowing system package.
+          python3 -m pip install --quiet --user "cryptography>=42"
+          PYTHONPATH="$(python3 -m site --user-site)" python3 tools/ota_tls_host_test.py
 
   mod-bin:
     runs-on: ubuntu-latest
