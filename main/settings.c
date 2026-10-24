@@ -151,6 +151,7 @@ static uint8_t s_shelf_style = 2;
 static char s_books_dir[MEDIA_DIR_MAX] = "/sdcard/books";
 static char s_fonts_dir[MEDIA_DIR_MAX] = "/sdcard/fonts";
 static void nvs_put_u8(const char* key, uint8_t value);
+static void nvs_put_u32(const char* key, uint32_t value);
 
 static bool valid_media_dir(const char* path) {
     if (!path || strncmp(path, "/sdcard/", 8) || !path[8] ||
@@ -210,8 +211,7 @@ void app_settings_init(void) {
     raw = 1;
     if (nvs_get_u8(h, NVS_KEY_DNS_INDEX, &raw) == ESP_OK && raw < MOD_DNS_MAX) s_dns_index = raw;
     raw = 0;
-    if (nvs_get_u8(h, NVS_KEY_PIN_GRACE, &raw) == ESP_OK &&
-        (raw == 0 || raw == 5 || raw == 60 || raw == 480)) s_pin_grace_minutes = raw;
+    if (nvs_get_u8(h, NVS_KEY_PIN_GRACE, &raw) == ESP_OK && raw <= 3) s_pin_grace_minutes = raw;
     s_pin_locked_at = 0;
     uint32_t locked_at = 0;
     if (nvs_get_u32(h, NVS_KEY_PIN_LOCK_AT, &locked_at) == ESP_OK) s_pin_locked_at = locked_at;
@@ -432,12 +432,16 @@ void app_settings_set_dns_index(uint8_t index) {
 // 密码宽限期：只在合法档位间切换；修改密码相关设置不重置计时，下一次锁屏自然刷新。
 // PIN grace toggles only between valid steps; changing settings does not reset the timer,
 // the next lock simply records a fresh timestamp.
-uint8_t app_settings_pin_grace_minutes(void) { return s_pin_grace_minutes; }
-void app_settings_set_pin_grace_minutes(uint8_t minutes) {
-    if (minutes != 5 && minutes != 60 && minutes != 480) minutes = 0;
-    if (minutes == s_pin_grace_minutes) return;
-    s_pin_grace_minutes = minutes;
-    nvs_put_u8(NVS_KEY_PIN_GRACE, minutes);
+uint8_t app_settings_pin_grace_code(void) { return s_pin_grace_minutes; }
+void app_settings_set_pin_grace_code(uint8_t code) {
+    if (code > 3) code = 0;
+    if (code == s_pin_grace_minutes) return;
+    s_pin_grace_minutes = code;
+    nvs_put_u8(NVS_KEY_PIN_GRACE, code);
+}
+unsigned app_settings_pin_grace_minutes(void) {
+    static const unsigned minutes[4] = {0, 5, 60, 480};
+    return minutes[s_pin_grace_minutes & 3];
 }
 uint32_t app_settings_pin_locked_at(void) { return s_pin_locked_at; }
 void app_settings_record_pin_lock(uint32_t unix_seconds) {

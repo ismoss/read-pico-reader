@@ -38,8 +38,10 @@ void app_settings_set_wake_presses(uint8_t presses);
 uint8_t app_settings_dns_index(void);
 /// 密码解锁宽限期（分钟，0=关闭）：锁屏后该时间内唤醒/开机免密。
 /// PIN unlock grace in minutes (0=off): wakes inside the window skip the PIN prompt.
-uint8_t app_settings_pin_grace_minutes(void);
-void app_settings_set_pin_grace_minutes(uint8_t minutes);
+uint8_t app_settings_pin_grace_code(void);
+void app_settings_set_pin_grace_code(uint8_t code);
+/// 档位码换分钟：0 关 / 1=5 / 2=60 / 3=480。/ Code to minutes: 0 off / 1=5 / 2=60 / 3=480.
+unsigned app_settings_pin_grace_minutes(void);
 /// 锁屏时刻（unix 秒，0=未知）；由锁屏路径写入，宽限期判定读取。
 /// Wall-clock second when locking (0=unknown); written by the lock path, read by the grace check.
 uint32_t app_settings_pin_locked_at(void);
