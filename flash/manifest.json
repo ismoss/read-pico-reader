@@ -45,5 +45,5 @@
   "previous_version": "0.3.3-rc99",
   "tf_package_url": "https://github.com/wegooo-cell/read-pico-reader/releases/download/v0.3.3-rc100/kiikoread-0.3.3-rc100-TF.zip",
   "usb_package_url": "https://github.com/wegooo-cell/read-pico-reader/releases/download/v0.3.3-rc100/kiikoread-0.3.3-rc100-USB.zip",
-  "release_source_commit": "67f8f0c2c4a97da658b15bfdabf6e817130b5eaf"
+  "release_source_commit": "6ad301b9d1740d552a5f77701bbb5044e9664fef"
 }
