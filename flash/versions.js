@@ -78,7 +78,7 @@
     document.getElementById('tf-guide').href=device==='metalio'?'./metalio/#tf':'./manual/#update';
     document.getElementById('tf-instructions').replaceChildren(document.createTextNode('升级文件名保持 '),Object.assign(document.createElement('code'),{textContent:model.filename}),document.createTextNode('，放入 TF 卡根目录。这是应用升级包，不能代替完整 USB 包。'));
     document.getElementById('usb-instructions').textContent=device==='metalio'?'先在设备上进入 BOOT 下载模式，再连接电脑；不要使用 USB 读卡模式。默认保留设置，刷写后会读回校验。':'安装时保留数据：不要勾选「擦除设备」。无法连接时，先在设置中进入 BOOT 模式。';
-    document.getElementById('ota-instructions').textContent=device==='metalio'?'先通过 USB 或 TF 卡安装 Metalio rc98，再连接 Wi-Fi，在「设置 → 系统升级」检查更新。GitHub Pages 优先，官网备用；保留设置与 TF 文件。':'连接 Wi-Fi，在「设置 → 系统升级」检查更新。GitHub Pages 优先，官网作为备用来源；旧版本先按兼容说明升级基础包。';
+    document.getElementById('ota-instructions').textContent=device==='metalio'?'先通过 USB 或 TF 卡安装 Metalio rc100，再连接 Wi-Fi，在「设置 → 系统升级」检查更新。GitHub Pages 优先，官网备用；保留设置与 TF 文件。':'连接 Wi-Fi，在「设置 → 系统升级」检查更新。GitHub Pages 优先，官网作为备用来源；旧版本先按兼容说明升级基础包。';
     hint.textContent='设备、版本与刷机包一一对应。安装前会校验固件身份与完整性。';
     releases=new Map([[model.manifest,{manifest:model.manifest}]]);
     selector.replaceChildren(Object.assign(document.createElement('option'),{value:model.manifest,textContent:'最新版本 · 读取中'}));
@@ -90,7 +90,7 @@
         const path=device==='pico'?`releases/${release.version}/manifest.json`:`metalio/releases/${release.version}/manifest.json`;
         if(!/^\d+\.\d+\.\d+(?:-rc\d+)?$/.test(release.version)||release.manifest!==path||release.bin!==`${model.prefix}-${release.version}.bin`||releases.has(release.manifest))throw Error('Invalid release');
         releases.set(release.manifest,release);
-        selector.appendChild(Object.assign(document.createElement('option'),{value:release.manifest,textContent:`${release.version} · ${release.version===catalog.previous_version?'上一正式版':'历史版本'}`}));
+        selector.appendChild(Object.assign(document.createElement('option'),{value:release.manifest,textContent:`${release.version} · ${release.version===catalog.previous_version?(device==='metalio'?'上一版本':'上一正式版'):'历史版本'}`}));
       }
       const wanted=catalog.releases.find(r=>r.version===wantedVersion||r.version.split('-').pop()===wantedVersion);if(wanted)selector.value=wanted.manifest;
     }catch(error){if(current!==request)return;hint.textContent='历史列表暂不可用，可选择当前机型最新版本。';}

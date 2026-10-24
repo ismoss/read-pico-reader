@@ -1,6 +1,6 @@
 {
   "name": "kiikoread · Metalio EINK 4 Plus",
-  "version": "0.3.3-rc98",
+  "version": "0.3.3-rc100",
   "board": "metalio47",
   "experimental_pie_pixels": true,
   "experimental_text_ripple": true,
@@ -16,7 +16,7 @@
           "path": "bootloader.bin",
           "offset": 8192,
           "size": 22448,
-          "sha256": "f9046a43ff1d93cee2b3eca50e490208f88928e1028ba8e60148b107bae00071"
+          "sha256": "23d087cf202a768b5fc6c951f9c7de1848481ff6f1dc30cb9d804b84c192b183"
         },
         {
           "path": "partitions.bin",
@@ -27,8 +27,8 @@
         {
           "path": "firmware.bin",
           "offset": 65536,
-          "size": 4499072,
-          "sha256": "d412fa79b1f623cdf387723f9a279db4d3bb9b3ddd54c1cb87b08d074c7b0dbd"
+          "size": 4498208,
+          "sha256": "a2f0ba9ea7235e9433dad8d8de8e2eeb8e5e17fbeabf2ea7c5b6472f3da80df5"
         },
         {
           "path": "ota_data_initial.bin",
@@ -39,14 +39,15 @@
       ]
     }
   ],
-  "updated_at": "2026-10-24T14:04:03+08:00",
+  "previous_version": "0.3.3-rc98",
+  "updated_at": "2026-10-24T14:20:10+08:00",
   "pico_ota": {
     "layout": "metalio-s31-dual-5m-v1",
-    "base_version": "0.3.3-rc98",
+    "base_version": "0.3.3-rc100",
     "minimum_base_version": "0.3.3-rc98",
     "online_ota_base_version": "0.3.3-rc98",
     "rollback": true
   },
-  "tf_package_url": "https://github.com/wegooo-cell/read-pico-reader/releases/download/metalio-s31-v0.3.3-rc98/kiikoread-metalio47-0.3.3-rc98-TF.zip",
-  "usb_package_url": "https://github.com/wegooo-cell/read-pico-reader/releases/download/metalio-s31-v0.3.3-rc98/kiikoread-metalio47-0.3.3-rc98-USB.zip"
+  "tf_package_url": "https://github.com/wegooo-cell/read-pico-reader/releases/download/metalio-s31-v0.3.3-rc100/kiikoread-metalio47-0.3.3-rc100-TF.zip",
+  "usb_package_url": "https://github.com/wegooo-cell/read-pico-reader/releases/download/metalio-s31-v0.3.3-rc100/kiikoread-metalio47-0.3.3-rc100-USB.zip"
 }

@@ -65,4 +65,28 @@ def stage_metalio(flash: Path, output: Path) -> None:
     assert feed['url']=='https://wegooo-cell.github.io/read-pico-reader/'+fixed
     assert isinstance(feed['notes'],str) and 0<len(feed['notes'].encode())<384
     shutil.copy2(flash/'metalio-s31-update.json',output/'metalio-s31-update.json')
+    # 历史版本必须来自原 Release，所有旧网址保留原字节。 / Historical URLs retain original Release bytes.
+    history={}
+    for release in assets.get('historical',[]):
+        assert re.fullmatch(r'metalio-s31-v\d+\.\d+\.\d+-rc\d+',release['tag'])
+        fixed='Metalio-S31-update-'+release['tag'].removeprefix('metalio-s31-v')+'.bin'
+        assert set(release['files'])=={fixed}
+        _hydrate_files(flash,output,release,maximum=0x500000)
+        history[release['tag'].removeprefix('metalio-s31-v')]=release['files'][fixed]
+    catalog=json.loads((source/'releases.json').read_text())
+    for entry in catalog['releases']:
+        old=entry['version'];assert old in history and old!=version
+        assert entry['manifest']==f'metalio/releases/{old}/manifest.json' and entry['bin']==f'Metalio-S31-update-{old}.bin'
+        archive=source/'releases'/old;old_manifest=json.loads((archive/'manifest.json').read_text())
+        assert old_manifest['version']==old and old_manifest['board']=='metalio47' and old_manifest['builds'][0]['chipFamily']=='ESP32-S31'
+        target=output/'metalio/releases'/old;target.mkdir(parents=True,exist_ok=True)
+        shutil.copy2(archive/'manifest.json',target/'manifest.json')
+        payload=(output/entry['bin']).read_bytes()
+        assert payload[48:80].split(b'\0')[0].decode()==old and payload[80:112].split(b'\0')[0]==b'Kiikoread_Metalio_S31'
+        for name in ('bootloader.bin','partitions.bin','ota_data_initial.bin'):
+            data=(archive/name).read_bytes();info=entry['files'][name]
+            assert len(data)==info['size'] and hashlib.sha256(data).hexdigest()==info['sha256']
+            shutil.copy2(archive/name,target/name)
+    previous=manifest.get('previous_version')
+    if previous:assert any(entry['version']==previous for entry in catalog['releases'])
     print(f'Metalio S31: {version}, {len(app)} bytes, independent 5 MiB slots, verified SHA-256')
