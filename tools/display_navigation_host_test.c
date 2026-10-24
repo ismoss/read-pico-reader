@@ -322,14 +322,19 @@ int main(void) {
     memset(front, 0xee, BYTES); assert(update_display_full(&hl) == EPD_DRAW_SUCCESS);
     calls = bw_calls = gray_calls = full_calls = gc_calls = nav_draws = 0;
     target(1);
+    // front 与 final 同步构造：整条底栏清零、横条五行保留 back，新语义下两者一致。
+    // Build front and final together: the strip zeroed and the five marker rows kept from back,
+    // identical under the new contract.
     for (int y = 0; y < H; ++y) {
         size_t offset = (size_t)y * W / 2 + UI_NAV_REFRESH_END / 2;
         memset(front + offset, 0, (W - UI_NAV_REFRESH_END) / 2);
+        memset(final + offset, 0, (W - UI_NAV_REFRESH_END) / 2);
         const size_t row = (size_t)y * W / 2;
         for (int x = UI_NAV_MARKER_TOP; x < UI_NAV_MARKER_BOTTOM; ++x) {
             const size_t at = row + x / 2;
             const unsigned shift = (x & 1) ? 4 : 0;
             front[at] = (front[at] & ~(15u << shift)) | (back[at] & (15u << shift));
+            final[at] = (final[at] & ~(15u << shift)) | (back[at] & (15u << shift));
         }
     }
 
