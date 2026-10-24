@@ -10,8 +10,8 @@
  * User revision: fast/water still cap content scans at the 32-column boundary without painting into the bar; the ordinary mode lets each page decide what flows beneath the dock.
  * 用户修订：状态栏签名按系统字体和内建界面字体的共同安全宽度截断，阅读页复用小型字宽表，不重载系统字体。
  * User revision: fit status signatures to widths safe for the system and built-in UI faces; reading reuses a small metrics table without reloading the system font.
- * 用户修订：底栏改为悬浮玻璃胶囊，普通模式采样其下页面内容，快刷/水波纹保持固定浅灰；局部刷新不重算玻璃。
- * User revision: the bar becomes a floating glass capsule that samples page content in the ordinary mode and stays a fixed light pill under fast/water; partial updates never recompute the glass.
+ * 用户修订：底栏改为悬浮液态玻璃（重度漂白磨砂+细灰描边+淡阴影），选中项用亮色小胶囊取代横条；局部刷新不重算玻璃。
+ * User revision: the bar becomes floating liquid glass (bleached frost, thin gray rim, soft shadow) with a bright active pill replacing the marker strip; partial updates never recompute the glass.
  */
 #include "ui_nav.h"
 #include <stdio.h>
@@ -148,27 +148,36 @@ static void icon(uint8_t *fb, int tab, int cx, int y) {
 void ui_nav_draw(uint8_t *fb, int active) {
     const EpdRect dock = {UI_NAV_DOCK_INSET, UI_NAV_DOCK_TOP,
                           UI_LOCK_WIDTH - 2 * UI_NAV_DOCK_INSET, UI_NAV_DOCK_BOTTOM - UI_NAV_DOCK_TOP};
-    // 胶囊统一加深一档并加深色描边：纯白底上玻璃与旧实心条只差一个灰阶，不描边几乎看不出。
-    // The capsule drops one gray step and gains a dark outline: over pure white the glass is barely
-    // one gray step off the old solid strip and reads as unchanged without a visible rim.
+    // 液态玻璃参考图规格：重度漂白磨砂（内容只剩淡影）、细灰描边、底部淡阴影；
+    // 选中项不再用横条，改为包住图标和文字的亮色小胶囊。
+    // Liquid-glass reference spec: a heavily bleached frost leaving faint traces, a thin gray
+    // rim, a soft shadow below; the active tab drops the marker strip for a bright pill.
     if (app_settings_main_refresh_mode() == APP_MAIN_REFRESH_NORMAL) {
-        // 只画胶囊本体：采样 dock 之下的页面内容，胶囊外（四角与四周留白）保留页面内容自然穿过。
-        // Glass paints the capsule only: it samples the page beneath, and content around the pill
-        // (box corners and margins) keeps flowing naturally instead of being masked white.
-        if (!ui_glass_panel(fb, dock, UI_NAV_DOCK_RADIUS, 40, 48)) {
-            ui_fill_round_rect(fb, dock, UI_NAV_DOCK_RADIUS, 0xd0);
+        // 只画 dock 本体：采样其下的页面内容，dock 外保留页面内容自然穿过。
+        // Glass paints the bar only: it samples the page beneath, and content around it keeps flowing.
+        if (!ui_glass_panel(fb, dock, UI_NAV_DOCK_RADIUS, 70, 45)) {
+            ui_fill_round_rect(fb, dock, UI_NAV_DOCK_RADIUS, 0xd8);
         }
     } else {
-        // 快刷/水波纹用固定浅灰胶囊：像素稳定不随内容重驱，整条底栏保持白底与横条预留。
-        // Fast/water keep a fixed light capsule whose pixels never re-drive with content; the strip stays white with the marker reserve.
+        // 快刷/水波纹用固定浅灰底：像素稳定不随内容重驱，整条底栏保持白底。
+        // Fast/water keep a fixed light bar whose pixels never re-drive with content.
         ui_fill_rect_fast((EpdRect){0, UI_NAV_TOP, UI_LOCK_WIDTH, UI_LOCK_HEIGHT - UI_NAV_TOP}, UI_GRAY_WHITE, fb);
-        ui_fill_rect_fast((EpdRect){0, UI_NAV_MARKER_TOP, UI_LOCK_WIDTH, UI_NAV_MARKER_BOTTOM - UI_NAV_MARKER_TOP}, UI_GRAY_WHITE, fb);
-        ui_fill_round_rect(fb, dock, UI_NAV_DOCK_RADIUS, 0xd0);
+        ui_fill_round_rect(fb, dock, UI_NAV_DOCK_RADIUS, 0xe8);
     }
-    ui_draw_round_rect(fb, dock, UI_NAV_DOCK_RADIUS, 0x30);
+    ui_draw_round_rect(fb, dock, UI_NAV_DOCK_RADIUS, 0x78);
+    // 底边下方两像素的淡阴影线，拉开 dock 与背景的层次。
+    // A faint shadow line two pixels under the bottom edge separates the dock from the page.
+    ui_fill_rect_fast((EpdRect){UI_NAV_DOCK_INSET + 6, UI_NAV_DOCK_BOTTOM + 2,
+                                dock.width - 12, 2}, 0xd0, fb);
     for (int i = 0; i < 4; ++i) {
         int center = (i * 2 + 1) * UI_LOCK_WIDTH / 8;
-        if (i == active) ui_fill_rect_fast((EpdRect){center - 28, UI_NAV_MARKER_TOP, 56, UI_NAV_MARKER_BOTTOM - UI_NAV_MARKER_TOP}, UI_GRAY_BLACK, fb);
+        if (i == active) {
+            // 亮色小胶囊包住选中的图标与文字，是唯一的选中指示。
+            // A bright pill wrapping the active icon and label is the only selection cue.
+            EpdRect pill = {center - 54, UI_NAV_DOCK_TOP + 8, 108, dock.height - 16};
+            ui_fill_round_rect(fb, pill, 24, UI_GRAY_WHITE);
+            ui_draw_round_rect(fb, pill, 24, 0x78);
+        }
         icon(fb, i, center, UI_NAV_TOP + 27);
         ui_text(fb, center, UI_NAV_TOP + 74, 17, labels[i], EPD_DRAW_ALIGN_CENTER, false);
     }
