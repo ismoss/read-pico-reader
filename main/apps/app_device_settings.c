@@ -2431,10 +2431,9 @@ static bool settings_present(app_ctx_t *ctx, app_redraw_t redraw) {
         s_scroll_present_pending = false;
         render(ctx, ctx->fb);
         int top = s_page == SETTINGS_MAIN ? 160 : s_page == SETTINGS_SHELF_STYLE ? 242 : 190;
-        // 主页在普通模式把 dock 下的行一并推走；其他页维持 1088 内容界。
-        // The main page in the ordinary mode pushes its under-dock rows too; other pages keep the 1088 content bound.
-        int bottom = s_page == SETTINGS_MAIN && app_settings_main_refresh_mode() == APP_MAIN_REFRESH_NORMAL
-            ? UI_LOCK_HEIGHT : settings_content_end();
+        // 主页推屏延到整屏：玻璃 dock 之下的行随滚动一次差分带走；快刷/水波纹的 dock 目标恒定，扩展区无像素可驱动。
+        // The main page pushes to the full panel so under-dock rows ride one scroll diff; under fast/water the dock target is constant and the extension drives nothing.
+        int bottom = s_page == SETTINGS_MAIN ? UI_LOCK_HEIGHT : settings_content_end();
         EpdRect area = {0, top, UI_LOCK_WIDTH, bottom - top};
         // 只驱动变化像素，滚动次数不触发黑白清屏；题头与底栏保持稳定。
         // Drive changed pixels only; scroll counts never trigger a wipe, and header/nav stay stable.

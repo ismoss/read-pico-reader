@@ -193,7 +193,8 @@ enum EpdDrawError e0470_update_regions(EpdiyHighlevelState* state, EpdRect area,
     enum EpdDrawMode strong_mode) {
     assert(ota_display_depth && scan==READ_PICO_EPD_SCAN_FULL);
     assert(soft==&main_water && calibrated==&main_acrylic);
-    assert(area.y==0 && area.height==UI_NAV_MARKER_SCAN_END);
+    // 底栏目标变化时整屏一次扫描；否则仍止于横条扩展界。/ A changed dock target scans the full panel; otherwise the marker expansion bound holds.
+    assert(area.y==0 && (area.height==UI_NAV_MARKER_SCAN_END || area.height==W));
     assert(strong.y>=0 && strong.y+strong.height<=UI_NAV_REFRESH_END && !(strong.y&31) && !(strong.height&31));
     if(protect_shelf_chrome)assert(strong.y==192 && strong.height==800);
     ++region_calls;last_strong_area=strong;
@@ -234,15 +235,11 @@ static void assert_final(void) {
     assert(!memcmp(panel, final, BYTES) && !memcmp(back, final, BYTES));
     assert(!memcmp(front, final, BYTES));
 }
-// 按像素生成预期固定底栏，独立核对半字节边界及灰阶前态。
-// Build expected navigation pixel by pixel to independently check nibble edges and the actual gray baseline.
-static void expect_navigation(bool marker) {
-    for (int y = 0; y < H; ++y) for (int x = UI_NAV_REFRESH_END; x < W; ++x) {
-        if (marker && x >= UI_NAV_MARKER_TOP && x < UI_NAV_MARKER_BOTTOM) continue;
-        const size_t at = (size_t)y * W / 2 + x / 2;
-        const unsigned mask = 15u << ((x & 1) ? 4 : 0);
-        final[at] = (final[at] & ~mask) | (back[at] & mask);
-    }
+// 把玻璃 dock 行涂成新目标，模拟内容移到悬浮胶囊之下。/ Paint fresh dock rows, simulating content moved under the floating capsule.
+static void paint_dock(uint8_t gray) {
+    for (int y = 0; y < H; ++y)
+        memset(front + (size_t)y * W / 2 + UI_NAV_DOCK_TOP / 2, gray,
+               (UI_NAV_DOCK_BOTTOM - UI_NAV_DOCK_TOP) / 2);
 }
 
 static void gray_target(unsigned seed) {
@@ -548,13 +545,25 @@ int main(void) {
     for (int y = 0; y < H; ++y)
         memset(final + (size_t)y * W / 2, 0x0f, UI_NAV_REFRESH_END / 2);
     begin(&owner_a); assert_final();
-    // 普通模式一次输出柔和灰阶，不运行水波纹调度或黑白预刷。
-    // Ordinary uses one soft grayscale pass without ripple scheduling or a monochrome prepass.
+    // 普通模式一次输出柔和灰阶，不运行水波纹调度或黑白预刷；整页含底栏的目标变化（玻璃 dock 下的内容）随同一次扫描驱动，横条不再单独补刷。
+    // Ordinary uses one soft grayscale pass without ripple scheduling or a monochrome prepass; a whole-page
+    // target change that includes navigation (content under the glass dock) rides that single scan with no separate marker pass.
     reset(); main_mode=APP_MAIN_REFRESH_NORMAL; memset(front,0x73,BYTES); memcpy(final,front,BYTES);
-    expect_navigation(true);
     display_main_transition_arm(&owner_a,true,false);
-    assert(update_display_fast_page(&hl)==EPD_DRAW_SUCCESS); assert_final();
-    assert(bw_calls==1 && !complete_bw_calls && !exit_calls && !allocations && gray_calls==1 && nav_draws==1);
+    assert(update_display_fast_page(&hl)==EPD_DRAW_SUCCESS);assert_final();
+    assert(!bw_calls && !complete_bw_calls && !exit_calls && !allocations && gray_calls==1 && nav_draws==1);
+    assert(last_area.y==0 && last_area.height==W);
+    // 玻璃 dock 路径：底栏目标变化时整屏一次扫描连内容带底栏；同目标重画后底栏回到基准，恢复冻结路径不再驱动。
+    // Glass dock path: a changed nav target rides one whole-panel scan with the body; once the dock matches the baseline again the frozen path returns and drives nothing.
+    reset(); main_mode=APP_MAIN_REFRESH_NORMAL; target(7); paint_dock(0x36); memcpy(final,front,BYTES);
+    begin(&owner_a); assert_final();
+    assert(calls==1 && gray_calls==1 && !bw_calls && nav_draws==1);
+    assert(last_area.y==0 && last_area.height==W);
+    target(9); memcpy(final,front,BYTES);
+    const int dock_before=calls, dock_nav=nav_draws;
+    begin(&owner_a); assert_final();
+    assert(calls==dock_before+1 && nav_draws==dock_nav);
+    assert(last_area.y==0 && last_area.height==UI_NAV_REFRESH_END);
     // 普通灰阶周期清理、局部滚动与后台封面均止于1088，重复目标不清屏，手动全刷仍含底栏。
     // Ordinary gray cleanup, scrolling and background covers stop at 1088; identical targets skip cleanup and manual full output still includes nav.
     reset(); main_mode=APP_MAIN_REFRESH_NORMAL; memset(front,0x73,BYTES);

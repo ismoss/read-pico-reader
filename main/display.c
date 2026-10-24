@@ -172,6 +172,24 @@ static bool main_body_changed(EpdiyHighlevelState* hl) {
     return false;
 }
 
+// 底栏条的目标是否与已显示基准不同：保护带、dock 与图标区计入；横条五行有自己的 DU 路径，不计入。
+// Whether the navigation target differs from the presented baseline: the guard band, dock and
+// icon region count, while the five marker rows keep their own DU path and stay out.
+static bool main_nav_changed(EpdiyHighlevelState* hl) {
+    const size_t stride = (size_t)epd_width() / 2;
+    const size_t guard_bytes = (size_t)(UI_NAV_MARKER_TOP - 1 - UI_NAV_REFRESH_END) / 2;
+    for (int y = 0; y < epd_height(); ++y) {
+        const uint8_t* row = hl->front_fb + y * stride;
+        const uint8_t* was = hl->back_fb + y * stride;
+        if (memcmp(row + UI_NAV_REFRESH_END / 2, was + UI_NAV_REFRESH_END / 2, guard_bytes)) return true;
+        // 横条起点是奇数半字节：1096 那个半字节属于保护带，单独比较。/ The marker starts on an odd nibble; nibble 1096 belongs to the guard band and compares alone.
+        if ((row[UI_NAV_MARKER_TOP / 2] & 0x0f) != (was[UI_NAV_MARKER_TOP / 2] & 0x0f)) return true;
+        if (memcmp(row + UI_NAV_MARKER_BOTTOM / 2, was + UI_NAV_MARKER_BOTTOM / 2,
+                   stride - UI_NAV_MARKER_BOTTOM / 2)) return true;
+    }
+    return false;
+}
+
 // 三条最终灰阶最多约90KiB；首帧跳过它们，实际输出成功才提交back。
 // Three final gray bands cost at most about 90 KiB; skip them in the first pass and commit back only after successful output.
 static size_t main_band_bytes(void) {
@@ -288,12 +306,16 @@ static bool main_begin(EpdiyHighlevelState* hl, enum EpdDrawError* result) {
     if (!main_nav_geometry()) return false;
     // 8帧整页方案被实机否定；用户接受主页面黑白、亚克力灰阶，黑白改用完整20相。
     // Hardware rejected whole-page 8-frame output; the user accepted black/white main pages with gray acrylic. Use the full 20-phase black/white table.
-    // 普通模式玻璃 dock 随内容驱动：不冻结底栏像素，整页差分把 dock 变化一并带出；快刷/水波纹保留原冻结。
-    // The ordinary-mode glass dock follows content: skip the navigation freeze so one whole-page diff carries dock changes; fast/water keep the original freeze.
-    const bool dock_with_body = normal;
+    // 玻璃 dock 随内容驱动：仅当底栏目标真的变化（玻璃下内容移动）时，普通模式才放开冻结并把扫描扩到整屏；
+    // 底栏不变时保留原冻结路径，底栏像素一次都不驱动。快刷/水波纹始终冻结。
+    // The glass dock follows content: only a really changed nav target (content moved under the
+    // glass) unlocks the freeze and extends the scan to the full panel in ordinary mode; an
+    // unchanged nav keeps the frozen path without driving nav pixels. Fast/water always freeze.
+    const bool nav_changed = main_nav_changed(hl);
+    const bool dock_with_body = normal && nav_changed;
     if (!dock_with_body) main_freeze_navigation(hl, true);
     if (fast) main_normalize_body(hl);
-    const bool changed = main_body_changed(hl);
+    const bool changed = main_body_changed(hl) || nav_changed;
     uint8_t *cache = fast && changed && s_main_band_count
         ? heap_caps_aligned_alloc(16, main_band_bytes(), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) : NULL;
     const bool gray_fallback = water || (fast && changed && s_main_band_count && !cache);
