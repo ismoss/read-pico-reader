@@ -68,7 +68,7 @@ static void known_upsert(const transfer_credentials_t *net) {
         snprintf(from, sizeof(from), "known%d", i);
         snprintf(to, sizeof(to), "known%d", i - 1);
         transfer_credentials_t moved = {0};
-        size = sizeof(moved);
+        size_t size = sizeof(moved);
         if (nvs_get_blob(handle, from, &moved, &size) == ESP_OK && size == sizeof(moved)) {
             (void)nvs_set_blob(handle, to, &moved, sizeof(moved));
         }
