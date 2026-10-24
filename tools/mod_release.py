@@ -78,7 +78,7 @@ def guard(version: str) -> None:
     except Exception:
         print("no live feed yet; first publication")
         return
-    assert rc_number(version) > rc_number(live["version"]), \
+    assert version_key(version) > version_key(live["version"]), \
         f"live {live['version']} is not older than {version}; refusing a downgrade"
 
 
