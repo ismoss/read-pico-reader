@@ -1,11 +1,12 @@
 /* 中文：S31 专用网页安装，先验证再写入；与 Pico 安装器隔离。 / English: Verify-before-write S31 installation isolated from the Pico installer. */
 import {require,equal,identity,partitionTable,selectedSlot} from './metalio-flash-core.js';
+import {connectS31,connectionMessage} from './metalio-connection.js';
 let active=false;
 async function open(snapshot){
   if(active)return;active=true;
   const dialog=document.createElement('dialog');dialog.className='metalio-dialog';
   dialog.setAttribute('aria-labelledby','metalio-dialog-title');
-  dialog.innerHTML=`<span class="card-number">METALIO / ESP32-S31</span><h2 id="metalio-dialog-title">安装 kiikoread</h2><p data-version></p><p>在墨水屏上进入「设置 → BOOT 刷机」，再选择下载串口。请关闭占用串口的其他刷机页面；USB 读卡模式不能刷机。</p><label><input type="checkbox" data-clear>清除机内设置（TF 卡文件保留）</label><label class="reinstall-option"><input type="checkbox" data-reinstall>重新安装基础包（用于原厂或其他固件）</label><p data-status role="status" aria-live="polite">尚未连接设备</p><progress max="100" value="0" aria-label="安装进度"></progress><details><summary>连接与校验记录</summary><pre data-log></pre></details><a data-backup hidden class="text-link">下载刷写前的应用备份</a><div class="dialog-actions"><button type="button" class="button primary" data-connect>连接并检查设备</button><button type="button" class="button primary" data-write hidden>确认刷入</button><button type="button" class="button secondary" data-close>关闭</button></div>`;
+  dialog.innerHTML=`<span class="card-number">METALIO / ESP32-S31</span><h2 id="metalio-dialog-title">安装 kiikoread</h2><p data-version></p><p><strong>首次安装必须从 Metalio 官方固件刷入。</strong>正在使用其他第三方固件时，请先恢复 Metalio 官方固件。已有兼容 kiikoread 可直接更新。</p><p>在墨水屏上进入「设置 → BOOT 刷机」，再选择下载串口。请关闭占用串口的其他刷机页面；USB 读卡模式不能刷机。</p><label><input type="checkbox" data-clear>清除机内设置（TF 卡文件保留）</label><label class="reinstall-option"><input type="checkbox" data-reinstall>重新安装基础包（首次从 Metalio 官方固件安装）</label><p data-status role="status" aria-live="polite">尚未连接设备</p><progress max="100" value="0" aria-label="安装进度"></progress><details><summary>连接与校验记录</summary><pre data-log></pre></details><a data-backup hidden class="text-link">下载刷写前的应用备份</a><div class="dialog-actions"><button type="button" class="button primary" data-connect>连接并检查设备</button><button type="button" class="button primary" data-write hidden>确认刷入</button><button type="button" class="button secondary" data-close>关闭</button></div>`;
   document.body.appendChild(dialog);dialog.showModal();
   const q=s=>dialog.querySelector(s), status=q('[data-status]'), log=q('[data-log]'), progress=q('progress');
   const connect=q('[data-connect]'), write=q('[data-write]'), close=q('[data-close]');
@@ -15,7 +16,15 @@ async function open(snapshot){
   const say=text=>{status.textContent=text;};
   const append=text=>{log.textContent=(log.textContent+String(text)+'\n').slice(-18000);log.scrollTop=log.scrollHeight;};
   const digest=data=>window.KiikoreadFlasher.digest(data);
-  async function disconnect(){try{await transport?.disconnect();}catch{}transport=loader=null;}
+  async function disconnect(){
+    const previous=transport;transport=loader=null;if(!previous)return;
+    let timer;
+    try{
+      // 驱动写入阻塞时仍让错误提示和关闭按钮可用；不复用未释放的串口。
+      // Keep error/close controls responsive if a driver write is stuck; never reuse the locked transport.
+      await Promise.race([previous.disconnect(),new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('串口未能释放，请关闭此刷机标签页后重试。')),2000);})]);
+    }catch(error){append(error.message);}finally{clearTimeout(timer);}
+  }
   function lock(on){connect.disabled=close.disabled=clear.disabled=reinstall.disabled=on;write.disabled=on;}
   async function cleanup(){if(checking||writing)return;await disconnect();bundle?.dispose();if(backupURL)URL.revokeObjectURL(backupURL);dialog.remove();active=false;}
   close.addEventListener('click',cleanup);
@@ -32,8 +41,9 @@ async function open(snapshot){
       bundle?.dispose();bundle=await window.KiikoreadFlasher.prepare(snapshot.manifest,snapshot.manifestURL,snapshot.files,'metalio');
       const {ESPLoader,Transport}=await import('./vendor/metalio/esptool-js-0.7.0.js');
       transport=new Transport(port);loader=new ESPLoader({transport,baudrate:115200,romBaudrate:115200,terminal:{clean(){},write:append,writeLine:append}});
-      say('正在握手并识别 S31…');await loader.main('no_reset');
-      require(loader.chip?.CHIP_NAME==='ESP32-S31'&&loader.chip.IMAGE_CHIP_ID===32&&loader.IS_STUB,'未连接到支持的 S31 下载口，尚未写入。');
+      say('正在复位 USB JTAG 下载口并识别 S31（最长 30 秒）…');
+      append('连接方式：Espressif USB JTAG 下载复位（usb_reset）；尚未写入 Flash。');
+      await connectS31(loader);
       const security=await loader.getSecurityInfo();
       require(security.chipId===32&&!security.parsedFlags.SECURE_BOOT_EN&&!security.parsedFlags.SECURE_DOWNLOAD_ENABLE&&((security.flashCryptCnt.toString(2).match(/1/g)||[]).length%2===0),'此设备已启用安全启动或 Flash 加密，不能使用此安装包。');
       const capacity=await loader.detectFlashSize();require(loader.flashSizeBytes(capacity)>=0x1000000,'Flash 容量不足 16 MB。');
@@ -58,7 +68,7 @@ async function open(snapshot){
         plan={full:false,slot,mac,current};say(`已识别 ${current}，保留分区和启动位置。确认后刷入 ${snapshot.manifest.version}。`);
       }
       connect.hidden=true;write.hidden=false;write.textContent=plan.full?'确认重装并清除机内设置':clear.checked?'确认刷入并清除机内设置':'确认刷入，保留数据';
-    }catch(error){append(error.stack||error.message);say(error.name==='NotFoundError'?'已取消选择，尚未写入。':error.message);await disconnect();}
+    }catch(error){append(error.stack||error.message);say(connectionMessage(error));await disconnect();}
     finally{checking=false;lock(false);if(plan)write.disabled=plan.full&&!clear.checked;}
   });
   write.addEventListener('click',async()=>{

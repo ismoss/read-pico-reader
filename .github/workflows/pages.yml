@@ -24,6 +24,7 @@ on:
       - flash/metalio-s31-update.json
       - flash/metalio-installer.js
       - flash/metalio-flash-core.js
+      - flash/metalio-connection.js
       - tools/metalio_release_assets.py
       - flash/update.json
       - flash/Pico-update*.bin

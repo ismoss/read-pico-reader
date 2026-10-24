@@ -48,3 +48,5 @@
   Cache-Control: no-cache
 /metalio-flash-core.js
   Cache-Control: no-cache
+/metalio-connection.js
+  Cache-Control: no-cache
