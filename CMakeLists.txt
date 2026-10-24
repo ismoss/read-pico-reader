@@ -3,6 +3,10 @@
 cmake_minimum_required(VERSION 3.22)
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
+# -Os 下 GCC 对 snprintf 截断的分析更激进；上游按 -O2 写就的防御性 snprintf 保持原样，仅降级这一类警告。
+# GCC analyzes snprintf truncation more aggressively under -Os; upstream's defensive -O2-era
+# snprintf calls stay untouched and only this warning class is downgraded.
+idf_build_set_property(COMPILE_OPTIONS "-Wno-error=format-truncation" APPEND)
 # "Trim" the build. Include the minimal set of components, main, and anything it depends on.
 idf_build_set_property(MINIMAL_BUILD ON)
 
