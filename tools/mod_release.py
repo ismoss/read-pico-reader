@@ -32,6 +32,16 @@ def version_key(version: str):
     return (x, y, z, 1 if mod else 0, rc, mod)
 
 
+# 自建源上的公共 DNS 列表（「特殊功能」页在线获取）；设备端保留同样的内置兜底。
+# Public DNS list on the self-hosted origin (fetched by the special-features page); the firmware carries the same built-in fallback.
+DNS_LIST = [
+    {"name": "阿里公共 DNS", "main": "223.5.5.5", "backup": "223.6.6.6"},
+    {"name": "腾讯公共 DNS", "main": "119.29.29.29", "backup": "119.28.28.28"},
+    {"name": "114 公共 DNS", "main": "114.114.114.114", "backup": "114.114.115.115"},
+    {"name": "谷歌公共 DNS", "main": "8.8.8.8", "backup": "8.8.4.4"},
+]
+
+
 def load_image(dist: Path, version: str) -> bytes:
     data = (dist / "Read_Pico.bin").read_bytes()
     assert data[0] == 0xE9, "not an ESP image"
