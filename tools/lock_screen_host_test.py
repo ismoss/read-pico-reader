@@ -28,6 +28,13 @@ with tempfile.TemporaryDirectory() as folder:
 #define LOW_W 76
 #define LOW_H 136
 #define RADIUS 72
+// 二改白底绘制所需常量与快速填充；本测试环境只需可编译。
+// Constants and the fast fill for the mod's white base; only compilable stubs here.
+#define UI_LOCK_WIDTH 684
+#define UI_LOCK_HEIGHT 1216
+static void ui_fill_rect_fast(EpdRect rect, uint8_t gray, uint8_t *fb) {
+    (void)rect; (void)gray; if (fb) fb[0] = 0xff;
+}
 #define ART_MAGIC UINT32_C(0x50414434)
 #define LOCK_SCREEN_CACHE_PARENT "FOLDER"
 #define LOCK_ART_PATH LOCK_SCREEN_CACHE_PARENT "/locks/pin-background.bin"
