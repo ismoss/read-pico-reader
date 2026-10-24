@@ -809,11 +809,18 @@ static void settings_fit_text(char *value, int px, int width) {
 static void fit_value(char *value, int width) { settings_fit_text(value,20,width); }
 
 static void settings_switch(uint8_t *fb, int center_y, bool active) {
+    // 二改：开关改纯黑白——灰色轨道在滚动差分扫描下会经过深色过渡产生黑闪；黑白无灰阶过渡。
+    // Mod: the switch goes pure black/white — a gray track transits dark phases under the
+    // scroll's differential scan and flashes black; pure BW has no gray transitions.
     EpdRect track = {555, center_y - 19, 69, 39};
-    ui_fill_round_rect(fb, track, 19, active ? 0x58 : 0xc4);
+    if (active) ui_fill_round_rect(fb, track, 19, UI_GRAY_BLACK);
+    else {
+        ui_fill_round_rect(fb, track, 19, UI_GRAY_WHITE);
+        ui_draw_round_rect(fb, track, 19, 0x30);
+    }
     int cx = active ? track.x + 49 : track.x + 20;
     epd_fill_circle(cx, track.y + 19, 16, UI_GRAY_WHITE, fb);
-    epd_draw_circle(cx, track.y + 19, 16, 0x78, fb);
+    epd_draw_circle(cx, track.y + 19, 16, 0x30, fb);
 }
 
 static void setting_group(uint8_t *fb, int title_y, const char *title,

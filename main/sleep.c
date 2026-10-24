@@ -743,4 +743,8 @@ void app_lock_boot_gate(EpdiyHighlevelState *hl, cst836u_handle_t touch, sc7a20h
     lock_screen_authenticate(hl, touch, acc, true);
     s_lock_hint_hl=NULL;
     app_font_end_lock(&saved);
+    // 二改：开机验证通过也是一种解锁——同样自动连网（此前只接了浅睡唤醒路径，深睡开机漏了）。
+    // Mod: a verified boot is also an unlock — auto-connect here too (previously wired only
+    // for the light-sleep wake path, the deep-sleep boot was missed).
+    auto_connect_after_unlock();
 }

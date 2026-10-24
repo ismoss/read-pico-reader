@@ -23,6 +23,10 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## 待发布 / Unreleased
 
+- 深睡开机（密码验证通过）后也自动连网：此前只接了浅睡唤醒路径，按电源键从深睡开机漏了。
+  Verified boots now auto-connect as well: previously only the light-sleep wake path was wired and the deep-sleep power-on was missed.
+- 设置开关改纯黑白样式：灰色轨道在滚动差分扫描下会经过深色过渡产生黑闪，黑白无灰阶过渡，任何刷新模式都不再闪。
+  Settings switches go pure black/white: a gray track transits dark phases under the scroll's differential scan, while pure BW holds clean in every refresh mode.
 - 密码提示的白色底图只在弹出提示时出现：等待解锁期间保持原锁屏样式，按下电源键出提示时整屏刷白再画键盘，点「取消」恢复锁屏样式（上一版把白色画在等待阶段之前，导致锁屏后立即变白）。
   The PIN prompt's white base now appears only with the prompt itself: the waiting phase keeps the original lock face, the power key whitens the panel while painting the pad, and cancel restores the lock face (the previous build painted the white before waiting, blanking the face right after locking).
 - 解锁后自动连网：已保存凭据且传输栈空闲时，解锁（含深睡无密码恢复）后台发起连接，由主循环轮询推进；已知的多个网络仍按信号自动挑选。
