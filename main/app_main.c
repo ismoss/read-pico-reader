@@ -48,6 +48,7 @@
 #include "usb_storage.h"
 #include "app_font_context.h"
 #include "ui_kit.h"
+#include "ui_font.h"
 #include "vcom_setup.h"
 
 static const char* TAG = "read_pico";
@@ -67,10 +68,6 @@ static void restore_time_from_pmu(void) {
     if (settimeofday(&tv, NULL) == 0) ESP_LOGI(TAG, "system clock restored from PMU");
 }
 
-extern const uint8_t lock_4bpp_bin_start[] asm("_binary_lock_4bpp_bin_start");
-extern const uint8_t lock_4bpp_bin_end[] asm("_binary_lock_4bpp_bin_end");
-extern const uint8_t loading_4bpp_bin_start[] asm("_binary_loading_4bpp_bin_start");
-extern const uint8_t loading_4bpp_bin_end[] asm("_binary_loading_4bpp_bin_end");
 
 // 已标定则开机读一次喂给 epdiy。未标定先用板级默认出开机图，随后拦住进标定页。
 // Load VCOM once when set. Otherwise keep the board default for the splash,
@@ -88,41 +85,45 @@ static bool resolve_vcom_at_boot(void) {
     return false;
 }
 
-// 开机图和锁屏图是预先转好的 4bpp 全屏位图，尺寸对不上说明资源和面板不匹配。
-// Splash and lock images are pre-baked 4bpp full-frames. A size mismatch
-// means the assets do not match the panel.
-static bool images_match_panel(void) {
-    size_t lock_size = (size_t)(lock_4bpp_bin_end - lock_4bpp_bin_start);
-    size_t loading_size = (size_t)(loading_4bpp_bin_end - loading_4bpp_bin_start);
-    size_t expected = (size_t)epd_width() * epd_height() / 2;
-    if (lock_size == expected && loading_size == expected) return true;
-    ESP_LOGE(
-        TAG, "Image size mismatch: lock %u loading %u expected %u",
-        (unsigned)lock_size, (unsigned)loading_size, (unsigned)expected
-    );
-    return false;
+// 极简启动画面直接借内建字形绘制，不读TF、不借阅读字体、不保存整屏位图。
+// Draw the minimal cold splash with built-in glyphs, without TF access, reader faces or a full-screen asset.
+static void draw_startup_frame(uint8_t *framebuffer) {
+    ui_clear_page(framebuffer);
+    const int cx = epd_rotated_display_width() / 2;
+    const int cy = epd_rotated_display_height() / 2;
+    static const char *const wordmark[] = {"K", "i", "i", "k", "o", "r", "e", "a", "d"};
+    static const char *const caption[] = {"准", "备", "资", "源"};
+    const struct {
+        const char *text;
+        const char *const *letters;
+        int count, px, tracking, gray, center_y;
+    } lines[] = {
+        {"Kiikoread", wordmark, 9, 72, 2, 0, cy - 50},
+        {"准备资源", caption, 4, 24, 8, 7, cy + 20},
+    };
+    // 以实际字宽居中，疏朗品牌字距与浅灰提示形成层次，不引入新的字体或位图。
+    // Center measured advances; tracked branding and a muted caption add hierarchy without new fonts or bitmaps.
+    for (size_t row = 0; row < sizeof(lines) / sizeof(lines[0]); ++row) {
+        int above = 0, below = 0;
+        ui_font_measure_line_px(lines[row].px, lines[row].text, &above, &below);
+        int width = (lines[row].count - 1) * lines[row].tracking;
+        for (int i = 0; i < lines[row].count; ++i)
+            width += ui_font_text_width_px(lines[row].px, lines[row].letters[i]);
+        int x = cx - width / 2;
+        const int baseline = lines[row].center_y + (above - below) / 2;
+        for (int i = 0; i < lines[row].count; ++i) {
+            ui_font_draw_text_px(framebuffer, x, baseline, lines[row].px,
+                                lines[row].letters[i], EPD_DRAW_ALIGN_LEFT,
+                                lines[row].gray, 15, false);
+            x += ui_font_text_width_px(lines[row].px, lines[row].letters[i]) + lines[row].tracking;
+        }
+    }
 }
 
-// 缓存验证失败时继续原开机路径，不假设未知屏幕已经全白。
-// A rejected cache keeps the original startup path; never assume an unknown panel is white.
-static bool restore_retained_lock(EpdiyHighlevelState *hl,uint8_t *framebuffer) {
-    read_pico_sd_info_t info = {0};
-    for(unsigned wait=0;wait<150 && read_pico_sd_get_info(&info)==ESP_ERR_NOT_FINISHED;++wait)
-        vTaskDelay(pdMS_TO_TICKS(20));
-    // 超时未挂载不能继续进入卡上的缓存读取。/ Never enter cached-art I/O after a mount timeout.
-    if(!info.mounted)return false;
-    if(!lock_screen_restore(framebuffer))return false;
-    memcpy(hl->back_fb,framebuffer,(size_t)epd_width()*epd_height()/2);
-    return true;
-}
-
-// 深睡恢复会继续等双击解锁；缓存失效时也必须显示锁屏，不能停留在「准备资源」。
-// Deep resumes still await double-press unlock; invalid art must show a lock face, never a loading splash.
+// 深睡保持面板上原锁屏；挂卡与参考帧恢复由锁屏输入循环继续，不能用圆锁覆盖。
+// Keep the retained lock on deep boot; the locked-input loop resumes pending media/reference restoration without a badge replacement.
 static bool prepare_startup_frame(EpdiyHighlevelState *hl,uint8_t *framebuffer,bool resuming,bool vcom_ok) {
-    bool restored=false;
-    if(resuming && vcom_ok && !lock_pin_enabled() && pico_boot_resume_frame_cached())
-        restored=restore_retained_lock(hl,framebuffer);
-    if(restored)return true;
+    if(resuming && vcom_ok)return app_lock_resume_frame(hl);
     epd_poweron();
     if(!resuming)read_pico_i2c_census_take();
     epd_clear();
@@ -130,7 +131,7 @@ static bool prepare_startup_frame(EpdiyHighlevelState *hl,uint8_t *framebuffer,b
     // 样式4关闭锁屏画面：续启无缓存时只留白底，不画兜底锁面。
     // Style 4 disables the lock face: a cache-less resume keeps plain white without the fallback badge.
     if(resuming && app_settings_lock_style()!=4)ui_lock_fallback_draw(framebuffer);
-    else if(!resuming) ui_draw_full_image(framebuffer,loading_4bpp_bin_start);
+    else if(!resuming) draw_startup_frame(framebuffer);
     update_display_from_white(hl);
     return false;
 }
@@ -161,7 +162,6 @@ void app_main(void) {
     pmu_selftest_bind(hw.sensor);
     app_sleep_bind(hw.touch, hw.sensor);
 
-    if (!images_match_panel()) return;
 
     EpdiyHighlevelState hl = hw.hl;
     uint8_t* framebuffer = hw.framebuffer;
@@ -213,6 +213,7 @@ void app_main(void) {
                 (unsigned)app_settings_wake_presses());
         app_lock_boot_gate(&hl, hw.touch, hw.sensor);
     }
+    (void)app_lock_resume_frame(NULL);
     rp_boot_mark("lock");
     const app_desc_t *first = app_home_page();
     pico_resume_t resume = {0};

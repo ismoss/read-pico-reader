@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "previous_version": "0.3.3-rc98",
+  "releases": [
+    {
+      "version": "0.3.3-rc98",
+      "manifest": "metalio/releases/0.3.3-rc98/manifest.json",
+      "bin": "Metalio-S31-update-0.3.3-rc98.bin",
+      "files": {
+        "bootloader.bin": {
+          "size": 22448,
+          "sha256": "f9046a43ff1d93cee2b3eca50e490208f88928e1028ba8e60148b107bae00071"
+        },
+        "partitions.bin": {
+          "size": 3072,
+          "sha256": "6a5500c826a7957e06233d2a580e8378106ce88a31db2857ccb5333a3c5f84bc"
+        },
+        "firmware.bin": {
+          "size": 4499072,
+          "sha256": "d412fa79b1f623cdf387723f9a279db4d3bb9b3ddd54c1cb87b08d074c7b0dbd"
+        },
+        "ota_data_initial.bin": {
+          "size": 8192,
+          "sha256": "7d2c7ac4888bfd75cd5f56e8d61f69595121183afc81556c876732fd3782c62f"
+        }
+      },
+      "source_commit": "688b08ee631f167f568e8ea5085c0cf023c27433",
+      "usb_package_url": "https://github.com/wegooo-cell/read-pico-reader/releases/download/metalio-s31-v0.3.3-rc98/kiikoread-metalio47-0.3.3-rc98-USB.zip",
+      "tf_package_url": "https://github.com/wegooo-cell/read-pico-reader/releases/download/metalio-s31-v0.3.3-rc98/kiikoread-metalio47-0.3.3-rc98-TF.zip"
+    }
+  ]
+}

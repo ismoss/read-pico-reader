@@ -26,7 +26,6 @@
 #include "read_pico_pmu.h"
 #include "ttf_font.h"
 #include "ui_kit.h"
-#include "ui_image_dither.h"
 
 #define TICKET_MAGIC UINT32_C(0x52505431)
 typedef struct {
@@ -183,7 +182,9 @@ static void cover_background_draw(uint8_t *fb, const uint8_t *gray) {
         for (int x = 0; x < UI_LOCK_WIDTH; ++x) {
             const int sx = crop_x + x * crop_w / UI_LOCK_WIDTH;
             const uint8_t tone = ui_contrast_gray(gray[sy * BOOK_COVER_W + sx]);
-            epd_draw_pixel(x, y, ui_image_dither_gray(tone, x, y), fb);
+            // 对比度输出已经是面板4bit灰阶；再次按255/15量化会把纯白变成灰点。
+            // Contrast already yields panel 4-bit levels; quantizing again by 255/15 would dither solid white into gray.
+            epd_draw_pixel(x, y, tone, fb);
         }
     }
 }
@@ -225,7 +226,7 @@ static void cover_draw(uint8_t *fb, const uint8_t *gray, const char *title) {
                 int sy = y * BOOK_COVER_H / box.height;
                 const uint8_t tone = ui_contrast_gray(gray[sy * BOOK_COVER_W + sx]);
                 epd_draw_pixel(box.x + x, box.y + y,
-                               ui_image_dither_gray(tone, box.x + x, box.y + y), fb);
+                               tone, fb);
             }
     } else {
         char short_title[96]; snprintf(short_title, sizeof(short_title), "%s", title);

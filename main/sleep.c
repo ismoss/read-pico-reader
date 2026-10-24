@@ -76,7 +76,6 @@ static bool s_lock_feedback_visible;
 // PMU 确认后仍未掉 EN 时恢复调用方，禁止无限等待。/ Restore the caller if EN stays high after acknowledgement instead of waiting forever.
 #define HOST_EN_DROP_WAIT_MS 5000
 
-extern const uint8_t lock_4bpp_bin_start[] asm("_binary_lock_4bpp_bin_start");
 
 void app_lock_feedback(EpdiyHighlevelState *hl) {
     s_lock_feedback_visible = false;
@@ -144,6 +143,47 @@ static void periph_resume(void) {
 // 单击提示只保留一个小区域；等待双击窗口结束才绘制，触摸仅临时唤醒三秒。
 // Retain one small hint region; draw after the double-click window and wake touch for only three seconds.
 static EpdiyHighlevelState *s_lock_hint_hl;
+static EpdiyHighlevelState *s_boot_lock_hl;
+static bool s_boot_lock_active, s_boot_lock_known, s_boot_lock_draw;
+
+// 未恢复像素前不做差分提示；缺卡/坏透明底图仍保留物理锁图，不假设白底。
+// Never hint against unknown pixels; absent media or a damaged transparent backdrop keeps physical art rather than assuming white.
+static void lock_resume_service(void) {
+    EpdiyHighlevelState *hl=s_boot_lock_hl;
+    if(!hl)return;
+    read_pico_sd_info_t info={0};
+    if(read_pico_sd_get_info(&info)==ESP_ERR_NOT_FINISHED)return;
+    if(!info.mounted){s_boot_lock_hl=NULL;return;}
+    uint8_t *fb=epd_hl_get_framebuffer(hl);
+    bool restored=lock_screen_restore(fb);
+    if(!restored && !s_boot_lock_draw)return;
+    s_boot_lock_hl=NULL;
+    if(!restored) {
+        uint8_t style=app_settings_lock_style();
+        if(style==3)return;
+        epd_hl_set_all_white(hl);
+        app_lock_font_t saved;app_font_begin_lock(&saved);
+        bool drawn=style==0?book_ticket_draw(fb,false):style==2?book_lock_collage_draw(fb):draw_wallpaper(fb);
+        app_font_end_lock(&saved);
+        if(!drawn)return;
+    }
+    if(restored && pico_boot_resume_frame_cached())
+        memcpy(hl->back_fb,fb,(size_t)epd_width()*epd_height()/2);
+    else {
+        enum EpdDrawError result=update_display_full(hl);
+        guard_draw_result(hl,result);epd_poweroff();
+        if(result!=EPD_DRAW_SUCCESS)return;
+        if(lock_screen_save(fb))(void)pico_boot_mark_frame_cached();
+    }
+    s_boot_lock_known=true;s_lock_hint_hl=hl;
+}
+
+bool app_lock_resume_frame(EpdiyHighlevelState *hl) {
+    s_boot_lock_hl=hl;s_boot_lock_active=hl!=NULL;
+    s_boot_lock_known=s_boot_lock_draw=false;s_lock_hint_hl=NULL;
+    lock_resume_service();return s_boot_lock_known;
+}
+
 static struct {
     uint8_t *pixels;
     EpdRect area;
@@ -228,7 +268,7 @@ static bool lock_wait_key(void) {
     bool wake = app_settings_wake_presses() == 1
         ? read_pico_pmu_take_key_wakeup_single() : read_pico_pmu_take_key_wakeup();
     if(wake)return true;
-    lock_hint_service();return false;
+    lock_resume_service();lock_hint_service();return false;
 }
 
 static void lock_arm_ioe_wakeup(void) {
@@ -581,6 +621,10 @@ void enter_lock_and_sleep(
     if (lock_style == 2 && lock_drawn && result == EPD_DRAW_SUCCESS) book_lock_collage_cache_commit(framebuffer);
     if (lock_style == 1 && lock_drawn && result == EPD_DRAW_SUCCESS) ui_wallpaper_cache_commit(framebuffer);
 
+    // PIN也只保存成功显示的原样式，密码输入层不能把兜底或键盘写成锁图。
+    // PIN locks persist only successfully displayed artwork; the PIN layer must not store fallback/keypad pixels.
+    if(lock_drawn && result==EPD_DRAW_SUCCESS && lock_pin_enabled() && lock_screen_save(framebuffer))
+        (void)pico_boot_mark_frame_cached();
     app_lock_wait_key_idle(800);
     // 锁屏先浅睡，十分钟后进入深睡；按键唤醒使用已保存的页面检查点。
     // Locks light-sleep first, enter deep sleep after ten minutes and wake through the saved page checkpoint.
@@ -593,7 +637,7 @@ void enter_lock_and_sleep(
     while (wake == APP_WAKE_TIMEOUT) {
         // PMU SOFT_SLEEP drops the ESP rail while keeping its RTC alive. A short
         // power-key press boots the host; the e-paper keeps this lock image.
-        if(!lock_pin_enabled() && lock_screen_save(framebuffer)) (void)pico_boot_mark_frame_cached();
+        if(lock_drawn && result==EPD_DRAW_SUCCESS && !lock_pin_enabled() && lock_screen_save(framebuffer)) (void)pico_boot_mark_frame_cached();
         app_enter_host_sleep(APP_SLEEP_DEEP);
         wake=app_light_sleep_wait_timed(NULL,APP_LOCK_LIGHT_SLEEP_MS);
     }
@@ -616,19 +660,21 @@ void enter_lock_and_sleep(
 }
 
 void app_lock_boot_gate(EpdiyHighlevelState *hl, cst836u_handle_t touch, sc7a20h_handle_t acc) {
-    s_lock_hint_hl=hl;s_lock_hint.serial=0;
+    s_lock_hint_hl=s_boot_lock_active&&!s_boot_lock_known?NULL:hl;s_lock_hint.serial=0;
+    s_boot_lock_draw=true;lock_resume_service();
     if (!lock_pin_enabled()) {
         if(pico_boot_has_resume()) {
             pico_boot_ready();pico_boot_hold_resume();
             (void)app_light_sleep_wait_timed(NULL,0);
         }
-        s_lock_hint_hl=NULL;return;
+        s_boot_lock_hl=NULL;s_boot_lock_active=false;s_lock_hint_hl=NULL;return;
     }
     // 卡挂载有界等待仅为了字体/锁屏图；没有卡仍必须验证。
     // Bound mount waiting for the face/art only; absent media still requires authentication.
     read_pico_sd_info_t info;
     for (unsigned i = 0; i < 150 && read_pico_sd_get_info(&info) == ESP_ERR_NOT_FINISHED; ++i)
         vTaskDelay(pdMS_TO_TICKS(20));
+    lock_resume_service();
     app_lock_font_t saved; app_font_begin_lock(&saved);
     uint8_t *fb = epd_hl_get_framebuffer(hl);
     if (!lock_screen_restore(fb)) {
@@ -644,6 +690,7 @@ void app_lock_boot_gate(EpdiyHighlevelState *hl, cst836u_handle_t touch, sc7a20h
             boot_style == 3 ? book_lock_bookmark_draw(fb,app_settings_bookmark_path()) : draw_wallpaper(fb);
         if (!drawn) ui_lock_fallback_draw(fb);
     }
+    s_boot_lock_hl=NULL;s_boot_lock_active=false;
     lock_screen_authenticate(hl, touch, acc, true);
     s_lock_hint_hl=NULL;
     app_font_end_lock(&saved);

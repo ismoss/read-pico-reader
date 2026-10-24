@@ -1,12 +1,12 @@
 {
   "schema": 1,
-  "version": "0.3.3-rc99",
+  "version": "0.3.3-rc100",
   "project": "Read_Pico",
   "board": "RDP-G01-W",
   "layout": "pico-dual-4m-v1",
   "minimum_base_version": "0.3.3-rc72",
-  "url": "https://wegooo-cell.github.io/read-pico-reader/Pico-update-0.3.3-rc99.bin",
-  "size": 4194176,
-  "sha256": "238b62fc2fc562c39de4150894bc6388367be258ea6692a85a5d80a46b30fb81",
-  "notes": "1. 恢复设置、文件及二级页文字抗锯齿\n2. 修复充电显示，新增单/双击唤醒\n3. 更新锁屏、取消图标及阅读辅助线\n4. 入书清残影，优化连续翻页输出\n5. OTA优先GitHub，保留原rc98"
+  "url": "https://wegooo-cell.github.io/read-pico-reader/Pico-update-0.3.3-rc100.bin",
+  "size": 3382896,
+  "sha256": "31e0ed2374a1390b7842600f30e3a42ac709fff63d175c4e835712f8629fd4a5",
+  "notes": "1. 漫画 EPUB 使用有界图片头探测，加快大文件开书\n2. 固定时钟预览与透明书封缓存，改善切换与锁屏\n3. 完善锁屏恢复、字体回退及 TF 生命周期\n4. 官网双机型选择，GitHub 优先 OTA 与交叉签名验证"
 }

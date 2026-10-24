@@ -20,6 +20,13 @@ on:
       - flash/releases.json
       - flash/releases/**
       - flash/versions.js
+      - flash/metalio/**
+      - flash/metalio-s31-update.json
+      - flash/metalio-installer.js
+      - flash/metalio-flash-core.js
+      - flash/metalio-connection.js
+      - flash/metalio-flash-reader.js
+      - tools/metalio_release_assets.py
       - flash/update.json
       - flash/Pico-update*.bin
       - flash/firmware.bin
@@ -52,6 +59,8 @@ concurrency:
 
 jobs:
   deploy:
+    # Metalio 使用受保护的 main 发布站点；其独立标签只归档固件。 / Deploy Metalio metadata from protected main; its tag archives binaries only.
+    if: github.event_name != 'release' || !startsWith(github.event.release.tag_name, 'metalio-s31-')
     runs-on: ubuntu-latest
     environment:
       name: github-pages

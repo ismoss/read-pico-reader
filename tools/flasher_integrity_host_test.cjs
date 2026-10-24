@@ -9,11 +9,12 @@ const original = JSON.parse(fs.readFileSync('flash/manifest.json'));
 const bytes = new Map();
 const manifest = JSON.parse(JSON.stringify(original));
 for (const part of manifest.builds[0].parts) {
-  const data = Buffer.alloc(part.offset === 0x10000 ? 256 : 64, part.offset & 255);
+  const data = Buffer.alloc(part.offset === 0x10000 ? 288 : 64, part.offset & 255);
   if (part.offset === 0x10000) {
-    data[0] = 0xe9; data.writeUInt32LE(0xabcd5432, 32);
+    data[0] = 0xe9; data.writeUInt16LE(9,12); data.writeUInt32LE(0xabcd5432, 32);
     data.write(manifest.version, 48); data.write('Read_Pico', 80);
   }
+  if(part.offset===0){data[0]=0xe9;data.writeUInt16LE(9,12);}
   bytes.set(part.path, data); part.size = data.length; part.sha256 = sha(data);
 }
 const script = fs.readFileSync('flash/flasher-integrity.js', 'utf8');

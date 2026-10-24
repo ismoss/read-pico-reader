@@ -1,5 +1,23 @@
 # 版本变更 / Changelog
 
+## 0.3.3-rc100 / 2026-10-24
+
+- 小纸 Pico 与 Metalio EINK 4 Plus 分别构建 rc100，官网按机型提供刷机、TF 下载及联网 OTA；身份和分区保持独立。
+- Pico 同步已确认的漫画图片头测尺寸、时钟样式预览缓存、透明书封缓存及锁屏恢复优化，保留图片质量。
+- 两款联网升级优先 GitHub Pages；启用 SDK 交叉签名证书验证，保留严格 HTTPS、整包校验与回退。
+- 历史固定下载不覆盖。Metalio 源码保持私有，公开交付编译固件与安装工具。
+- Metalio 网页连接改用 Espressif USB JTAG 下载复位，补充握手超时与串口占用提示；首次安装明确要求先恢复 Metalio 官方固件，已有兼容 kiikoread 保留正常更新流程。
+- Metalio 网页读取增加串口接收缓冲与有界在途数据包，收齐并校验读取结束帧；分区核对、应用保留及刷后读回显示进度，读取异常停止并提示重新连接。
+- Metalio 网页下载会话按官方 esptool 的 S31 寄存器与顺序处理 RTC 看门狗及 SWD 自动喂狗，避免连接数秒后复位中断读取或写入；设备正常运行时的看门狗配置保持。
+
+
+## 官网双设备入口 · 2026-10-24
+
+- 刷机页先选择小纸 Pico 或 Metalio EINK 4 Plus，再选择对应版本；各自下载、文件名、更新说明及校验独立。
+- 发布 Metalio S31 rc98 编译固件及联网 OTA 基础包，优先 GitHub Pages，官网备用；旧 Metalio 首次用 USB/TF 安装。
+- Pico 现有 rc99 固件、OTA 清单及历史版本字节保持不变。
+
+
 按版本简述对用户可见的变化；使用方法见 [README](../README.zh-CN.md)。
 User-visible changes by release; see [README](../README.md) for usage.
 

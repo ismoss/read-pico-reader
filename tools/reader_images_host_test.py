@@ -33,6 +33,7 @@ unit = r'''
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -58,6 +59,20 @@ static uint32_t s_page_images_generation;
 static size_t s_page,s_chapter=3,s_image_count;
 static char **s_images;
 static bool hidden,locked;
+// 本套只测未缩放插图；意外进入缩放绘制会直接失败。
+// This suite covers unzoomed illustration paths and rejects accidental zoom rendering.
+#define READER_IMAGE_ZOOM_MIN 1000
+static int s_image_zoom=READER_IMAGE_ZOOM_MIN,s_image_zoom_cx,s_image_zoom_cy,s_zoom_slot=-1;
+static int s_image_zoom_start_distance;
+static size_t s_image_zoom_page=SIZE_MAX,s_zoom_bits_bytes;
+static bool s_image_zoom_bw,s_image_pan_active,s_zoom_active;
+static uint8_t *s_zoom_bits;
+static struct {bool pending;} s_reader_tap;
+static void continuous_du_reset(void){assert(!s_image_zoom_bw);}
+static bool reader_single_image_page(void){assert(0);return false;}
+static void draw_zoomed_image(uint8_t *fb,EpdRect band,int scale,int cx,int cy,bool bw){
+ (void)fb;(void)band;(void)scale;(void)cx;(void)cy;(void)bw;assert(0);
+}
 static int alloc_fail_after=-1,read_failure=-1,decode_failure=-1;
 static unsigned reads,decodes,pixels,notices,invalidations;
 static int reading_image;
@@ -116,6 +131,10 @@ static esp_err_t book_chapter_image(size_t chapter,const char *path,uint8_t **ou
  if(reading_image==read_failure)return ESP_FAIL;
  *out=malloc(1);assert(*out);*size=1;*png=false;return ESP_OK;
 }
+static esp_err_t book_chapter_image_dimensions(size_t chapter,const char *path,unsigned *w,unsigned *h){
+ assert(path);if(locked)measured_chapter=chapter;else assert(chapter==s_chapter);
+ if(atoi(path)==read_failure)return ESP_FAIL;*w=60;*h=20;return ESP_OK;
+}
 static bool book_image_dimensions(const uint8_t *data,size_t len,bool png,unsigned *w,unsigned *h){
  (void)png;assert(data&&len==1);*w=60;*h=20;return true;
 }
@@ -138,13 +157,14 @@ static void ui_text_vc(uint8_t *fb,int x,int y,int px,const char *text,int align
  (void)fb;(void)align;(void)inv;assert(x>=body.x&&x<=body.x+body.width&&y-px/2>=body.y&&y+px/2<=body.y+body.height&&text);++notices;
 }
 static const char s_path[]="test";
-static void book_excerpt_offer(const char *path,const html_text_t *text){(void)path;(void)text;}
+static void book_excerpt_offer(const char *path,uint32_t chapter,const html_text_t *text){(void)path;(void)chapter;(void)text;}
 static char *s_text;
 static blk_t *s_blocks;
 static html_run_t *s_runs;
 static size_t s_run_count;
 static void book_layout_set_runs(const html_run_t *runs,size_t count){(void)runs;(void)count;}
 static size_t s_text_len,s_block_count,s_selected_toc=2,s_jump_offset,s_jump_page;
+static struct {bool valid;} s_chapter_jump_undo;
 static size_t s_chapter_lead_skip;
 static unsigned s_chapter_lead_height,s_chapter_lead_row_height;
 static unsigned s_chapter_lead_width;
@@ -186,7 +206,7 @@ static void free_book(void){
  book_layout_set_image_dims(NULL,NULL);s_reader_dims_ctx=(reader_dims_ctx_t){0};
 }
 '''
-for name in ('inline_ink_gray', 'reader_image_slots', 'reader_image_slot', 'reader_image_dims', 'alloc_page_bitmap', 'release_page_images', 'prepare_inline_image', 'draw_reader_images', 'heading_text_matches', 'load_chapter_at'):
+for name in ('inline_ink_gray', 'reader_image_slots', 'reader_image_slot', 'reader_image_dims', 'alloc_page_bitmap', 'reader_zoom_reset', 'release_page_images', 'prepare_inline_image', 'draw_reader_images', 'heading_text_matches', 'load_chapter_at'):
     unit += '\n' + function(name)
 unit += r'''
 static void setup_images(int count){

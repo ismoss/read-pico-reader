@@ -24,6 +24,7 @@ remain in the source. This project is not an official MindReset release.
 | FreeInk SDK text-turn waveform assembly, commit `96de1be6ce08eb732909e6e8149af8f892b9a2c5` | MIT | [FreeInk SDK notice](licenses/FreeInk-SDK-MIT.txt) |
 | Embedded Noto Sans SC Medium font subset and compressed common-Han bitmaps | SIL OFL-1.1 | [Font license](main/assets/OFL-Noto.txt) |
 | [ESP Web Tools](https://github.com/esphome/esp-web-tools) browser flasher | Apache-2.0 | [Bundled web tool license](flash/vendor/LICENSE) |
+| [SparkMD5](https://github.com/satazor/js-spark-md5), version 3.0.2, browser flash-read transfer checksums | MIT alternative license | [MIT notice](flash/vendor/metalio/SPARK-MD5-LICENSE-MIT); original npm source retained inside an ESM wrapper |
 | Espressif TinyUSB component | Apache-2.0 | [Component license](components/espressif__esp_tinyusb/LICENSE) |
 
 License terms apply to their respective material. The repository's

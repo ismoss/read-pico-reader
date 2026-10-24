@@ -61,7 +61,7 @@ static void ui_fill_round_rect(uint8_t*f,EpdRect r,int radius,uint8_t v){assert(
 static void ui_draw_round_rect(uint8_t*f,EpdRect r,int rad,uint8_t v){(void)f;(void)r;(void)rad;(void)v;}
 static void ui_text_fixed_vc(uint8_t*f,int x,int y,int px,const char*t,int align,bool bold){assert(px==28&&align==1&&!bold&&!strcmp(t,"双击电源键解锁"));epd_draw_pixel(x,y,0,f);}
 '''
-unit+=s[a:b]
+unit+=s[a:s.index('static EpdiyHighlevelState *s_boot_lock_hl;',a)]+'static void lock_resume_service(void){}\n'+s[s.index('static struct {',a):b]
 unit+=r'''
 static void reset(void){
  memset(&s_lock_hint,0,sizeof(s_lock_hint));s_lock_hint_hl=&hl;

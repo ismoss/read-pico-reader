@@ -6,6 +6,7 @@
 #include "book_cover_auto.h"
 #include "book_title.h"
 #include "ui_image_dither.h"
+#include "read_pico_sd.h"
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -137,6 +138,9 @@ static bool same_request(const book_cover_job_t *a,const book_cover_job_t *b) {
         a->stride==b->stride&&a->contrast==b->contrast&&a->phase==b->phase&&a->x==b->x&&a->y==b->y;
 }
 bool book_cover_jobs_submit(unsigned generation,unsigned slot,const book_cover_job_t *request) {
+    // 挂载交接期间不重新打开旧卡封面；恢复后由书架扫描重排队。
+    // Never reopen old-card cover files during mount handoff; shelf scans requeue after recovery.
+    if(request&&!strncmp(request->path,"/sdcard/",8)&&!read_pico_sd_io_ready())return false;
     if(!s_jobs||!request||slot>=BOOK_COVER_JOB_SLOTS||!request->path[0])return false;
     portENTER_CRITICAL(&s_lock);bool ok=generation==s_generation&&!s_paused;
     if(ok&&s_jobs[slot].state!=EMPTY&&!same_request(&s_jobs[slot].request,request))ok=false;

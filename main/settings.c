@@ -17,7 +17,7 @@
 #include "settings.h"
 #include "mod_dns.h"
 #include "kiiko_board_config.h"
-#define READER_TURN_EFFECT_MAX 1
+#define READER_TURN_EFFECT_MAX 2
 #include "book/book_font_size.h"
 
 #include <stdio.h>

@@ -29,9 +29,9 @@
 #define LOCK_SCREEN_CACHE_PARENT "/sdcard/.readpico"
 #endif
 #define LOCK_ART_PATH LOCK_SCREEN_CACHE_PARENT "/locks/pin-background.bin"
-// 旧兜底图可能包含加载提示；升级缓存代号，失效后只显示无文字圆锁。
-// Old fallbacks may contain loading text; invalidate that art generation and replace misses with the text-free badge.
-#define ART_MAGIC UINT32_C(0x50414433)
+// 旧缓存可能保存了临时圆锁；新代号仅持久化成功显示的真实锁图。
+// Old caches may contain temporary badges; this generation persists only successfully displayed lock artwork.
+#define ART_MAGIC UINT32_C(0x50414434)
 typedef struct {uint32_t magic,rotation,style,checksum;uint64_t wallpaper;} art_header_t;
 static uint32_t checksum(const uint8_t *bytes){uint32_t h=2166136261u;for(unsigned i=0;i<FRAME_BYTES;++i)h=(h^bytes[i])*16777619u;return h;}
 static uint64_t wallpaper_key(void){
@@ -64,7 +64,16 @@ bool lock_screen_save(const uint8_t *frame){
         .style=app_settings_lock_style(),.checksum=checksum(frame),.wallpaper=wallpaper_key()};
     bool ok=fwrite(&h,1,sizeof(h),f)==sizeof(h)&&fwrite(frame,1,FRAME_BYTES,f)==FRAME_BYTES&&fflush(f)==0;
     if(fclose(f))ok=false;
-    if(ok&&rename(LOCK_ART_PATH ".tmp",LOCK_ART_PATH)==0)return true;
+    if(ok) {
+        // FatFS不支持覆盖rename；旧图保留为备份，失败时回滚，不把失败保存标记为可恢复。
+        // FatFS cannot replace through rename; keep old art in a backup and roll back failures without marking them cached.
+        if(rename(LOCK_ART_PATH ".tmp",LOCK_ART_PATH)==0)return true;
+        (void)remove(LOCK_ART_PATH ".bak");
+        if(rename(LOCK_ART_PATH,LOCK_ART_PATH ".bak")==0) {
+            if(rename(LOCK_ART_PATH ".tmp",LOCK_ART_PATH)==0){(void)remove(LOCK_ART_PATH ".bak");return true;}
+            (void)rename(LOCK_ART_PATH ".bak",LOCK_ART_PATH);
+        }
+    }
     (void)remove(LOCK_ART_PATH ".tmp");return false;
 }
 static void restore_art(uint8_t *fb,const uint8_t *original){
@@ -89,7 +98,8 @@ void lock_screen_authenticate(EpdiyHighlevelState *hl,cst836u_handle_t touch,sc7
     uint8_t *fb=epd_hl_get_framebuffer(hl);
     (void)acc;
     (void)ble_pt_stop(2000);
-    lock_screen_save(fb);
+    // Pico由锁屏入口保存确认成功的样式；启动/PIN不得覆盖它。
+    // Pico persists validated art at the lock entry; boot/PIN must not overwrite it.
     uint8_t *original=heap_caps_get_free_size(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT)>FRAME_BYTES+1024u*1024u
         ?heap_caps_malloc(FRAME_BYTES,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT):NULL;
     if(original)memcpy(original,fb,FRAME_BYTES);

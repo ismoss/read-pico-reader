@@ -3,6 +3,8 @@
  * English: Composite a transparent PNG cover over the current frame, preserving canvas ratio without reader history or an extra full-frame cache.
  * 用户2026-10-21修订：有界PSRAM行环合并阴影/图案读取，保留逐像素结果；低内存沿用原双遍，缓存完整校验先于底图修改。
  * User revision2026-10-21: a bounded PSRAM row ring fuses shadow/art reads with identical pixels; low memory retains two passes and cache validation precedes background edits.
+ * 用户2026-10-24修订：缓存灰度/alpha字节对无损行压缩，FAT安全替换，继续完整校验后再叠加。
+ * User revision2026-10-24: losslessly pack cached gray/alpha pairs and replace safely on FAT, retaining full validation before composition.
  */
 #include "book_lock_bookmark.h"
 #include "book_cover.h"
@@ -16,10 +18,15 @@
 #include <sys/stat.h>
 
 #ifndef BOOK_SEAL_CACHE_PARENT
+#if KIIKO_BOARD_METALIO47
+#define BOOK_SEAL_CACHE_PARENT "/sdcard/.metalio_s31"
+#else
 #define BOOK_SEAL_CACHE_PARENT "/sdcard/.readpico"
+#endif
 #endif
 #define SEAL_CACHE BOOK_SEAL_CACHE_PARENT "/locks/seal-layer.bin"
 #define SEAL_TEMP SEAL_CACHE ".tmp"
+#define SEAL_PACK SEAL_CACHE ".packed"
 
 typedef struct {
     uint8_t *visited,*pending;
@@ -96,6 +103,90 @@ static uint32_t seal_checksum(uint32_t hash,const uint8_t *p,size_t n) {
     while(n--)hash=(hash^*p++)*16777619u;
     return hash;
 }
+// 每行按灰度/alpha原始字节对无损压缩；高噪声行保持原样，不降低透明度或灰阶。
+// Losslessly pack exact gray/alpha pairs per row; noisy rows remain raw without reducing alpha or gray precision.
+static bool seal_write_row(FILE *file,const uint8_t *row,unsigned w){
+    uint8_t packed[684*2+6],size[2];unsigned x=0,n=0;
+    while(x<w){
+        unsigned run=1;
+        while(run<128&&x+run<w&&!memcmp(row+x*2,row+(x+run)*2,2))++run;
+        if(run>=3){packed[n++]=(uint8_t)(128+run-1);packed[n++]=row[x*2];packed[n++]=row[x*2+1];x+=run;}
+        else{
+            unsigned start=x;x+=run;
+            while(x<w&&x-start<128){
+                run=1;while(run<3&&x+run<w&&!memcmp(row+x*2,row+(x+run)*2,2))++run;
+                if(run>=3)break;
+                if(run>128-(x-start))run=128-(x-start);
+                x+=run;
+            }
+            unsigned count=x-start;packed[n++]=(uint8_t)(count-1);
+            memcpy(packed+n,row+start*2,count*2);n+=count*2;
+        }
+    }
+    unsigned length=n<w*2?n:0;size[0]=(uint8_t)length;size[1]=(uint8_t)(length>>8);
+    return fwrite(size,1,2,file)==2&&fwrite(length?packed:row,1,length?length:w*2,file)==(length?length:w*2);
+}
+static bool seal_read_row(FILE *file,uint8_t *row,unsigned w){
+    uint8_t size[2],packed[684*2+6];
+    if(fread(size,1,2,file)!=2)return false;
+    unsigned length=(unsigned)size[0]+((unsigned)size[1]<<8);
+    if(!length)return fread(row,2,w,file)==w;
+    if(length>w*2+(w+127)/128||length>sizeof(packed)||fread(packed,1,length,file)!=length)return false;
+    unsigned at=0,x=0;
+    while(at<length){
+        unsigned flag=packed[at++],count=(flag&127)+1;
+        if(count>w-x)return false;
+        if(flag&128){
+            if(length-at<2)return false;
+            for(unsigned i=0;i<count;++i){row[(x+i)*2]=packed[at];row[(x+i)*2+1]=packed[at+1];}at+=2;
+        }else{
+            if(length-at<count*2)return false;
+            memcpy(row+x*2,packed+at,count*2);at+=count*2;
+        }
+        x+=count;
+    }
+    return x==w;
+}
+static bool seal_publish(void){
+    if(!rename(SEAL_PACK,SEAL_CACHE))return true;
+    // FAT不能覆盖rename；保留旧缓存直到新文件可发布，失败恢复，不反复走PNG解码。
+    // FAT cannot replace by rename; preserve the old cache until publication and roll back failures instead of repeatedly decoding PNG.
+    (void)remove(SEAL_CACHE ".bak");
+    if(!rename(SEAL_CACHE,SEAL_CACHE ".bak")){
+        if(!rename(SEAL_PACK,SEAL_CACHE)){(void)remove(SEAL_CACHE ".bak");return true;}
+        (void)rename(SEAL_CACHE ".bak",SEAL_CACHE);
+    }
+    return false;
+}
+static bool seal_build_memory(const char *path,seal_header_t *header,bool *attempted){
+    const size_t count=(size_t)header->width*header->height;
+    *attempted=false;
+    if(heap_caps_get_free_size(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT)<2*count+1024u*1024u)return false;
+    uint8_t *layers=heap_caps_malloc(2*count,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(!layers)return false;
+    bool ok=book_png_file_layer(path,header->width,header->height,layers,layers+count)&&
+        remove_white_background(layers,layers+count,header->width,header->height);
+    if(!ok){free(layers);return false;}
+    // 首次生成借用空闲PSRAM，避免把未压缩层反复写回TF；低内存继续走有界行流程。
+    // Borrow spare PSRAM for the first build, avoiding raw SD intermediates; low memory retains bounded row processing.
+    *attempted=true;
+    FILE *file=fopen(SEAL_PACK,"wb");
+    if(!file){free(layers);return false;}
+    header->checksum=2166136261u;uint8_t row[684*2];
+    ok=fwrite(header,1,sizeof(*header),file)==sizeof(*header);
+    for(unsigned y=0;y<header->height&&ok;++y){
+        for(unsigned x=0;x<header->width;++x){
+            size_t at=(size_t)y*header->width+x;row[x*2]=layers[at];row[x*2+1]=layers[count+at];
+        }
+        header->checksum=seal_checksum(header->checksum,row,header->width*2);
+        ok=seal_write_row(file,row,header->width);
+    }
+    free(layers);
+    if(ok)ok=!fseek(file,0,SEEK_SET)&&fwrite(header,1,sizeof(*header),file)==sizeof(*header)&&!fflush(file);
+    if(fclose(file))ok=false;
+    if(ok&&seal_publish())return true;
+    (void)remove(SEAL_PACK);return false;
+}
 static bool seal_row(void *context,unsigned y,unsigned w,const uint8_t *gray,const uint8_t *alpha) {
     seal_sink_t *s=context; uint8_t row[684*2];
     for(unsigned x=0;x<w;++x) {
@@ -149,6 +240,8 @@ static bool seal_remove_white(FILE *file,const uint8_t *white,unsigned w,unsigne
 static bool seal_build(const char *path,seal_header_t *header) {
     if((mkdir(BOOK_SEAL_CACHE_PARENT,0775)&&errno!=EEXIST)||
        (mkdir(BOOK_SEAL_CACHE_PARENT "/locks",0775)&&errno!=EEXIST))return false;
+    bool attempted=false,ready=seal_build_memory(path,header,&attempted);
+    if(attempted)return ready;
     size_t bits=((size_t)header->width*header->height+7)/8;
     uint8_t *white=heap_caps_malloc(bits,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
     if(!white)return false;
@@ -162,14 +255,18 @@ static bool seal_build(const char *path,seal_header_t *header) {
     free(white);
     uint8_t row[684*2];header->checksum=2166136261u;
     if(ok)ok=!fflush(f)&&!fseek(f,sizeof(*header),SEEK_SET);
+    FILE *packed=ok?fopen(SEAL_PACK,"wb"):NULL;
+    if(ok)ok=packed&&fwrite(header,1,sizeof(*header),packed)==sizeof(*header);
     for(unsigned y=0;y<header->height&&ok;++y) {
         ok=fread(row,2,header->width,f)==header->width;
-        if(ok)header->checksum=seal_checksum(header->checksum,row,header->width*2);
+        if(ok){header->checksum=seal_checksum(header->checksum,row,header->width*2);ok=seal_write_row(packed,row,header->width);}
     }
-    if(ok)ok=!fseek(f,0,SEEK_SET)&&fwrite(header,1,sizeof(*header),f)==sizeof(*header)&&!fflush(f);
+    if(ok)ok=!fseek(packed,0,SEEK_SET)&&fwrite(header,1,sizeof(*header),packed)==sizeof(*header)&&!fflush(packed);
+    if(packed&&fclose(packed))ok=false;
     if(fclose(f))ok=false;
-    if(ok&&!rename(SEAL_TEMP,SEAL_CACHE))return true;
-    (void)remove(SEAL_TEMP);return false;
+    (void)remove(SEAL_TEMP);
+    if(ok&&seal_publish())return true;
+    (void)remove(SEAL_PACK);return false;
 }
 static FILE *seal_open(const seal_header_t *wanted) {
     FILE *f=fopen(SEAL_CACHE,"rb");if(!f)return NULL;
@@ -177,7 +274,7 @@ static FILE *seal_open(const seal_header_t *wanted) {
     bool ok=fread(&h,1,sizeof(h),f)==sizeof(h)&&h.magic==wanted->magic&&h.width==wanted->width&&
         h.height==wanted->height&&h.key==wanted->key;
     for(unsigned y=0;y<wanted->height&&ok;++y) {
-        ok=fread(row,2,wanted->width,f)==wanted->width;
+        ok=seal_read_row(f,row,wanted->width);
         if(ok)sum=seal_checksum(sum,row,wanted->width*2);
     }
     if(ok)ok=sum==h.checksum&&fgetc(f)==EOF&&!ferror(f);
@@ -204,7 +301,7 @@ static bool seal_draw_rows(FILE *f,uint8_t *fb,unsigned w,unsigned h,uint8_t *wo
         if(y<h) {
             if(block_row==buffered) {
                 buffered=h-y<16?h-y:16;block_row=0;
-                if(fread(block,row_bytes,buffered,f)!=buffered)return false;
+                for(unsigned i=0;i<buffered;++i)if(!seal_read_row(f,block+i*row_bytes,w))return false;
             }
             art=work+(y%7)*row_bytes;
             memcpy(art,block+block_row++*row_bytes,row_bytes);
@@ -236,7 +333,7 @@ static bool seal_draw(uint8_t *fb,const char *path,unsigned w,unsigned h,bool *s
     for(const unsigned char *p=(const unsigned char*)path;*p;++p)key=(key^*p)*UINT64_C(1099511628211);
     key=(key^(uint64_t)st.st_size)*UINT64_C(1099511628211);
     key=(key^(uint64_t)st.st_mtime)*UINT64_C(1099511628211);
-    seal_header_t wanted={.magic=UINT32_C(0x53454131),.width=w,.height=h,.key=key};
+    seal_header_t wanted={.magic=UINT32_C(0x53454132),.width=w,.height=h,.key=key};
     FILE *f=seal_open(&wanted);
     if(!f&&seal_build(path,&wanted))f=seal_open(&wanted);
     if(!f)return false;
@@ -249,7 +346,7 @@ static bool seal_draw(uint8_t *fb,const char *path,unsigned w,unsigned h,bool *s
     for(unsigned pass=0;pass<2&&ok;++pass) {
         ok=!fseek(f,sizeof(wanted),SEEK_SET);
         for(unsigned y=0;y<h&&ok;++y) {
-            ok=fread(row,2,w,f)==w;
+            ok=seal_read_row(f,row,w);
             for(unsigned x=0;x<w&&ok;++x) {
                 unsigned a=row[x*2+1];if(!a)continue;
                 int xx=ox+x+(pass?0:4),yy=oy+y+(pass?0:6);
