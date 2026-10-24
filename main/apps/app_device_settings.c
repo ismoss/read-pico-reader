@@ -1188,7 +1188,7 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
         // 在线列表：从自建源获取并覆盖内置扩展项；标题显示当前在线条数。
         // Online list: fetched from the self-hosted origin over the built-in extras; the title shows the online count.
         char refresh_value[24];
-        snprintf(refresh_value, sizeof(refresh_value), count > 2 ? "在线 %d 项" : "内置列表");
+        snprintf(refresh_value, sizeof(refresh_value), count > 2 ? "在线 %d 项" : "内置列表", count - 2);
         row(fb, 292 + count * pitch + 12, "联网更新 DNS 列表", refresh_value);
         ui_text(fb, 54, 292 + count * pitch + 100, 20, "选择后立即生效；切换运营商 DNS 遇问题时可回到跟随路由器。",
                 EPD_DRAW_ALIGN_LEFT, false);
