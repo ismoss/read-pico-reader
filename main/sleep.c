@@ -571,6 +571,8 @@ void app_restart_host(void) {
     while (true) vTaskDelay(pdMS_TO_TICKS(1000));
 }
 
+static void auto_connect_after_unlock(void);
+
 // 密码宽限期判定供锁屏与启动门共用；定义在下方。
 // Shared by the lock entry and the boot gate; defined below.
 bool lock_pin_grace_active(void);
