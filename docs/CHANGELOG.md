@@ -5,6 +5,10 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## 待发布 / Unreleased
 
+- 「设置 → 个性化功能 → 锁屏样式」新增「关闭锁屏」：锁屏只清屏息屏，不显示票根/壁纸/拼贴画面；默认单击电源键直接回到原页面，锁屏密码开启时仍先验证，深睡唤醒路径不变。
+  "Settings → Personalization → Lock style" adds "Lock screen off": locking only blanks the panel without ticket/wallpaper/collage art; the default single press returns straight to the previous page, an enabled PIN still validates first, and deep-wake paths are unchanged.
+- 四个主页面底栏改为悬浮玻璃胶囊：普通刷新模式采样底栏之下的页面内容（设置列表延伸到底栏下透出），快刷/水波纹保持固定浅灰胶囊；局部刷新不重算玻璃，玻璃只在整页渲染时采样一次。
+  The four main pages gain a floating glass capsule dock: the ordinary refresh mode samples page content beneath it (the settings list now flows under the dock), while fast/water keep a fixed light pill; partial updates never recompute the glass, which samples once per whole-page render.
 - 联网OTA优先使用GitHub Pages清单与固件下载，官网清单保留备用；保留断点续传、失败重试、完整校验及空闲分区写入保护。
   Prefer GitHub Pages OTA metadata/images, retaining website metadata fallback, Range resumes, retries, full verification and inactive-slot protection.
 - 修复章节文件名含冒号的 EPUB 打不开：只有路径首段的冒号仍按协议/盘符分隔处理，条目名内部的冒号按普通字符解析。

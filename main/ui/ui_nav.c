@@ -6,10 +6,12 @@
  * English: Draw and hit-test the four-tab navigation with thin-line home, books, files and settings icons from Lucide.
  * 用户增加点击反馈：共享返回键和底栏图标登记局部命中，主循环只在按下和复位推该控件。
  * User adds click feedback: register local hits for shared backs and navigation icons; the loop presents only that control on press and restoration.
- * 用户修订：所有模式把内容扫描截止到分隔线之间的8行固定为白色留白；滚动不能把列表画进这条扫描保护带。
- * User revision: every mode keeps the eight rows between content scans and the divider blank white; scrolling must not paint list content into this guard.
+ * 用户修订：快刷/水波纹仍把内容扫描截止在 32 列对齐边界，滚动不画进底栏；普通模式由页面自行决定 dock 之下内容。
+ * User revision: fast/water still cap content scans at the 32-column boundary without painting into the bar; the ordinary mode lets each page decide what flows beneath the dock.
  * 用户修订：状态栏签名按系统字体和内建界面字体的共同安全宽度截断，阅读页复用小型字宽表，不重载系统字体。
  * User revision: fit status signatures to widths safe for the system and built-in UI faces; reading reuses a small metrics table without reloading the system font.
+ * 用户修订：底栏改为悬浮玻璃胶囊，普通模式采样其下页面内容，快刷/水波纹保持固定浅灰；局部刷新不重算玻璃。
+ * User revision: the bar becomes a floating glass capsule that samples page content in the ordinary mode and stays a fixed light pill under fast/water; partial updates never recompute the glass.
  */
 #include "ui_nav.h"
 #include <stdio.h>
@@ -20,6 +22,7 @@
 #include "read_pico_pmu_protocol.h"
 #include "read_pico_transfer.h"
 #include "ui_kit.h"
+#include "ui_glass.h"
 #include "settings.h"
 #include "ui_click_feedback.h"
 #include "ttf_font.h"
@@ -143,17 +146,25 @@ static void icon(uint8_t *fb, int tab, int cx, int y) {
 }
 
 void ui_nav_draw(uint8_t *fb, int active) {
-    ui_fill_rect_fast((EpdRect){0, UI_NAV_TOP, UI_LOCK_WIDTH, UI_LOCK_HEIGHT - UI_NAV_TOP}, 0xe0, fb);
-    ui_hairline(fb, UI_NAV_TOP, 0, UI_LOCK_WIDTH, UI_GRAY_LIGHT);
-    ui_fill_rect_fast((EpdRect){0, UI_NAV_REFRESH_END, UI_LOCK_WIDTH, UI_NAV_TOP - UI_NAV_REFRESH_END}, 0xf0, fb);
-    if (app_settings_main_refresh_mode() != APP_MAIN_REFRESH_NORMAL) {
-        // 快刷内容边界预留空白；横条在白底上单独短刷，图标和文字保持固定。
-        // Reserve a blank fast-refresh boundary; short-update the marker on white while retaining icons and text.
+    const EpdRect dock = {UI_NAV_DOCK_INSET, UI_NAV_DOCK_TOP,
+                          UI_LOCK_WIDTH - 2 * UI_NAV_DOCK_INSET, UI_NAV_DOCK_BOTTOM - UI_NAV_DOCK_TOP};
+    if (app_settings_main_refresh_mode() == APP_MAIN_REFRESH_NORMAL) {
+        // 只画胶囊本体：采样 dock 之下的页面内容，胶囊外（四角与四周留白）保留页面内容自然穿过。
+        // Glass paints the capsule only: it samples the page beneath, and content around the pill
+        // (box corners and margins) keeps flowing naturally instead of being masked white.
+        if (!ui_glass_panel(fb, dock, UI_NAV_DOCK_RADIUS, 58, 40)) {
+            ui_fill_round_rect(fb, dock, UI_NAV_DOCK_RADIUS, 0xe0);
+        }
+    } else {
+        // 快刷/水波纹用固定浅灰胶囊：像素稳定不随内容重驱，整条底栏保持白底与横条预留。
+        // Fast/water keep a fixed light capsule whose pixels never re-drive with content; the strip stays white with the marker reserve.
+        ui_fill_rect_fast((EpdRect){0, UI_NAV_TOP, UI_LOCK_WIDTH, UI_LOCK_HEIGHT - UI_NAV_TOP}, UI_GRAY_WHITE, fb);
         ui_fill_rect_fast((EpdRect){0, UI_NAV_MARKER_TOP, UI_LOCK_WIDTH, UI_NAV_MARKER_BOTTOM - UI_NAV_MARKER_TOP}, UI_GRAY_WHITE, fb);
+        ui_fill_round_rect(fb, dock, UI_NAV_DOCK_RADIUS, 0xe0);
     }
     for (int i = 0; i < 4; ++i) {
         int center = (i * 2 + 1) * UI_LOCK_WIDTH / 8;
-        if (i == active) ui_fill_rect_fast((EpdRect){center - 28, UI_NAV_TOP + 1, 56, 5}, UI_GRAY_BLACK, fb);
+        if (i == active) ui_fill_rect_fast((EpdRect){center - 28, UI_NAV_MARKER_TOP, 56, UI_NAV_MARKER_BOTTOM - UI_NAV_MARKER_TOP}, UI_GRAY_BLACK, fb);
         icon(fb, i, center, UI_NAV_TOP + 27);
         ui_text(fb, center, UI_NAV_TOP + 74, 17, labels[i], EPD_DRAW_ALIGN_CENTER, false);
     }

@@ -288,7 +288,10 @@ static bool main_begin(EpdiyHighlevelState* hl, enum EpdDrawError* result) {
     if (!main_nav_geometry()) return false;
     // 8帧整页方案被实机否定；用户接受主页面黑白、亚克力灰阶，黑白改用完整20相。
     // Hardware rejected whole-page 8-frame output; the user accepted black/white main pages with gray acrylic. Use the full 20-phase black/white table.
-    main_freeze_navigation(hl, true);
+    // 普通模式玻璃 dock 随内容驱动：不冻结底栏像素，整页差分把 dock 变化一并带出；快刷/水波纹保留原冻结。
+    // The ordinary-mode glass dock follows content: skip the navigation freeze so one whole-page diff carries dock changes; fast/water keep the original freeze.
+    const bool dock_with_body = normal;
+    if (!dock_with_body) main_freeze_navigation(hl, true);
     if (fast) main_normalize_body(hl);
     const bool changed = main_body_changed(hl);
     uint8_t *cache = fast && changed && s_main_band_count
@@ -300,6 +303,9 @@ static bool main_begin(EpdiyHighlevelState* hl, enum EpdDrawError* result) {
     // an additional comparison and eight-frame serial marker update.
     bool marker_with_body=fast&&changed&&!cache&&!gray_fallback;
     EpdRect body_area=main_body_area();
+    // 普通模式把 dock 一并纳入同一次扫描；body 变化与 dock 变化在整页渲染里总是同时出现。
+    // The ordinary mode folds the dock into the same scan; body and dock changes always appear together in a whole-page render.
+    if(dock_with_body)body_area.height=epd_rotated_display_height()-body_area.y;
     if(marker_with_body)body_area.height=UI_NAV_MARKER_SCAN_END;
     if (cache) main_band_copy(hl, cache, false);
     const EpdWaveform* body_wave = normal ? display_main_normal_waveform() : gray_fallback ? display_main_gray_waveform()
@@ -318,7 +324,7 @@ static bool main_begin(EpdiyHighlevelState* hl, enum EpdDrawError* result) {
         }
     }
     const bool shelf_regions=normal&&changed&&s_main_band_count&&(changing_page||body_full);
-    if(shelf_regions){marker_with_body=true;body_area.height=UI_NAV_MARKER_SCAN_END;}
+    if(shelf_regions&&!dock_with_body){marker_with_body=true;body_area.height=UI_NAV_MARKER_SCAN_END;}
     use_scan_for(body_wave, body_mode);
     epd_poweron();
     epd_hl_waveform(hl, body_wave);

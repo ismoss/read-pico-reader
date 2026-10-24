@@ -96,6 +96,11 @@ static int settings_content_end(void) {
 static int settings_viewport_end(void) {
     return UI_NAV_TOP;
 }
+// 普通刷新模式主页列表延伸到悬浮玻璃 dock 之下透出内容；快刷/水波纹维持原 1096 边界。
+// In the ordinary refresh mode the main list flows beneath the floating glass dock; fast/water keep the old 1096 bound.
+static int settings_list_end(void) {
+    return app_settings_main_refresh_mode() == APP_MAIN_REFRESH_NORMAL ? UI_LOCK_HEIGHT : settings_viewport_end();
+}
 static void settings_navigation(uint8_t *fb) {
     ui_nav_draw(fb,3);
 }
@@ -785,14 +790,14 @@ static void setting_group(uint8_t *fb, int title_y, const char *title,
     card_y -= s_main_scroll;
     // 屏外的行不测字、不生成字形；保留卡片边界与原滚动坐标。
     // Skip off-screen glyph work while preserving card boundaries and scroll coordinates.
-    if (card_y + count * row_height <= 160 || title_y >= settings_viewport_end()) return;
-    if (title_y + ui_text_effective_px(20) > 160 && title_y < settings_viewport_end())
+    if (card_y + count * row_height <= 160 || title_y >= settings_list_end()) return;
+    if (title_y + ui_text_effective_px(20) > 160 && title_y < settings_list_end())
         ui_text(fb, 42, title_y, 20, title, EPD_DRAW_ALIGN_LEFT, false);
     settings_card(fb, (EpdRect){36, card_y, 612, count * row_height}, 22,
                   UI_GRAY_WHITE, 0x70);
     for (int i = 0; i < count; ++i) {
         int y = card_y + i * row_height;
-        if (y + row_height <= 160 || y >= settings_viewport_end()) continue;
+        if (y + row_height <= 160 || y >= settings_list_end()) continue;
         if (i) settings_divider(fb, y, 88, 544);
         setting_icon(fb, icons[i], 67, y + row_height / 2);
         if (icons[i] == SETTINGS_UNLOCK_ICON) {
@@ -1081,20 +1086,24 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
     if (s_page == SETTINGS_LOCK_STYLE) {
         back_header(fb, "锁屏样式");
         section(fb, 248, "选择电源键锁屏后的画面");
-        const char *labels[] = {"壁纸锁屏", "阅读票根", "书架拼贴", "透明 PNG 书封"};
-        const char *details[] = {"使用 TF 卡中的 JPG / PNG 图片", "书封、进度和阅读记录", "真实封面 · 名称与数量 · 系统字体", "当前页面作底 · 白底 PNG 自动去白"};
-        const uint8_t values[] = {1, 0, 2, 3};
-        for (int i = 0; i < 4; ++i) {
-            EpdRect box = {36, 300 + i * 154, 612, 132};
+        // 五档样式压缩为一列卡片；关闭档放首位，选中后锁屏只清屏息屏。
+        // Five styles share one card column; the off entry leads, and locking with it only blanks the panel.
+        const char *labels[] = {"关闭锁屏", "壁纸锁屏", "阅读票根", "书架拼贴", "透明 PNG 书封"};
+        const char *details[] = {"不显示锁屏画面 · 短按电源键唤醒",
+                                 "使用 TF 卡中的 JPG / PNG 图片", "书封、进度和阅读记录",
+                                 "真实封面 · 名称与数量 · 系统字体", "当前页面作底 · 白底 PNG 自动去白"};
+        const uint8_t values[] = {4, 1, 0, 2, 3};
+        for (int i = 0; i < 5; ++i) {
+            EpdRect box = {36, 300 + i * 128, 612, 110};
             bool active = app_settings_lock_style() == values[i];
-            settings_card(fb, box, 22, active ? 0xd0 : UI_GRAY_WHITE, 0x70);
-            ui_text(fb, 64, box.y + 23, 31, labels[i], EPD_DRAW_ALIGN_LEFT, false);
-            ui_text(fb, 64, box.y + 79, 20, details[i], EPD_DRAW_ALIGN_LEFT, false);
-            if (active) epd_fill_circle(609, box.y + 66, 8, UI_GRAY_BLACK, fb);
+            settings_card(fb, box, 18, active ? 0xd0 : UI_GRAY_WHITE, 0x70);
+            ui_text(fb, 64, box.y + 24, 28, labels[i], EPD_DRAW_ALIGN_LEFT, false);
+            ui_text(fb, 64, box.y + 74, 19, details[i], EPD_DRAW_ALIGN_LEFT, false);
+            if (active) epd_fill_circle(609, box.y + 55, 8, UI_GRAY_BLACK, fb);
         }
-        ui_text(fb,54,966,21,"透明书封放入 pictures · 推荐 684 × 1216",EPD_DRAW_ALIGN_LEFT,false);
+        ui_text(fb,54,954,21,"透明书封放入 pictures · 推荐 684 × 1216",EPD_DRAW_ALIGN_LEFT,false);
         if (app_settings_wallpaper_path()[0])
-            row(fb, 1010, "当前壁纸", strrchr(app_settings_wallpaper_path(), '/') + 1);
+            row(fb, 992, "当前壁纸", strrchr(app_settings_wallpaper_path(), '/') + 1);
         settings_navigation(fb);
         return;
     }
@@ -2042,6 +2051,9 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
     if (s_page == SETTINGS_MAIN_REFRESH) {
         for (int i = 0; i < 3; ++i) {
             if (!ui_rect_hit((EpdRect){36, 298 + i * 158, 612, 132}, ev->x0, y)) continue;
+            // 玻璃与实心 dock 的像素形态不同，切换刷新模式后下一次推屏直接整屏定稿清掉旧底栏。
+            // Glass and solid docks differ pixel-wise, so a mode switch settles a full frame next present to clear the old bar.
+            display_request_full_refresh();
             app_settings_set_main_refresh_mode((app_main_refresh_mode_t)i);
             return APP_REDRAW_PAGE;
         }
@@ -2064,25 +2076,31 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         return APP_REDRAW_PAGE;
     }
     if (s_page == SETTINGS_LOCK_STYLE) {
-        if (y >= 300 && y < 432) {
+        // 卡片命中带与渲染的 128px 间距一致；关闭档立即生效，壁纸/书封档先进选择器。
+        // Hit bands mirror the 128 px render pitch; the off entry applies at once, art entries open pickers.
+        if (y >= 300 && y < 410) {
+            app_settings_set_lock_style(4);
+            return APP_REDRAW_PAGE;
+        }
+        if (y >= 428 && y < 538) {
             s_bookmark_picker=false;wallpaper_scan();
             s_page = SETTINGS_WALLPAPER;
             return APP_REDRAW_PAGE;
         }
-        if (y >= 454 && y < 586) {
+        if (y >= 556 && y < 666) {
             app_settings_set_lock_style(0);
             return APP_REDRAW_PAGE;
         }
-        if (y >= 608 && y < 740) {
+        if (y >= 684 && y < 794) {
             app_settings_set_lock_style(2);
             s_collage_prepare_pending = true;
             return APP_REDRAW_PAGE;
         }
-        if(y>=762 && y<894){
+        if(y>=812&&y<922){
             s_bookmark_picker=true;wallpaper_scan();s_page=SETTINGS_WALLPAPER;
             return APP_REDRAW_PAGE;
         }
-        if (y >= 1010 && app_settings_wallpaper_path()[0]) {
+        if (y >= 984 && app_settings_wallpaper_path()[0]) {
             s_bookmark_picker=false;wallpaper_scan();
             s_page = SETTINGS_WALLPAPER;
             return APP_REDRAW_PAGE;
@@ -2413,7 +2431,11 @@ static bool settings_present(app_ctx_t *ctx, app_redraw_t redraw) {
         s_scroll_present_pending = false;
         render(ctx, ctx->fb);
         int top = s_page == SETTINGS_MAIN ? 160 : s_page == SETTINGS_SHELF_STYLE ? 242 : 190;
-        EpdRect area = {0, top, UI_LOCK_WIDTH, settings_content_end() - top};
+        // 主页在普通模式把 dock 下的行一并推走；其他页维持 1088 内容界。
+        // The main page in the ordinary mode pushes its under-dock rows too; other pages keep the 1088 content bound.
+        int bottom = s_page == SETTINGS_MAIN && app_settings_main_refresh_mode() == APP_MAIN_REFRESH_NORMAL
+            ? UI_LOCK_HEIGHT : settings_content_end();
+        EpdRect area = {0, top, UI_LOCK_WIDTH, bottom - top};
         // 只驱动变化像素，滚动次数不触发黑白清屏；题头与底栏保持稳定。
         // Drive changed pixels only; scroll counts never trigger a wipe, and header/nav stay stable.
         // 滚动已限定列表区域；取消主页替换许可，保留抗锯齿并去掉额外补白，不在松手后追加刷新。

@@ -126,8 +126,10 @@ static bool prepare_startup_frame(EpdiyHighlevelState *hl,uint8_t *framebuffer,b
     if(!resuming)read_pico_i2c_census_take();
     epd_clear();
     epd_hl_set_all_white(hl);
-    if(resuming)ui_lock_fallback_draw(framebuffer);
-    else ui_draw_full_image(framebuffer,loading_4bpp_bin_start);
+    // 样式4关闭锁屏画面：续启无缓存时只留白底，不画兜底锁面。
+    // Style 4 disables the lock face: a cache-less resume keeps plain white without the fallback badge.
+    if(resuming && app_settings_lock_style()!=4)ui_lock_fallback_draw(framebuffer);
+    else if(!resuming) ui_draw_full_image(framebuffer,loading_4bpp_bin_start);
     update_display_from_white(hl);
     return false;
 }

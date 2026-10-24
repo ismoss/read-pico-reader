@@ -559,7 +559,10 @@ void enter_lock_and_sleep(
     if (system_lock) app_font_begin_lock(&lock_font);
     // 阅读票根独占锁屏画布：始终先画最近书籍封面，再叠票根；自定义壁纸只属于壁纸模式。
     // Ticket mode owns the lock canvas: book cover first, ticket on top. Custom wallpaper is wallpaper-only.
-    bool lock_drawn = ticket
+    // 样式4关闭锁屏画面：不画任何面，整屏保持白底直接入睡；锁屏缓存仍保存白帧供深睡续读。
+    // Style 4 disables the lock face: no art is drawn and the white frame goes straight to sleep; the blank cache still serves deep-sleep resume.
+    bool lock_drawn = lock_style == 4 ? true
+        : ticket
         ? book_ticket_draw(framebuffer, reader_background)
         : lock_style == 2 ? book_lock_collage_prepare(framebuffer) :
           lock_style == 3 ? book_lock_bookmark_draw(framebuffer,app_settings_bookmark_path()) : draw_wallpaper(framebuffer);
@@ -631,10 +634,14 @@ void app_lock_boot_gate(EpdiyHighlevelState *hl, cst836u_handle_t touch, sc7a20h
     if (!lock_screen_restore(fb)) {
         // 冷启动丢失锁屏缓存时没有当前页面，用干净底图并继续密码校验。
         // A cold start with no retained art has no current page; use a clean base and keep authentication.
-        if (app_settings_lock_style() == 3) memset(fb,255,(size_t)epd_width()*epd_height()/2);
-        bool drawn = app_settings_lock_style() == 0 ? book_ticket_draw(fb, false) :
-            app_settings_lock_style() == 2 ? book_lock_collage_draw(fb) :
-            app_settings_lock_style() == 3 ? book_lock_bookmark_draw(fb,app_settings_bookmark_path()) : draw_wallpaper(fb);
+        // 样式4关闭锁屏画面：缓存丢失同样只留白底；密码开启时验证层自行覆盖。
+        // Style 4 keeps a plain white base on cache loss too; the PIN layer overlays itself when enabled.
+        uint8_t boot_style = app_settings_lock_style();
+        if (boot_style == 3 || boot_style == 4) memset(fb,255,(size_t)epd_width()*epd_height()/2);
+        bool drawn = boot_style == 4 ? true
+            : boot_style == 0 ? book_ticket_draw(fb, false) :
+            boot_style == 2 ? book_lock_collage_draw(fb) :
+            boot_style == 3 ? book_lock_bookmark_draw(fb,app_settings_bookmark_path()) : draw_wallpaper(fb);
         if (!drawn) ui_lock_fallback_draw(fb);
     }
     lock_screen_authenticate(hl, touch, acc, true);

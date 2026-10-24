@@ -247,7 +247,9 @@ void app_settings_init(void) {
         system_contrast >= 100 && system_contrast <= 140 && system_contrast % 10 == 0)
         s_system_contrast = system_contrast;
     uint8_t lock_style = 0;
-    if (nvs_get_u8(h, NVS_KEY_LOCK_STYLE, &lock_style) == ESP_OK && lock_style <= 3)
+    // 4 = 关闭锁屏画面（纯息屏），与票根/壁纸/拼贴/书封并列为一档样式。
+    // 4 = lock face off (blank sleep), kept in the same enum as ticket/wallpaper/collage/bookmark.
+    if (nvs_get_u8(h, NVS_KEY_LOCK_STYLE, &lock_style) == ESP_OK && lock_style <= 4)
         s_lock_style = lock_style;
     size_t wallpaper_len = sizeof(s_wallpaper);
     if (nvs_get_str(h, NVS_KEY_WALLPAPER, s_wallpaper, &wallpaper_len) != ESP_OK ||
@@ -508,7 +510,7 @@ void app_settings_set_system_contrast(uint8_t percent) {
 }
 uint8_t app_settings_lock_style(void) { return s_lock_style; }
 void app_settings_set_lock_style(uint8_t style) {
-    if (style > 3 || style == s_lock_style) return;
+    if (style > 4 || style == s_lock_style) return;
     s_lock_style = style;
     nvs_put_u8(NVS_KEY_LOCK_STYLE, style);
 }
@@ -1144,7 +1146,7 @@ static bool backup_valid(const settings_backup_v1_t *backup) {
     if (f[BK_SLEEP] > APP_SLEEP_OFF || f[BK_PICKUP] > 1 ||
         f[BK_SYS_SIZE] < 100 || f[BK_SYS_SIZE] > 200 || f[BK_SYS_SIZE] % 10 ||
         f[BK_SYS_CONTRAST] < 100 || f[BK_SYS_CONTRAST] > 140 || f[BK_SYS_CONTRAST] % 10 ||
-        f[BK_LOCK] > 3 || f[BK_BOOK_PX] < BOOK_READER_PX_MIN || f[BK_BOOK_PX] > BOOK_READER_PX_MAX ||
+        f[BK_LOCK] > 4 || f[BK_BOOK_PX] < BOOK_READER_PX_MIN || f[BK_BOOK_PX] > BOOK_READER_PX_MAX ||
         f[BK_SHAKE] > 1 || (f[BK_FULL_PAGES] != 0 && f[BK_FULL_PAGES] != 5 &&
                             f[BK_FULL_PAGES] != 10 && f[BK_FULL_PAGES] != 15 &&
                             f[BK_FULL_PAGES] != 30) ||
