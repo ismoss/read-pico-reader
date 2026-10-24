@@ -732,7 +732,9 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
         // A next-page preview under the glass: painted but untappable so the dock refracts real list content.
         int preview = first + root_rows();
         if (preview < s_count) {
-            int y = 520 + root_rows() * 91;
+            // 跳过翻页器所在的一行间隙：预览行在第 6 行位置（520+6*91=1066），不与 1006..1056 的翻页器重叠。
+            // Skip the pager's row gap: the preview sits in slot six (520+6*91=1066), clear of the pager at 1006..1056.
+            int y = 520 + (root_rows() + 1) * 91;
             char name[128]; copy_utf8(name, sizeof(name), s_files[preview].name); fit_name(name, 23, 430);
             file_rule(fb, 96, y, 532);
             file_icon(fb, 52, y + 24, s_files[preview].is_dir);

@@ -207,6 +207,10 @@ void app_settings_init(void) {
         s_staged_shutdown = raw == 1;
     raw = 1;
     if (nvs_get_u8(h, NVS_KEY_WAKE_PRESSES, &raw) != ESP_OK || (raw != 1 && raw != 2)) raw = 1;
+    // 二改决定：迁移掉历史保存的双击唤醒——单击电源键直接进密码页/原页，开关保留可再开。
+    // Mod decision: migrate any saved double-press away -- one power press goes straight to
+    // the PIN page or the previous page; the switch itself stays available.
+    if (raw == 2) { raw = 1; nvs_put_u8(NVS_KEY_WAKE_PRESSES, 1); }
     s_wake_presses = raw;
     raw = 1;
     if (nvs_get_u8(h, NVS_KEY_DNS_INDEX, &raw) == ESP_OK && raw < MOD_DNS_MAX) s_dns_index = raw;
