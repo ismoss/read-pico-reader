@@ -50,3 +50,5 @@
   Cache-Control: no-cache
 /metalio-connection.js
   Cache-Control: no-cache
+/metalio-flash-reader.js
+  Cache-Control: no-cache

@@ -1,6 +1,7 @@
 /* 中文：S31 专用网页安装，先验证再写入；与 Pico 安装器隔离。 / English: Verify-before-write S31 installation isolated from the Pico installer. */
 import {require,equal,identity,partitionTable,selectedSlot} from './metalio-flash-core.js';
 import {connectS31,connectionMessage} from './metalio-connection.js';
+import {readS31Flash} from './metalio-flash-reader.js';
 let active=false;
 async function open(snapshot){
   if(active)return;active=true;
@@ -16,6 +17,16 @@ async function open(snapshot){
   const say=text=>{status.textContent=text;};
   const append=text=>{log.textContent=(log.textContent+String(text)+'\n').slice(-18000);log.scrollTop=log.scrollHeight;};
   const digest=data=>window.KiikoreadFlasher.digest(data);
+  async function read(address,size,label){
+    const started=performance.now();let last=0;
+    say(`${label}（0/${size} 字节）…`);append(`${label}: 0x${address.toString(16)}, ${size} 字节`);
+    const bytes=await readS31Flash(loader,address,size,(done,total)=>{
+      const now=performance.now();if(now-last<200&&done!==total)return;last=now;
+      say(`${label}：${Math.floor(done/total*100)}%（${done}/${total} 字节）`);
+      if(checking)progress.value=done/total*100;
+    });
+    append(`${label}：读取及 MD5 校验通过，${Math.round(performance.now()-started)} ms`);return bytes;
+  }
   async function disconnect(){
     const previous=transport;transport=loader=null;if(!previous)return;
     let timer;
@@ -40,7 +51,7 @@ async function open(snapshot){
       await disconnect();say('正在下载并校验所选固件…');
       bundle?.dispose();bundle=await window.KiikoreadFlasher.prepare(snapshot.manifest,snapshot.manifestURL,snapshot.files,'metalio');
       const {ESPLoader,Transport}=await import('./vendor/metalio/esptool-js-0.7.0.js');
-      transport=new Transport(port);loader=new ESPLoader({transport,baudrate:115200,romBaudrate:115200,terminal:{clean(){},write:append,writeLine:append}});
+      transport=new Transport(port);loader=new ESPLoader({transport,baudrate:115200,romBaudrate:115200,serialOptions:{bufferSize:65536},terminal:{clean(){},write:append,writeLine:append}});
       say('正在复位 USB JTAG 下载口并识别 S31（最长 30 秒）…');
       append('连接方式：Espressif USB JTAG 下载复位（usb_reset）；尚未写入 Flash。');
       await connectS31(loader);
@@ -50,7 +61,7 @@ async function open(snapshot){
       const mac=await loader.chip.readMac(loader);append(`S31 MAC: ${mac} / ${capacity}`);
       const table=bundle.parts.find(p=>p.name==='partitions.bin');partitionTable(table.data);
       say('正在核对分区与启动位置…');
-      protectedBefore=await loader.readFlash(0x8000,0x8000);
+      protectedBefore=await read(0x8000,0x8000,'读取分区与启动记录');
       const expected=new Uint8Array(4096).fill(255);expected.set(table.data);
       const compatible=equal(protectedBefore.slice(0,4096),expected);
       if(reinstall.checked){
@@ -59,10 +70,10 @@ async function open(snapshot){
       }else{
         require(compatible,'设备分区不同，尚未写入。如需从原厂切换，请勾选重新安装基础包及清除机内设置，再检查。');
         const slot=selectedSlot(protectedBefore.slice(0x5000,0x7000));
-        const current=identity(await loader.readFlash(slot.address,4096));
+        const current=identity(await read(slot.address,4096,'核对当前应用身份'));
         const app=bundle.parts.find(p=>p.name==='firmware.bin');require(Math.ceil(app.data.length/4096)*4096<=slot.size,'固件超过启动槽容量。');
         say('正在保留原应用，以便写入失败时恢复…');
-        const before=await loader.readFlash(slot.address,slot.size);identity(before);
+        const before=await read(slot.address,slot.size,'保留原应用以便恢复');identity(before);
         if(backupURL)URL.revokeObjectURL(backupURL);backupURL=URL.createObjectURL(new Blob([before]));
         const backup=q('[data-backup]');backup.href=backupURL;backup.download=`Metalio-S31-before-${current}.bin`;backup.hidden=false;
         plan={full:false,slot,mac,current};say(`已识别 ${current}，保留分区和启动位置。确认后刷入 ${snapshot.manifest.version}。`);
@@ -77,7 +88,7 @@ async function open(snapshot){
     try{
       // 再次核对检查后设备未变；写入中不更改已绑定的版本。 / Recheck the device and retain the clicked release throughout writing.
       require(await loader.chip.readMac(loader)===plan.mac,'设备身份发生变化。');
-      require(equal(await loader.readFlash(0x8000,0x8000),protectedBefore),'检查后启动记录发生变化，请重新连接。');
+      require(equal(await read(0x8000,0x8000,'复核分区与启动记录'),protectedBefore),'检查后启动记录发生变化，请重新连接。');
       const app=bundle.parts.find(p=>p.name==='firmware.bin');
       const parts=plan.full?bundle.parts.map(p=>({data:p.data,address:p.offset})):[{data:app.data,address:plan.slot.address}];
       parts.sort((a,b)=>a.address-b.address);
@@ -85,7 +96,7 @@ async function open(snapshot){
       await loader.writeFlash({fileArray:parts,flashSize:'keep',flashMode:'keep',flashFreq:'keep',eraseAll:false,compress:true,reportProgress:(index,written,total)=>{progress.value=Math.floor((index+written/total)/parts.length*75);}});
       for(let i=0;i<parts.length;i++){
         say(`正在读回校验 ${i+1}/${parts.length}…`);
-        const actual=await loader.readFlash(parts[i].address,parts[i].data.length);
+        const actual=await read(parts[i].address,parts[i].data.length,`读回校验 ${i+1}/${parts.length}`);
         require(await digest(actual)===await digest(parts[i].data),'设备读回校验失败，不能确认安装成功。');progress.value=75+Math.floor((i+1)/parts.length*20);
       }
       imageVerified=true;
@@ -93,7 +104,7 @@ async function open(snapshot){
         say('固件已校验，正在清除机内设置…');
         await loader.writeFlash({fileArray:[{address:0x9000,data:new Uint8Array(0x4000).fill(255)}],flashSize:'keep',flashMode:'keep',flashFreq:'keep',eraseAll:false,compress:true});
       }
-      const after=await loader.readFlash(0x8000,0x8000);
+      const after=await read(0x8000,0x8000,'核对数据保护区域');
       if(!plan.full){
         require(equal(after.slice(0,4096),protectedBefore.slice(0,4096))&&equal(after.slice(0x5000),protectedBefore.slice(0x5000)),'保护区校验失败，请保留记录。');
         require(clear.checked?after.slice(0x1000,0x5000).every(v=>v===255):equal(after.slice(0x1000,0x5000),protectedBefore.slice(0x1000,0x5000)),'机内设置校验失败。');
