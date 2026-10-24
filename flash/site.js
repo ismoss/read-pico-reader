@@ -97,21 +97,23 @@
     });
   }
   document.addEventListener("kiikoread:release", async event => {
-    const {manifest, latest} = event.detail;
+    const {manifest, latest, device, feed: feedPath} = event.detail;
+    const releaseEvent = event;
+    window.__kiikoreadReleaseEvent = releaseEvent;
     const list = document.getElementById("release-notes-list");
-    document.getElementById("release-notes-title").textContent = `${manifest.version.split("-").pop()} · 更新日志`;
+    document.getElementById("release-notes-title").textContent = `${device === "metalio" ? "Metalio · " : "Pico · "}${manifest.version.split("-").pop()} · 更新日志`;
     let notes = archiveNotes[manifest.version] || ["历史版本说明请查看 GitHub Releases。"];
     if (latest) {
       list.replaceChildren(Object.assign(document.createElement("li"), {textContent:"正在读取最新更新说明…"}));
       try {
-        const response = await fetch("./update.json", {cache:"no-store"});
+        const response = await fetch(feedPath || "./update.json", {cache:"no-store"});
         if (!response.ok) throw new Error("Unavailable");
         const feed = await response.json();
         if (feed.version !== manifest.version || typeof feed.notes !== "string") throw new Error("Version mismatch");
         notes = feed.notes.split(/\r?\n/).filter(Boolean).map(line => line.replace(/^\s*\d+[.、]\s*/, ""));
       } catch { notes = ["更新说明暂未加载，请刷新页面或查看 GitHub Releases。"]; }
     }
-    if (document.getElementById("firmware-version").textContent !== manifest.version) return;
+    if (window.__kiikoreadReleaseEvent !== releaseEvent) return;
     notes = notes.filter(note => !/(微信读书|微读)/.test(note));
     list.replaceChildren(...notes.map(note => Object.assign(document.createElement("li"), {textContent:note})));
   });

@@ -35,3 +35,16 @@
 /simulator/*.data.gz
   Content-Encoding: gzip
   Content-Type: application/octet-stream
+
+/metalio/manifest.json
+  Cache-Control: no-store
+/metalio/releases.json
+  Cache-Control: no-store
+/metalio-s31-update.json
+  Cache-Control: no-store
+/Metalio-S31-update.bin
+  Cache-Control: no-store
+/metalio-installer.js
+  Cache-Control: no-cache
+/metalio-flash-core.js
+  Cache-Control: no-cache

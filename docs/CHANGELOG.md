@@ -1,5 +1,12 @@
 # 版本变更 / Changelog
 
+## 官网双设备入口 · 2026-10-24
+
+- 刷机页先选择小纸 Pico 或 Metalio EINK 4 Plus，再选择对应版本；各自下载、文件名、更新说明及校验独立。
+- 发布 Metalio S31 rc98 编译固件及联网 OTA 基础包，优先 GitHub Pages，官网备用；旧 Metalio 首次用 USB/TF 安装。
+- Pico 现有 rc99 固件、OTA 清单及历史版本字节保持不变。
+
+
 按版本简述对用户可见的变化；使用方法见 [README](../README.zh-CN.md)。
 User-visible changes by release; see [README](../README.md) for usage.
 

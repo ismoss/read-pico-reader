@@ -20,6 +20,11 @@ on:
       - flash/releases.json
       - flash/releases/**
       - flash/versions.js
+      - flash/metalio/**
+      - flash/metalio-s31-update.json
+      - flash/metalio-installer.js
+      - flash/metalio-flash-core.js
+      - tools/metalio_release_assets.py
       - flash/update.json
       - flash/Pico-update*.bin
       - flash/firmware.bin
