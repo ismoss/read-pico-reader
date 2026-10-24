@@ -14,6 +14,10 @@ void ui_click_feedback_register(uint8_t *fb, EpdRect rect, ui_click_kind_t kind,
 bool ui_click_feedback_press(uint8_t *fb, int x, int y, EpdRect *area);
 /// 先记录变化边界，再精确恢复完整小控件缓存；不分配额外内存。/ Record change bounds before restoring the complete small cache exactly, without another allocation.
 bool ui_click_feedback_release(uint8_t *fb, EpdRect *area);
+/// 整条底栏即将重画（如切页 render）：按压缓存与放大姿态全部作废，不做旧像素恢复。
+/// The whole bar is about to be repainted (e.g. a page-switch render): drop the press cache
+/// and enlargement pose outright instead of restoring stale pixels over the fresh bar.
+void ui_click_feedback_discard_nav_cache(void);
 bool ui_click_feedback_cancel_at(int x, int y);
 bool ui_click_feedback_active(void);
 

@@ -1199,8 +1199,8 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
         return;
     }
     if (s_page == SETTINGS_SPECIAL) {
-        back_header(fb, "特殊功能");
-        section(fb, 248, "DNS 解析 · 二改功能");
+        back_header(fb, "DNS 设置");
+        section(fb, 248, "DNS 解析");
         const int pitch = 84;
         int count = mod_dns_count();
         if (count > 8) count = 8;
@@ -1499,7 +1499,7 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
     setting_group(fb,SETTINGS_DISPLAY_Y-49,"显示",SETTINGS_DISPLAY_Y,
                   display_icons,display_labels,display_values,SETTINGS_DISPLAY_ROWS);
     snprintf(signature,sizeof(signature),"%s",app_settings_status_signature()[0]?app_settings_status_signature():"未设置");
-    const char *personal_labels[]={"书架样式","锁屏样式","锁屏密码","状态栏签名","特殊功能"};
+    const char *personal_labels[]={"书架样式","锁屏样式","锁屏密码","状态栏签名","DNS 设置"};
     char dns_value[32]; snprintf(dns_value,sizeof(dns_value),"%s",mod_dns_entry(mod_dns_saved_index())->name);
     const char *personal_values[]={app_settings_shelf_style()==5?"列表书架":app_settings_shelf_style()==1?"深色书轨":"亚克力书架",
         app_settings_lock_style()==3?"透明书封":app_settings_lock_style()==2?"书架拼贴":app_settings_lock_style()==1?"壁纸":"阅读票根",

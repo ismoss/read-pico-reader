@@ -37,6 +37,13 @@ static EpdRect nav_union(EpdRect a,EpdRect b) {
 }
 bool ui_click_feedback_nav_pending(void) { return s_nav.tab>=0; }
 bool ui_click_feedback_active(void) { return s_pixels != NULL; }
+void ui_click_feedback_discard_nav_cache(void) {
+    // 新底栏已含选中胶囊：旧快照恢复会把胶囊抹回旧页状态（横条时代横条不在缓存内才安全）。
+    // The fresh bar already carries the active pill; restoring the old snapshot would erase it
+    // back to the prior page's state (safe only in the marker era, which sat outside the cache).
+    heap_caps_free(s_pixels); s_pixels = NULL;
+    s_nav.tab = -1; s_nav.dirty = (EpdRect){0};
+}
 void ui_click_feedback_reset(void) {
     heap_caps_free(s_pixels); s_pixels = NULL; s_count = 0; s_frame = NULL;
     s_nav.tab=-1;s_nav.phase=0;s_nav.due=0;s_nav.dirty=(EpdRect){0};

@@ -23,6 +23,12 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## 待发布 / Unreleased
 
+- 修复切换主页面后底栏选中胶囊消失：按压反馈缓存的旧页快照会在切页后恢复、把新画的胶囊抹回旧状态；现在整条底栏重画时缓存直接作废。
+  Fix the dock's active pill vanishing on tab switches: the press-feedback snapshot of the previous page was restored after navigation and erased the freshly painted pill; repainting the bar now voids the cache outright.
+- 选中胶囊与图标、文字对齐并放大（112×86），图标与文字在胶囊内垂直居中。
+  The active pill grows to 112x86 and centers the icon and label vertically.
+- 「特殊功能」更名为「DNS 设置」，页面标题与分区同步改名，去掉内部代号字样。
+  "特殊功能" becomes "DNS 设置" for the entry, page title and section, dropping the internal codename.
 - 合入上游 0.3.3-rc100 基线（Metalio S31 双设备发布管线、TF 卡与 EPUB/阅读器多项修复）。
   Merge the upstream 0.3.3-rc100 baseline (dual-device Metalio S31 publishing plus TF card, EPUB and reader fixes).
 - 检查更新与下载期间每秒补画已耗时秒数（小区域跟随刷新）：慢网络下可以确认仍在进行而不是卡死。

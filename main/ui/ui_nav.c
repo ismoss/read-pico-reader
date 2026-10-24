@@ -146,6 +146,10 @@ static void icon(uint8_t *fb, int tab, int cx, int y) {
 }
 
 void ui_nav_draw(uint8_t *fb, int active) {
+    // 整条底栏（含选中胶囊）即将全新绘制：按压缓存里的旧页快照全部作废。
+    // The whole bar including the active pill is repainted fresh: any cached press snapshot
+    // from the previous page is void.
+    ui_click_feedback_discard_nav_cache();
     const EpdRect dock = {UI_NAV_DOCK_INSET, UI_NAV_DOCK_TOP,
                           UI_LOCK_WIDTH - 2 * UI_NAV_DOCK_INSET, UI_NAV_DOCK_BOTTOM - UI_NAV_DOCK_TOP};
     // 液态玻璃参考图规格：重度漂白磨砂（内容只剩淡影）、细灰描边、底部淡阴影；
@@ -172,14 +176,14 @@ void ui_nav_draw(uint8_t *fb, int active) {
     for (int i = 0; i < 4; ++i) {
         int center = (i * 2 + 1) * UI_LOCK_WIDTH / 8;
         if (i == active) {
-            // 亮色小胶囊包住选中的图标与文字，是唯一的选中指示。
-            // A bright pill wrapping the active icon and label is the only selection cue.
-            EpdRect pill = {center - 54, UI_NAV_DOCK_TOP + 8, 108, dock.height - 16};
-            ui_fill_round_rect(fb, pill, 24, UI_GRAY_WHITE);
-            ui_draw_round_rect(fb, pill, 24, 0x78);
+            // 亮色胶囊包住选中的图标与文字（图标 1118-1162、文字 1168-1185，胶囊 1108-1194 内居中）。
+            // A bright pill wrapping the active icon (1118-1162) and label (1168-1185), centered inside 1108-1194.
+            EpdRect pill = {center - 56, 1108, 112, 86};
+            ui_fill_round_rect(fb, pill, 26, UI_GRAY_WHITE);
+            ui_draw_round_rect(fb, pill, 26, 0x78);
         }
-        icon(fb, i, center, UI_NAV_TOP + 27);
-        ui_text(fb, center, UI_NAV_TOP + 74, 17, labels[i], EPD_DRAW_ALIGN_CENTER, false);
+        icon(fb, i, center, UI_NAV_TOP + 26);
+        ui_text(fb, center, UI_NAV_TOP + 72, 17, labels[i], EPD_DRAW_ALIGN_CENTER, false);
     }
 }
 
