@@ -5,6 +5,11 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## 待发布 / Unreleased
 
+- 联网更新源改为自建 GitHub Pages（ismoss.github.io）：主源与备用源都指向自建清单，固件下载白名单加入自建源前缀；官方源不再作为回退，避免官方更高版本把二改顶掉。二改发布占用 rc2xx 版本段（首个 0.3.3-rc201）。
+  Online updates move to a self-hosted GitHub Pages origin (ismoss.github.io): both feed URLs point at the self-hosted manifest and the firmware download allowlist gains its prefix; no official fallback remains so a higher official version can never overwrite the mods. Mod releases claim the rc2xx band (first: 0.3.3-rc201).
+- WiFi 联网拿到 IP 后把 DNS 固定为公共解析（主 223.5.5.5、备 119.29.29.29），提升 github.io 与 NTP 域名的国内解析可靠性；DHCP 续租后被自动改回也能在下一次拿 IP 时自愈。
+  After the STA interface gains an IP, DNS is pinned to public resolvers (main 223.5.5.5, backup 119.29.29.29) for reliable domestic resolution of github.io and NTP names; a DHCP lease that restores router DNS self-heals on the next got-IP event.
+
 - 「设置 → 个性化功能 → 锁屏样式」新增「关闭锁屏」：锁屏只清屏息屏，不显示票根/壁纸/拼贴画面；默认单击电源键直接回到原页面，锁屏密码开启时仍先验证，深睡唤醒路径不变。
   "Settings → Personalization → Lock style" adds "Lock screen off": locking only blanks the panel without ticket/wallpaper/collage art; the default single press returns straight to the previous page, an enabled PIN still validates first, and deep-wake paths are unchanged.
 - 四个主页面底栏改为悬浮玻璃胶囊：普通刷新模式采样底栏之下的页面内容（设置列表延伸到底栏下透出），快刷/水波纹保持固定浅灰胶囊；局部刷新不重算玻璃，玻璃只在整页渲染时采样一次。

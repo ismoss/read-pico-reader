@@ -1,16 +1,31 @@
 name: mod-build
 
-# 个人二改构建：跑上游同款宿主回归测试，并用真机时序 sdkconfig.defaults 编出可 TF 升级的应用镜像。
-# Personal mod build: run the upstream host regression suite, then produce a TF-flashable app
-# image with the real-board sdkconfig.defaults timing.
-# 版本号带 -mod1 后缀：设备端 TF 升级会拒绝与当前版本相同的包，环境变量注入不改代码。
-# The -mod1 suffix is required because the device rejects a TF package equal to the running
-# version; the environment variable injects it without touching code.
+# 个人二改构建与发布：push 跑上游同款宿主回归测试并用真机时序 sdkconfig.defaults 编译；
+# 手动 dispatch 指定版本号（X.Y.Z-rcNNN，占用 rc2xx 段）时，测试+编译通过后把最小 OTA feed
+# （update.json + 固件 bin）部署到自己的 GitHub Pages，并做发布后线上自检。
+# Personal mod build and release: pushes run the upstream host regression suite and build with
+# the real-board sdkconfig.defaults; a manual dispatch with a version (X.Y.Z-rcNNN, rc2xx band)
+# additionally deploys the minimal OTA feed (update.json + app image) to our GitHub Pages after
+# tests and build pass, then verifies the live endpoints.
+# 不用 GitHub Releases 直链当下载地址：OTA 客户端禁用跟随重定向，Releases 会 302。
+# Never use GitHub Releases links as download URLs: they 302 and the OTA client never follows redirects.
 
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (X.Y.Z-rcNNN, rc2xx band, e.g. 0.3.3-rc201)'
+        required: true
+        default: '0.3.3-rc201'
+      notes:
+        description: 'Release notes shown on the device (short)'
+        required: false
+        default: '二改版：锁屏可关闭、悬浮玻璃底栏、公共DNS、自建更新源'
   push:
     branches: [mod/glass-dock-lockoff]
+
+permissions:
+  contents: read
 
 jobs:
   display-host-tests:
@@ -43,6 +58,10 @@ jobs:
           python3 tools/vertical_number_host_test.py
           cc -std=c11 -D_DEFAULT_SOURCE -Wall -Wextra -Werror -g -fsanitize=address,undefined -fno-omit-frame-pointer -Imain/book -Imain -Itools/book_layout_stubs -Itools/book_source_host_stubs tools/book_layout_host_test.c main/book/book_layout.c main/book/html_text.c -o build/book-tests/layout
           build/book-tests/layout
+      - name: OTA TLS chain regression
+        run: |
+          python3 -m pip install --quiet cryptography
+          python3 tools/ota_tls_host_test.py
 
   mod-bin:
     runs-on: ubuntu-latest
@@ -56,9 +75,11 @@ jobs:
           cp partitions.csv boards/pico/partitions.csv
       - name: Build with board sdkconfig.defaults
         shell: bash
+        env:
+          MOD_VERSION: ${{ github.event.inputs.version || '0.3.3-rc99-mod1' }}
         run: |
           . $IDF_PATH/export.sh
-          export PICO_PROJECT_VER=0.3.3-rc99-mod1
+          export PICO_PROJECT_VER="$MOD_VERSION"
           idf.py set-target esp32s3
           idf.py build
       - name: Size report
@@ -69,6 +90,54 @@ jobs:
       - name: Upload app image
         uses: actions/upload-artifact@v4
         with:
-          name: Pico-update-mod1
+          name: mod-app-bin
           path: build/Read_Pico.bin
+          if-no-files-found: error
+
+  publish-ota:
+    if: github.event_name == 'workflow_dispatch'
+    needs: [display-host-tests, mod-bin]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: mod-app-bin
+          path: dist
+      - name: Guard against downgrades of the live feed
+        env:
+          MOD_VERSION: ${{ github.event.inputs.version }}
+        run: python3 tools/mod_release.py guard "$MOD_VERSION"
+      - name: Build the minimal OTA feed
+        env:
+          MOD_VERSION: ${{ github.event.inputs.version }}
+          MOD_NOTES: ${{ github.event.inputs.notes }}
+        run: python3 tools/mod_release.py build dist site "$MOD_VERSION" "$MOD_NOTES"
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@v4
+      - name: Verify the deployed feed and image
+        env:
+          MOD_VERSION: ${{ github.event.inputs.version }}
+        run: |
+          sleep 5
+          python3 tools/mod_release.py verify "$MOD_VERSION"
+      - name: Upload TF-card package
+        uses: actions/upload-artifact@v4
+        with:
+          name: Pico-update-tf
+          path: site/Pico-update.bin
           if-no-files-found: error

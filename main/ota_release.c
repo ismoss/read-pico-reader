@@ -42,9 +42,10 @@ int pico_version_compare(const char *a, const char *b) {
     return 0;
 }
 bool pico_release_url_valid(const char *url) {
-    // 升级源限定官方 HTTPS 站点，避免重定向泄漏或被替换为任意下载源。
-    // Limit updates to the official HTTPS origin; do not follow arbitrary redirects.
+    // 升级源限定已允许的 HTTPS 站点，避免重定向泄漏或被替换为任意下载源；自建 Pages 源在前。
+    // Limit updates to allowed HTTPS origins with our self-hosted Pages feed first; never follow arbitrary redirects.
     static const char *const prefixes[] = {
+        "https://ismoss.github.io/read-pico-reader/",
         "https://kiikoread.com/", "https://wegooo-cell.github.io/read-pico-reader/"
     };
     if (!url || strlen(url) >= 256) return false;

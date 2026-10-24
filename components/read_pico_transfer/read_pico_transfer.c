@@ -951,6 +951,19 @@ static void wifi_event(void *arg, esp_event_base_t base, int32_t id, void *data)
     }
 }
 
+// 公共 DNS 替换 DHCP 下发的主备解析器：路由器 DNS 对 github.io/NTP 的解析不可靠或被污染时，
+// OTA 与对时仍能拿到正确地址。每次拿到 IP 都重设一次，DHCP 续租改回也能自愈。
+// Replace the DHCP-provided resolvers with public DNS so OTA and NTP keep resolving
+// when the router's DNS is unreliable or poisoned; re-applying on every got-IP self-heals renewals.
+static void apply_public_dns(esp_netif_t *netif) {
+    esp_netif_dns_info_t dns = {0};
+    dns.ip.type = IPADDR_TYPE_V4;
+    IP4_ADDR(&dns.ip.u_addr.ip4, 223, 5, 5, 5);
+    (void)esp_netif_set_dns_info(netif, ESP_NETIF_DNS_MAIN, &dns);
+    IP4_ADDR(&dns.ip.u_addr.ip4, 119, 29, 29, 29);
+    (void)esp_netif_set_dns_info(netif, ESP_NETIF_DNS_BACKUP, &dns);
+}
+
 static void ip_event(void *arg, esp_event_base_t base, int32_t id, void *data) {
     (void)arg; (void)base;
     if (id == IP_EVENT_STA_LOST_IP) {
@@ -972,6 +985,7 @@ static void ip_event(void *arg, esp_event_base_t base, int32_t id, void *data) {
     if (id != IP_EVENT_STA_GOT_IP) return;
     ip_event_got_ip_t *event = data;
     if (event->esp_netif != s_netif) return;
+    apply_public_dns(event->esp_netif);
     char url[64]; snprintf(url, sizeof(url), "http://" IPSTR, IP2STR(&event->ip_info.ip));
     portENTER_CRITICAL(&s_lock);
     bool accepted = !s_stopping && !s_connection.failed;
