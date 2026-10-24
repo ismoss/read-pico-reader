@@ -32,6 +32,7 @@ with tempfile.TemporaryDirectory() as folder:
 // Constants and the fast fill for the mod's white base; only compilable stubs here.
 #define UI_LOCK_WIDTH 684
 #define UI_LOCK_HEIGHT 1216
+#define UI_GRAY_WHITE 0xff
 static void ui_fill_rect_fast(EpdRect rect, uint8_t gray, uint8_t *fb) {
     (void)rect; (void)gray; if (fb) fb[0] = 0xff;
 }
