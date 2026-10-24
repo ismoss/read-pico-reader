@@ -281,7 +281,7 @@ static void upgrade_schedule(bool downloading, uint32_t now) {
     s_upgrade_beat_second = -1;
     upgrade_remember(now);
 }
-static app_redraw_t upgrade_start_pending(void) {
+static app_redraw_t upgrade_start_pending(app_ctx_t *ctx) {
     bool downloading = s_upgrade_job == UPGRADE_JOB_DOWNLOAD;
     s_upgrade_job = UPGRADE_JOB_NONE;
     app_home_cover_mode_changed();
@@ -1717,7 +1717,7 @@ static app_redraw_t on_tick(app_ctx_t *ctx) {
     }
     if (s_upgrade_restart) { s_upgrade_restart = false; esp_restart(); return APP_REDRAW_NONE; }
     if (s_page == SETTINGS_UPGRADE) {
-        if (s_upgrade_job != UPGRADE_JOB_NONE) return upgrade_start_pending();
+        if (s_upgrade_job != UPGRADE_JOB_NONE) return upgrade_start_pending(ctx);
         if (s_local_pending) {
             s_local_pending = false;
             esp_err_t error = pico_ota_install(PICO_OTA_UPDATE_PATH, s_upgrade_notice, sizeof(s_upgrade_notice));
