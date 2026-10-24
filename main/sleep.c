@@ -571,6 +571,10 @@ void app_restart_host(void) {
     while (true) vTaskDelay(pdMS_TO_TICKS(1000));
 }
 
+// 密码宽限期判定供锁屏与启动门共用；定义在下方。
+// Shared by the lock entry and the boot gate; defined below.
+bool lock_pin_grace_active(void);
+
 void enter_lock_and_sleep(
     EpdiyHighlevelState* hl, int64_t* ignore_until_ms, sc7a20h_handle_t acc, cst836u_handle_t touch,
     bool reader_background
