@@ -23,6 +23,10 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## 待发布 / Unreleased
 
+- 密码提示的白色底图只在弹出提示时出现：等待解锁期间保持原锁屏样式，按下电源键出提示时整屏刷白再画键盘，点「取消」恢复锁屏样式（上一版把白色画在等待阶段之前，导致锁屏后立即变白）。
+  The PIN prompt's white base now appears only with the prompt itself: the waiting phase keeps the original lock face, the power key whitens the panel while painting the pad, and cancel restores the lock face (the previous build painted the white before waiting, blanking the face right after locking).
+- 解锁后自动连网：已保存凭据且传输栈空闲时，解锁（含深睡无密码恢复）后台发起连接，由主循环轮询推进；已知的多个网络仍按信号自动挑选。
+  Auto-connect after unlock: with saved credentials and an idle stack, unlocking (including password-less deep-wake resume) starts a background connection polled by the main loop; multiple known networks still auto-pick by signal.
 - 回退"内容穿到玻璃底栏下"的整屏渲染试验（首页/书架/文件/设置恢复内容止于底栏上方）：墨水屏的分页式内容在底栏下没有持续流动的信息，试验只留下残影与翻页残留。底栏的玻璃观感、描边、阴影与选中胶囊保留。
   Revert the full-canvas under-dock rendering trial (home/shelf/files/settings content stops above the dock again): paged e-ink content offers nothing continuously flowing beneath the bar, and the trial left ghosting and stale page fragments. The dock's glass tone, rim, shadow and active pill stay.
 - 密码页改为纯白底：锁屏画面不再垫在密码控件下面（此前版本宣称此改动但实际未编入，本次真实生效）。

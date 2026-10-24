@@ -98,16 +98,21 @@ void lock_screen_authenticate(EpdiyHighlevelState *hl,cst836u_handle_t touch,sc7
     uint8_t *fb=epd_hl_get_framebuffer(hl);
     (void)acc;
     (void)ble_pt_stop(2000);
-    // 二改：密码页用纯白底——锁屏画面不再垫在密码控件下面，杜绝票根与密码互相透出。
-    // Mod: the PIN page takes a solid white base so the lock art never sits beneath the pad
-    // controls and the ticket face cannot bleed through.
-    ui_fill_rect_fast((EpdRect){0,0,UI_LOCK_WIDTH,UI_LOCK_HEIGHT},UI_GRAY_WHITE,fb);
     // Pico由锁屏入口保存确认成功的样式；启动/PIN不得覆盖它。
     // Pico persists validated art at the lock entry; boot/PIN must not overwrite it.
     uint8_t *original=heap_caps_get_free_size(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT)>FRAME_BYTES+1024u*1024u
         ?heap_caps_malloc(FRAME_BYTES,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT):NULL;
     if(original)memcpy(original,fb,FRAME_BYTES);
+    // 二改：密码提示画面用纯白底——锁屏画面不垫在密码控件下。等待期间仍显示原锁屏样式；
+    // 按键弹出提示时才刷白画键盘，取消则由 restore_art 恢复原样式。键盘的玻璃圆键在
+    // begin 时采样白底。
+    // Mod: the PIN prompt takes a solid white base instead of layering the lock art beneath
+    // the controls. The waiting phase still shows the original lock face; the prompt phase
+    // whites the panel before painting the pad, and cancel restores the art via restore_art.
+    // The pad's glass keys sample the white ground at begin time.
+    ui_fill_rect_fast((EpdRect){0,0,UI_LOCK_WIDTH,UI_LOCK_HEIGHT},UI_GRAY_WHITE,fb);
     ui_pinpad_t pad={0};ui_pinpad_begin(&pad,fb,"输入密码");
+    restore_art(fb,original);
     bool waiting=true;
     unsigned failures=0;int64_t retry_at=0;
     for(;;){
@@ -118,13 +123,21 @@ void lock_screen_authenticate(EpdiyHighlevelState *hl,cst836u_handle_t touch,sc7
             if(app_light_sleep_wait_timed(NULL,10u*60u*1000u)==APP_WAKE_TIMEOUT){
                 ui_pinpad_end(&pad);free(original);app_enter_host_sleep(APP_SLEEP_DEEP);
                 // 防御性处理：电源交接意外返回也继续验证。/ Defensive: a returning power handoff still requires verification.
-                original=NULL;ui_pinpad_begin(&pad,fb,"输入密码");
+                // 深睡回来 fb 是锁屏画面：先刷白让玻璃圆键重新采样，再由等待阶段的 restore_art 恢复样式。
+                // After deep sleep fb holds the lock art: white it so the glass keys resample,
+                // then the waiting phase restores the art again.
+                original=NULL;ui_fill_rect_fast((EpdRect){0,0,UI_LOCK_WIDTH,UI_LOCK_HEIGHT},UI_GRAY_WHITE,fb);
+                ui_pinpad_begin(&pad,fb,"输入密码");
                 continue;
             }
         }
         app_lock_wait_key_idle(800);
         ui_pinpad_reset(&pad,"输入密码","");
         if(esp_timer_get_time()/1000<retry_at){pad.blocked=true;snprintf(pad.notice,sizeof(pad.notice),"请等待 10 秒后重试");}
+        // 弹出提示才刷白：等待阶段 fb 是锁屏画面，这里整屏置白再画键盘；取消由 restore_art 恢复。
+        // White only when the prompt appears: fb holds the lock art during waiting, so blank
+        // the panel here before painting the pad; cancel restores the art via restore_art.
+        ui_fill_rect_fast((EpdRect){0,0,UI_LOCK_WIDTH,UI_LOCK_HEIGHT},UI_GRAY_WHITE,fb);
         // 直接推送完整密码画面一次，不再补刷第二段背景。/ Present the complete PIN screen once, without a second backdrop stage.
         ui_pinpad_paint(fb,&pad,ui_pinpad_full());present(hl,ui_pinpad_full());
         // 密码等待不是启动失败；待验证时保留一次性恢复，不提前开书。

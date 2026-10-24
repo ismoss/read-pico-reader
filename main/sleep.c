@@ -670,12 +670,29 @@ void enter_lock_and_sleep(
     if (ignore_until_ms) {
         *ignore_until_ms = esp_timer_get_time() / 1000 + APP_LOCK_IGNORE_BOOT_MS;
     }
+    auto_connect_after_unlock();
     ESP_LOGI(TAG, "unlocked");
 }
 
 // 密码宽限期内免验证：时钟无效或未记录时一律视为过期（安全回落要密码）。
 // Inside the PIN grace window no prompt is needed; an invalid clock or a missing
 // record always reads as expired so the safe fallback is the prompt itself.
+// 二改：解锁后自动连网——已保存凭据且传输栈空闲时后台发起 network_only 连接；
+// 由主循环每 500ms 的 service_poll 推进重试与超时，下线（传书/OTA 用完）不自动重连。
+// Mod: auto-connect after unlock — start a background network_only connection when
+// credentials exist and the stack is idle. The loop's 500ms poll advances retries and
+// timeouts; a deliberately stopped stack never reconnects on its own.
+static void auto_connect_after_unlock(void) {
+    read_pico_transfer_status_t status;
+    read_pico_transfer_get_status(&status);
+    char ssid[33];
+    bool configured = false;
+    if (status.state != READ_PICO_TRANSFER_STOPPED || pico_online_busy()) return;
+    if (read_pico_transfer_get_saved_wifi(ssid, &configured) != ESP_OK || !configured) return;
+    read_pico_transfer_cfg_t cfg = {.mode = READ_PICO_TRANSFER_MODE_STA, .network_only = true};
+    if (read_pico_transfer_start(&cfg) == ESP_OK) ESP_LOGI(TAG, "auto-connect after unlock");
+}
+
 bool lock_pin_grace_active(void) {
     if (!lock_pin_enabled() || !app_settings_pin_grace_minutes()) return false;
     const pmu_snapshot_t *pmu = read_pico_pmu_get();
@@ -695,6 +712,7 @@ void app_lock_boot_gate(EpdiyHighlevelState *hl, cst836u_handle_t touch, sc7a20h
         if(pico_boot_has_resume()) {
             pico_boot_ready();pico_boot_hold_resume();
             (void)app_light_sleep_wait_timed(NULL,0);
+            auto_connect_after_unlock();
         }
         s_boot_lock_hl=NULL;s_boot_lock_active=false;s_lock_hint_hl=NULL;return;
     }
