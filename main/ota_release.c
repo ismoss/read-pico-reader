@@ -28,17 +28,35 @@ static bool version_parts(const char *s, unsigned parts[4]) {
     s += 3;
     if (!isdigit((unsigned char)*s)) return false;
     char *end; unsigned long n = strtoul(s, &end, 10);
-    if (*end || n > 65535) return false;
+    if (n > 65535) return false;
     parts[3] = (unsigned)n;
+    // 二改尾缀 -modN：非零代表二改代际。不把 *end 提前判死，留给 mod 段继续解析。
+    // Mod suffix -modN: a nonzero value marks the fork generation. Keep parsing instead of
+    // rejecting at *end so the mod segment can consume the rest.
+    if (!*s) return true;
+    if (strncmp(s, "-mod", 4)) return false;
+    s += 4;
+    if (!isdigit((unsigned char)*s)) return false;
+    char *mod_end; unsigned long mod = strtoul(s, &mod_end, 10);
+    if (*mod_end || mod > 65535) return false;
+    parts[4] = (unsigned)mod;
     return true;
 }
 int pico_version_compare(const char *a, const char *b) {
-    unsigned left[4], right[4];
+    unsigned left[5], right[5];
     if (!version_parts(a, left) || !version_parts(b, right)) return 0;
-    for (unsigned i = 0; i < 4; ++i) {
+    for (unsigned i = 0; i < 3; ++i) {
         if (left[i] < right[i]) return -1;
         if (left[i] > right[i]) return 1;
     }
+    // 同一 X.Y.Z 内，二改代际（-modN）排在所有非二改版本之后：早期 rc2xx 试验号由此被
+    // 任何 mod 版超越；两个 mod 版之间先比 rc 基数再比 mod 序号。
+    // Within one X.Y.Z the fork generation (-modN) sorts after every non-mod release, which
+    // carries the legacy rc2xx experiments below any mod build; between mods compare rc then mod.
+    const bool left_mod = left[4] != 0, right_mod = right[4] != 0;
+    if (left_mod != right_mod) return left_mod ? 1 : -1;
+    if (left[3] != right[3]) return left[3] < right[3] ? -1 : 1;
+    if (left[4] != right[4]) return left[4] < right[4] ? -1 : 1;
     return 0;
 }
 bool pico_release_url_valid(const char *url) {
@@ -82,7 +100,7 @@ esp_err_t pico_release_parse(const char *json, size_t length, pico_release_t *re
     if (!end || end != json + length) valid = false;
     const cJSON *schema = cJSON_GetObjectItemCaseSensitive(root, "schema");
     const cJSON *size = cJSON_GetObjectItemCaseSensitive(root, "size");
-    unsigned version[4], base[4];
+    unsigned version[5], base[5];
     valid = valid && cJSON_IsNumber(schema) && schema->valuedouble == 1 &&
         field(root, "version", release->version, sizeof(release->version)) &&
         field(root, "project", release->project, sizeof(release->project)) &&

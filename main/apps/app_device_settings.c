@@ -240,6 +240,33 @@ static void draw_upgrade_progress_delta(uint8_t *fb) {
     ui_fill_rect_fast((EpdRect){61 + s_upgrade_bar_width, 519, width - s_upgrade_bar_width, 8}, UI_GRAY_BLACK, fb);
     s_upgrade_bar_width = width;
 }
+// 每秒耗时小区域：慢网络下证明还在跑而不是卡死；只重画这一个 ~100×44 区域（跟随 DU）。
+// A per-second elapsed label so slow networks still look alive; repaints only this ~100x44 area (FOLLOW DU).
+static const EpdRect s_upgrade_beat_area = {520, 462, 104, 42};
+static int64_t s_upgrade_beat_ms;
+static int s_upgrade_beat_second = -1;
+static void upgrade_beat_paint(app_ctx_t *ctx, int64_t elapsed_ms) {
+    if (!ctx || !ctx->fb || s_page != SETTINGS_UPGRADE) return;
+    const int second = (int)(elapsed_ms / 1000);
+    if (second <= s_upgrade_beat_second) return;
+    s_upgrade_beat_second = second;
+    char text[12];
+    snprintf(text, sizeof(text), "%ds", second);
+    ui_fill_rect_fast(s_upgrade_beat_area, UI_GRAY_WHITE, ctx->fb);
+    ui_text_fixed_vc(ctx->fb, s_upgrade_beat_area.x + s_upgrade_beat_area.width / 2,
+                     s_upgrade_beat_area.y + s_upgrade_beat_area.height / 2, 24, text,
+                     EPD_DRAW_ALIGN_CENTER, false);
+    epd_poweron();
+    guard_draw_result(ctx->hl, update_display_area_diff_with(
+        ctx->hl, &E0470_FOLLOW_WAVEFORM, MODE_DU, s_upgrade_beat_area));
+    epd_poweroff();
+}
+// 检查更新是同步阻塞的，钩子在同一个 UI 任务里触发，直接画屏安全。
+// The check blocks its tick, so the hook fires on the same UI task and may paint directly.
+static void upgrade_wait_hook(int64_t elapsed_ms, void *user) {
+    upgrade_beat_paint((app_ctx_t *)user, elapsed_ms);
+}
+
 // 排队时只改 UI 快照；本次画面推送结束后的 tick 才启动 TLS/擦写。
 // Scheduling changes only the UI snapshot; start TLS/flash on the tick after its presentation.
 static void upgrade_schedule(bool downloading, uint32_t now) {
@@ -250,6 +277,8 @@ static void upgrade_schedule(bool downloading, uint32_t now) {
     snprintf(s_update.message, sizeof(s_update.message), "%s", downloading
         ? "正在下载，短暂断网会自动重连" : "正在连接并检查更新");
     s_upgrade_offer_pending = !downloading;
+    s_upgrade_beat_ms = now;
+    s_upgrade_beat_second = -1;
     upgrade_remember(now);
 }
 static app_redraw_t upgrade_start_pending(void) {
@@ -257,7 +286,9 @@ static app_redraw_t upgrade_start_pending(void) {
     s_upgrade_job = UPGRADE_JOB_NONE;
     app_home_cover_mode_changed();
     app_book_cover_mode_changed();
+    if (!downloading) pico_online_set_wait_hook(upgrade_wait_hook, ctx);
     esp_err_t error = downloading ? pico_online_download() : pico_online_check();
+    if (!downloading) pico_online_set_wait_hook(NULL, NULL);
     pico_online_get_status(&s_update);
     if (error == ESP_OK) return APP_REDRAW_NONE;
     s_upgrade_offer_pending = false;
@@ -1701,6 +1732,8 @@ static app_redraw_t on_tick(app_ctx_t *ctx) {
         uint32_t now = esp_timer_get_time() / 1000;
         app_redraw_t redraw = upgrade_status_redraw(now);
         if (redraw == APP_REDRAW_AREA) draw_upgrade_progress_delta(ctx->fb);
+        if (s_update.state == PICO_UPDATE_DOWNLOADING)
+            upgrade_beat_paint(ctx, (int64_t)now - s_upgrade_beat_ms);
         return redraw;
     }
     if (!s_sync_pending) return APP_REDRAW_NONE;

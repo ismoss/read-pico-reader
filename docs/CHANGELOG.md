@@ -23,6 +23,12 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## 待发布 / Unreleased
 
+- 合入上游 0.3.3-rc100 基线（Metalio S31 双设备发布管线、TF 卡与 EPUB/阅读器多项修复）。
+  Merge the upstream 0.3.3-rc100 baseline (dual-device Metalio S31 publishing plus TF card, EPUB and reader fixes).
+- 检查更新与下载期间每秒补画已耗时秒数（小区域跟随刷新）：慢网络下可以确认仍在进行而不是卡死。
+  A per-second elapsed counter repaints a small area during update checks and downloads so slow networks still look alive.
+- 版本号支持二改尾缀 X.Y.Z-rcN-modM：二改代际排在所有非二改版本之后，mod 之间先比官方基数再比二改序号；自 rc203（最后一个旧编号）之后切换官方基数+后缀命名。
+  Versions gain the fork suffix X.Y.Z-rcN-modM: the fork generation sorts after every non-mod release, and mods compare the official base first. rc203 is the last legacy number before the switch.
 - 联网更新源改为自建 GitHub Pages（ismoss.github.io）：主源与备用源都指向自建清单，固件下载白名单加入自建源前缀；官方源不再作为回退，避免官方更高版本把二改顶掉。二改发布占用 rc2xx 版本段（首个 0.3.3-rc201）。
   Online updates move to a self-hosted GitHub Pages origin (ismoss.github.io): both feed URLs point at the self-hosted manifest and the firmware download allowlist gains its prefix; no official fallback remains so a higher official version can never overwrite the mods. Mod releases claim the rc2xx band (first: 0.3.3-rc201).
 - WiFi 联网拿到 IP 后把 DNS 固定为公共解析（主 223.5.5.5、备 119.29.29.29），提升 github.io 与 NTP 域名的国内解析可靠性；DHCP 续租后被自动改回也能在下一次拿 IP 时自愈。

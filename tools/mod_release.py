@@ -17,25 +17,19 @@ from pathlib import Path
 
 ORIGIN = "https://ismoss.github.io/read-pico-reader"
 FEED = ORIGIN + "/update.json"
-VERSION_RE = re.compile(r"^\d+\.\d+\.\d+-rc\d+$")
-
-# 自建源上的公共 DNS 列表（「特殊功能」页在线获取）；设备端保留同样的内置兜底。
-# Public DNS list on the self-hosted origin (fetched by the special-features page); the firmware carries the same built-in fallback.
-DNS_LIST = [
-    {"name": "阿里公共 DNS", "main": "223.5.5.5", "backup": "223.6.6.6"},
-    {"name": "腾讯公共 DNS", "main": "119.29.29.29", "backup": "119.28.28.28"},
-    {"name": "114 公共 DNS", "main": "114.114.114.114", "backup": "114.114.115.115"},
-    {"name": "谷歌公共 DNS", "main": "8.8.8.8", "backup": "8.8.4.4"},
-]
+VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)-rc(\d+)(?:-mod(\d+))?$")
 
 
-def rc_number(version: str) -> int:
-    # 设备端版本解析只认 X.Y.Z-rcN；二改发布占用 rc2xx 段，高于官方 rc99 且不与其 rc1xx 冲突。
-    # The device parser only accepts X.Y.Z-rcN; mods claim the rc2xx band, above official rc99
-    # and clear of a future official rc1xx run.
+def version_key(version: str):
+    # 设备端解析器接受 X.Y.Z-rcN（官方）与 X.Y.Z-rcN-modM（二改）。二改代际优先于 rc 数值，
+    # 使任何 mod 版高于早期 rc2xx 试验号；mod 之间先比 rc 基数再比 mod 序号。
+    # The device parser accepts X.Y.Z-rcN (official) and X.Y.Z-rcN-modM (fork). The fork
+    # generation outranks the rc number so any mod build beats the legacy rc2xx experiments;
+    # between mods compare the rc base first, then the mod serial.
     match = VERSION_RE.match(version)
-    assert match, f"version {version!r} must look like X.Y.Z-rcN"
-    return int(version.rsplit("-rc", 1)[1])
+    assert match, f"version {version!r} must look like X.Y.Z-rcN[-modM]"
+    x, y, z, rc, mod = (int(part) for part in match.groups(default="0"))
+    return (x, y, z, 1 if mod else 0, rc, mod)
 
 
 def load_image(dist: Path, version: str) -> bytes:
@@ -48,7 +42,7 @@ def load_image(dist: Path, version: str) -> bytes:
 
 
 def build(dist: Path, out: Path, version: str, notes: str) -> None:
-    assert rc_number(version) >= 200, "self-hosted releases use the rc2xx band"
+    version_key(version)  # Format check only; both legacy rc2xx and -modN are accepted.
     data = load_image(dist, version)
     feed = {
         "schema": 1, "version": version, "project": "Read_Pico", "board": "RDP-G01-W",

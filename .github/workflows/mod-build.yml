@@ -71,11 +71,6 @@ jobs:
     container: espressif/idf:v6.1
     steps:
       - uses: actions/checkout@v4
-      - name: Stage board partition table
-        shell: bash
-        run: |
-          mkdir -p boards/pico
-          cp partitions.csv boards/pico/partitions.csv
       - name: Build with board sdkconfig.defaults
         shell: bash
         env:
