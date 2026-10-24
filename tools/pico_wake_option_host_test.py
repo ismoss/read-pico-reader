@@ -81,7 +81,7 @@ int main(void){
  app_settings_set_wake_presses(0);assert(writes==0&&app_settings_wake_presses()==1);
  app_settings_set_wake_presses(2);assert(stored==2&&writes==1);
  app_settings_set_wake_presses(2);assert(writes==1);
- reload_wake(true,2);assert(app_settings_wake_presses()==1)  # 二改迁移：保存的双击读回单击 / the mod migrates a saved double to single
+ reload_wake(true,2);assert(app_settings_wake_presses()==1)  // 二改迁移：保存的双击读回单击 / the mod migrates a saved double to single
  reload_wake(true,1);assert(app_settings_wake_presses()==1);
  for(unsigned i=0;i<256;i++)if(i!=1&&i!=2){reload_wake(true,i);assert(app_settings_wake_presses()==1);}
  assert(SETTINGS_DISPLAY_ROWS==7);
