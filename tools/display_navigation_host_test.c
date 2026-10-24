@@ -340,9 +340,16 @@ int main(void) {
 
     begin(&owner_a); assert_final();
     assert(calls == 2 && bw_calls == 1 && gray_calls == 1 && nav_draws == 1 && !full_calls && !gc_calls);
+    // 横条五行沿用 back 值，面板检查排除它们；其余底栏字节应为驱动后的 0。
+    // The five marker rows keep the back bytes; the panel check skips them while every other
+    // nav byte reads as the driven 0.
     for (int y = 0; y < H; ++y) {
-        for (int x = UI_NAV_REFRESH_END / 2; x < W / 2; ++x)
-            assert(panel[y * W / 2 + x] == 0);
+        for (int x = UI_NAV_REFRESH_END; x < W; ++x) {
+            if (x >= UI_NAV_MARKER_TOP && x < UI_NAV_MARKER_BOTTOM) continue;
+            const size_t at = (size_t)y * W / 2 + x / 2;
+            const unsigned shift = (x & 1) ? 4 : 0;
+            assert(((panel[at] >> shift) & 15) == 0);
+        }
     }
 
     // 真实四个横条位置循环移动，旧条擦白新条压黑，其他底栏字节不变；无内容变化时只刷横条。
