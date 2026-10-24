@@ -23,6 +23,12 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## 待发布 / Unreleased
 
+- 快刷/水波纹下切换主页面时选中胶囊不再滞留：底栏目标真变化时跳过底栏冻结，黑白/波纹路径之外补一次整条底栏的灰阶差分。
+  The active pill no longer lingers under fast/water refresh: a really changed bar skips the navigation freeze and one grayscale diff carries the whole strip beside the BW or ripple path.
+- 文件管理列表延伸到玻璃 dock 之下并显示下一页预览行（不可点，翻页交互不变）。
+  File listings extend under the glass dock with an untappable next-page preview row; paging interaction is unchanged.
+- 锁屏密码新增「解锁宽限期」（关闭/5分钟/1小时/8小时）：锁屏后该时间内唤醒或深睡开机免输密码，超时或时钟无效照常验证。
+  The lock PIN gains an unlock grace window (off/5min/1h/8h): wakes and deep boots inside the window skip the prompt, while expiry or an invalid clock verifies as usual.
 - 修复切换主页面后底栏选中胶囊消失：按压反馈缓存的旧页快照会在切页后恢复、把新画的胶囊抹回旧状态；现在整条底栏重画时缓存直接作废。
   Fix the dock's active pill vanishing on tab switches: the press-feedback snapshot of the previous page was restored after navigation and erased the freshly painted pill; repainting the bar now voids the cache outright.
 - 选中胶囊与图标、文字对齐并放大（112×86），图标与文字在胶囊内垂直居中。

@@ -312,8 +312,13 @@ static bool main_begin(EpdiyHighlevelState* hl, enum EpdDrawError* result) {
     // glass) unlocks the freeze and extends the scan to the full panel in ordinary mode; an
     // unchanged nav keeps the frozen path without driving nav pixels. Fast/water always freeze.
     const bool nav_changed = main_nav_changed(hl);
+    // 任何模式底栏目标真变化（选中胶囊移动、玻璃下内容变化）都不冻结：普通模式整屏一次差分，
+    // 快刷/水波纹的黑白/波纹路径不碰底栏，改由末尾一次灰阶差分单推底栏条。
+    // Any mode with a really changed nav target (pill moved, content under the glass) skips the
+    // freeze: ordinary covers it in one whole-panel diff, while the fast/water BW and ripple paths
+    // leave the strip to one final grayscale diff below.
     const bool dock_with_body = normal && nav_changed;
-    if (!dock_with_body) main_freeze_navigation(hl, true);
+    if (!nav_changed) main_freeze_navigation(hl, true);
     if (fast) main_normalize_body(hl);
     const bool changed = main_body_changed(hl) || nav_changed;
     uint8_t *cache = fast && changed && s_main_band_count
@@ -323,7 +328,7 @@ static bool main_begin(EpdiyHighlevelState* hl, enum EpdDrawError* result) {
     // The BW/exit tables hold every equal pair. Include only the changing marker
     // in this scan; frozen divider/labels/icons receive no drive. This removes
     // an additional comparison and eight-frame serial marker update.
-    bool marker_with_body=fast&&changed&&!cache&&!gray_fallback;
+    bool marker_with_body=fast&&changed&&!cache&&!gray_fallback&&!nav_changed;
     EpdRect body_area=main_body_area();
     // 普通模式把 dock 一并纳入同一次扫描；body 变化与 dock 变化在整页渲染里总是同时出现。
     // The ordinary mode folds the dock into the same scan; body and dock changes always appear together in a whole-page render.
@@ -368,7 +373,7 @@ static bool main_begin(EpdiyHighlevelState* hl, enum EpdDrawError* result) {
             epd_hl_waveform(hl,display_main_normal_waveform());
             *result=epd_hl_update_area(hl,MODE_GL16,25,body_area);
         }
-    } else if (water && changing_page && changed) {
+    } else if (water && changing_page && changed && !nav_changed) {
         // 水波纹直接输出最终灰阶图，不先刷黑白、不追加整页灰阶；失败由统一恢复处理。
         // Water outputs the final gray target directly, without a BW prepass or a second whole-page gray update; common recovery handles failure.
         read_pico_epd_use_scan(READ_PICO_EPD_SCAN_FAST);
@@ -404,6 +409,16 @@ static bool main_begin(EpdiyHighlevelState* hl, enum EpdDrawError* result) {
         }
     }
     s_main_band_count = 0;
+    if (*result == EPD_DRAW_SUCCESS && nav_changed && !dock_with_body) {
+        // 快刷/水波纹的底栏条单独一次灰阶差分：胶囊与玻璃是灰阶像素，不能进黑白/波纹路径。
+        // One grayscale diff for the strip under fast/water: the pill and glass are grays that
+        // must never ride the black/white or ripple paths.
+        EpdRect strip = {0, UI_NAV_REFRESH_END, epd_rotated_display_width(),
+                         epd_rotated_display_height() - UI_NAV_REFRESH_END};
+        epd_hl_waveform(hl, display_main_gray_waveform());
+        use_scan_for(display_main_gray_waveform(), MODE_GL16);
+        *result = epd_hl_update_area(hl, MODE_GL16, 25, strip);
+    }
     if (*result == EPD_DRAW_SUCCESS && !marker_with_body) {
         const EpdRect marker = {0, UI_NAV_MARKER_TOP, epd_rotated_display_width(),
                                UI_NAV_MARKER_BOTTOM - UI_NAV_MARKER_TOP};

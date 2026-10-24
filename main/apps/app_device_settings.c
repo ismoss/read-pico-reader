@@ -928,9 +928,15 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
         else if (lock_pin_enabled()) {
             row(fb, 406, "修改密码", "验证原密码  ›");
             row(fb, 512, "关闭密码", "验证原密码  ›");
+            // 宽限期：锁屏后该时间内唤醒/开机免密；点按在 关闭/5分钟/1小时/8小时 间循环。
+            // Grace: wakes inside the window skip the PIN; tapping cycles off/5min/1h/8h.
+            const unsigned grace = app_settings_pin_grace_minutes();
+            const char *grace_text = grace == 5 ? "5 分钟" : grace == 60 ? "1 小时" :
+                grace == 480 ? "8 小时" : "关闭";
+            row(fb, 618, "解锁宽限期", grace_text);
         } else row(fb, 406, "开启密码", "设置四位密码  ›");
-        if (s_notice[0]) ui_text_vc(fb, 342, 680, 23, s_notice, EPD_DRAW_ALIGN_CENTER, false);
-        ui_text_vc(fb, 342, 752, 21, "修改和关闭密码需验证原密码", EPD_DRAW_ALIGN_CENTER, false);
+        if (s_notice[0]) ui_text_vc(fb, 342, 730, 23, s_notice, EPD_DRAW_ALIGN_CENTER, false);
+        ui_text_vc(fb, 342, 800, 21, "修改和关闭密码需验证原密码", EPD_DRAW_ALIGN_CENTER, false);
         settings_navigation(fb); return;
     }
     if (s_page == SETTINGS_PROFILE) {
@@ -1893,6 +1899,12 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
          (lock_pin_enabled() && ui_rect_hit((EpdRect){36,512,612,70},ev->x0,ev->y0)))) {
         if (ctx->now_ms < s_pin_retry_at) { snprintf(s_notice, sizeof(s_notice), "请等待后重试"); return APP_REDRAW_PAGE; }
         pin_setup_open(ctx, ev->y0 >= 512); return APP_REDRAW_PAGE;
+    }
+    if (s_page == SETTINGS_LOCK_PIN && ev->type == UI_GESTURE_TAP && lock_pin_enabled() &&
+        ui_rect_hit((EpdRect){36, 606, 612, 84}, ev->x0, ev->y0)) {
+        const unsigned grace = app_settings_pin_grace_minutes();
+        app_settings_set_pin_grace_minutes(grace == 0 ? 5 : grace == 5 ? 60 : grace == 60 ? 480 : 0);
+        return APP_REDRAW_PAGE;
     }
 
     if (s_page == SETTINGS_BOOT) {

@@ -36,6 +36,14 @@ uint8_t app_settings_wake_presses(void);
 void app_settings_set_wake_presses(uint8_t presses);
 /// 二改「特殊功能」的 DNS 选择序号（0 路由器 / 1 默认公共对 / 2 起列表项）。/ Mod DNS pick (0 router / 1 default pair / 2+ list entries).
 uint8_t app_settings_dns_index(void);
+/// 密码解锁宽限期（分钟，0=关闭）：锁屏后该时间内唤醒/开机免密。
+/// PIN unlock grace in minutes (0=off): wakes inside the window skip the PIN prompt.
+uint8_t app_settings_pin_grace_minutes(void);
+void app_settings_set_pin_grace_minutes(uint8_t minutes);
+/// 锁屏时刻（unix 秒，0=未知）；由锁屏路径写入，宽限期判定读取。
+/// Wall-clock second when locking (0=unknown); written by the lock path, read by the grace check.
+uint32_t app_settings_pin_locked_at(void);
+void app_settings_record_pin_lock(uint32_t unix_seconds);
 void app_settings_set_dns_index(uint8_t index);
 /// 首页进入时强制全刷；默认关闭。/ Full refresh when entering Home; off by default.
 bool app_settings_home_full_refresh(void);

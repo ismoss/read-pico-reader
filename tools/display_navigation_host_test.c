@@ -315,8 +315,9 @@ int main(void) {
     assert(bw_calls == old_bw + 2 && gray_calls == old_gray && allocations == old_allocs);
     assert(last_mode == MODE_DU && hl.waveform == &E0470_WAVEFORM && !nav_draws);
 
-    // 横条以外任意重绘差异不能驱动底栏；奇数起点同字节的分隔线也必须保留。
-    // Repaint differences outside the marker cannot drive navigation; retain the divider nibble sharing the marker's odd starting byte.
+    // 底栏目标真变化（胶囊移动）时快刷也必须驱动：黑白体不进底栏，整条底栏走一次灰阶差分。
+    // A really changed nav target (pill moved) must drive under fast mode too: the BW body
+    // stays out of the bar while one grayscale diff carries the whole strip.
     reset();
     memset(front, 0xee, BYTES); assert(update_display_full(&hl) == EPD_DRAW_SUCCESS);
     calls = bw_calls = gray_calls = full_calls = gc_calls = nav_draws = 0;
@@ -333,10 +334,10 @@ int main(void) {
     }
 
     begin(&owner_a); assert_final();
-    assert(calls == 1 && !nav_draws && !full_calls && !gc_calls);
+    assert(calls == 2 && bw_calls == 1 && gray_calls == 1 && nav_draws == 1 && !full_calls && !gc_calls);
     for (int y = 0; y < H; ++y) {
         for (int x = UI_NAV_REFRESH_END / 2; x < W / 2; ++x)
-            assert(panel[y * W / 2 + x] == 0xee);
+            assert(panel[y * W / 2 + x] == 0);
     }
 
     // 真实四个横条位置循环移动，旧条擦白新条压黑，其他底栏字节不变；无内容变化时只刷横条。

@@ -41,6 +41,8 @@
 #define NVS_KEY_SHUTDOWN_MODE "shutdown"
 #define NVS_KEY_WAKE_PRESSES "wake_press"
 #define NVS_KEY_DNS_INDEX "dns_idx"
+#define NVS_KEY_PIN_GRACE "pin_grace"
+#define NVS_KEY_PIN_LOCK_AT "pin_lck_at"
 #define NVS_KEY_HOME_FULL "home_full"
 #define NVS_KEY_HOME_COMPONENT "home_widget"
 #define NVS_KEY_HOME_GOAL "home_goal"
@@ -96,6 +98,8 @@ static app_sleep_mode_t s_sleep = APP_SLEEP_DEEP;
 static bool s_staged_shutdown;
 static uint8_t s_wake_presses = 1;
 static uint8_t s_dns_index = 1;  // 二改特殊功能：DNS 选择序号 / mod special-features DNS pick
+static uint8_t s_pin_grace_minutes;  // 密码宽限期分钟数，0 关闭 / PIN grace minutes, 0=off
+static uint32_t s_pin_locked_at;     // 最近一次带密码锁屏的 unix 秒 / last PIN-enabled lock, unix seconds
 static bool s_home_full_refresh;
 static app_home_component_t s_home_component = APP_HOME_FOLDER;
 static uint8_t s_home_goal_minutes = 30;
@@ -205,6 +209,12 @@ void app_settings_init(void) {
     s_wake_presses = raw;
     raw = 1;
     if (nvs_get_u8(h, NVS_KEY_DNS_INDEX, &raw) == ESP_OK && raw < MOD_DNS_MAX) s_dns_index = raw;
+    raw = 0;
+    if (nvs_get_u8(h, NVS_KEY_PIN_GRACE, &raw) == ESP_OK &&
+        (raw == 0 || raw == 5 || raw == 60 || raw == 480)) s_pin_grace_minutes = raw;
+    s_pin_locked_at = 0;
+    uint32_t locked_at = 0;
+    if (nvs_get_u32(h, NVS_KEY_PIN_LOCK_AT, &locked_at) == ESP_OK) s_pin_locked_at = locked_at;
     raw = 0;
     if (nvs_get_u8(h, NVS_KEY_HOME_FULL, &raw) == ESP_OK) s_home_full_refresh = raw == 1;
     raw = 0;
@@ -419,6 +429,23 @@ void app_settings_set_dns_index(uint8_t index) {
     s_dns_index = index;
     nvs_put_u8(NVS_KEY_DNS_INDEX, index);
 }
+// 密码宽限期：只在合法档位间切换；修改密码相关设置不重置计时，下一次锁屏自然刷新。
+// PIN grace toggles only between valid steps; changing settings does not reset the timer,
+// the next lock simply records a fresh timestamp.
+uint8_t app_settings_pin_grace_minutes(void) { return s_pin_grace_minutes; }
+void app_settings_set_pin_grace_minutes(uint8_t minutes) {
+    if (minutes != 5 && minutes != 60 && minutes != 480) minutes = 0;
+    if (minutes == s_pin_grace_minutes) return;
+    s_pin_grace_minutes = minutes;
+    nvs_put_u8(NVS_KEY_PIN_GRACE, minutes);
+}
+uint32_t app_settings_pin_locked_at(void) { return s_pin_locked_at; }
+void app_settings_record_pin_lock(uint32_t unix_seconds) {
+    if (unix_seconds < 1704067200) return;  // 时钟无效不记录，判定端安全回落要密码。/ An invalid clock records nothing; the check safely falls back to the PIN.
+    if (unix_seconds == s_pin_locked_at) return;
+    s_pin_locked_at = unix_seconds;
+    nvs_put_u32(NVS_KEY_PIN_LOCK_AT, unix_seconds);
+}
 
 app_home_component_t app_settings_home_component(void) { return s_home_component; }
 uint8_t app_settings_home_goal_minutes(void) { return s_home_goal_minutes; }
@@ -556,6 +583,14 @@ static void nvs_put_u8(const char* key, uint8_t value) {
     nvs_handle_t h;
     if (nvs_open(NVS_NS, NVS_READWRITE, &h) != ESP_OK) return;
     nvs_set_u8(h, key, value);
+    nvs_commit(h);
+    nvs_close(h);
+}
+
+static void nvs_put_u32(const char* key, uint32_t value) {
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS, NVS_READWRITE, &h) != ESP_OK) return;
+    nvs_set_u32(h, key, value);
     nvs_commit(h);
     nvs_close(h);
 }
