@@ -258,25 +258,27 @@ static void upgrade_beat_paint(app_ctx_t *ctx, int64_t elapsed_ms) {
     const int second = (int)(elapsed_ms / 1000);
     if (second <= s_upgrade_beat_second) return;
     s_upgrade_beat_second = second;
-    // 心跳盒直接画省略号循环（一秒一步）：这是真机验证过的每秒重绘通道，
-    // 比往提示行尾追加小点醒目得多。
-    // The heartbeat box draws the ellipsis cycle itself (one step per second) on the proven
-    // per-second repaint channel — far more visible than dots appended to the notice line.
+    // 心跳盒恢复秒数（b 方案的兜底反馈，真机验证过的每秒重绘通道）。
+    // The heartbeat box is back to seconds (plan b's guaranteed feedback on the proven channel).
     char text[12];
-    snprintf(text, sizeof(text), "%.*s", second % 3 + 1, "...");
+    snprintf(text, sizeof(text), "%ds", second);
     ui_fill_rect_fast(s_upgrade_beat_area, UI_GRAY_WHITE, ctx->fb);
     ui_text_fixed_vc(ctx->fb, s_upgrade_beat_area.x + s_upgrade_beat_area.width / 2,
-                     s_upgrade_beat_area.y + s_upgrade_beat_area.height / 2, 34, text,
+                     s_upgrade_beat_area.y + s_upgrade_beat_area.height / 2, 24, text,
                      EPD_DRAW_ALIGN_CENTER, false);
-    // 排队中的检查/下载才动画提示行；TF 安装等旁路不碰它。
-    // Only a queued check/download animates the notice; the TF-install side path leaves it alone.
+    // 排队中的检查/下载才动画；TF 安装等旁路不碰它。
+    // Only a queued check/download animates; the TF-install side path leaves it alone.
     if (s_update.busy && s_update.message[0]) {
-        char animated[sizeof(s_update.message)];
-        snprintf(animated, sizeof(animated), "%s%.*s", s_update.message,
-                 second % 3 + 1, "...");
-        fit_value(animated, s_upgrade_notice_area.width - 8);
+        // a 方案：点动画放在提示文字右侧、30px 大字，一秒一步（一个点→两个点→三个点→一个点）。
+        // Plan a: the dots sit right of the notice text at 30 px, one step per second.
+        char dots[4];
+        snprintf(dots, sizeof(dots), "%.*s", second % 3 + 1, "...");
         ui_fill_rect_fast(s_upgrade_notice_area, UI_GRAY_WHITE, ctx->fb);
-        ui_text(ctx->fb, 60, 436, 21, animated, EPD_DRAW_ALIGN_LEFT, false);
+        ui_text(ctx->fb, 60, 436, 21, s_update.message, EPD_DRAW_ALIGN_LEFT, false);
+        const int message_width =
+            ui_text_fixed_width_px(ui_text_effective_px(21), s_update.message);
+        ui_text_fixed_vc(ctx->fb, 60 + message_width + 14, 448, 30, dots,
+                         EPD_DRAW_ALIGN_LEFT, false);
     }
     epd_poweron();
     guard_draw_result(ctx->hl, update_display_area_diff_with(
@@ -378,6 +380,15 @@ static void upgrade_open(void) {
     upgrade_remember(esp_timer_get_time() / 1000);
     s_upgrade_notice[0] = 0;
     s_page = SETTINGS_UPGRADE;
+    // 已联网且空闲就自动检查一次更新：进入页面即见结果，省一次点按。
+    // With the network up and the stack idle, check for updates on entry: the result is on
+    // screen without an extra tap.
+    read_pico_transfer_status_t network;
+    read_pico_transfer_get_status(&network);
+    if (network.network_ready && !s_update.busy &&
+        s_update.state != PICO_UPDATE_CHECKING && s_update.state != PICO_UPDATE_DOWNLOADING) {
+        upgrade_schedule(false, esp_timer_get_time() / 1000);
+    }
 }
 static const char *const TAG = "device_settings";
 // 主设置始终单行；大字号只改变字形，字体预览单独保留足够空间。
@@ -1745,9 +1756,10 @@ static app_redraw_t on_tick(app_ctx_t *ctx) {
         }
     }
     if(s_reset_pending && s_page==SETTINGS_FACTORY_RESET)return reset_tick();
-    if (s_page == SETTINGS_MONITOR && mod_monitor_enabled() && s_monitor_url_shown != monitor_url_ready()) {
-        // 地址从无到有（或消失）时自动重绘一次，页面不再要求退出重进。
-        // Repaint once when the address appears or disappears; no more exit-and-reenter.
+    // 地址出现/消失（含空闲自动关把开关撤掉）都自动重绘一次本页。
+    // Repaint once when the address appears or disappears — including the idle auto-off
+    // clearing the switch.
+    if (s_page == SETTINGS_MONITOR && monitor_url_ready() != s_monitor_url_shown) {
         s_monitor_url_shown = monitor_url_ready();
         return APP_REDRAW_PAGE;
     }
