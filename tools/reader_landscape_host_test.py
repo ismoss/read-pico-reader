@@ -59,10 +59,16 @@ static void invalidate_prep(void){}
 static void free_book(void){assert(false);}
 static void copy_text(char *d,size_t n,const char *s){snprintf(d,n,"%s",s);}
 static char s_message[64];
-enum { READING, SHELF, TOC, READER_PANEL_NONE, READER_PANEL_TOOLS, READER_PANEL_STATS };
+enum { READING, SHELF, TOC, READER_PANEL_NONE, READER_PANEL_TOOLS, READER_PANEL_STATS,
+       READER_PANEL_CHAPTER_JUMP, READER_PANEL_STATS_RECENT, READER_PANEL_REFRESH_SETTINGS,
+       READER_PANEL_TURN_SETTINGS, READER_PANEL_KEY_SETTINGS, READER_PANEL_FONT_SETTINGS,
+       READER_PANEL_WEIGHT_SETTINGS, READER_PANEL_LAYOUT_SETTINGS, READER_PANEL_RULE_SETTINGS,
+       READER_PANEL_FONT_PICKER, READER_PANEL_BOOKMARKS, READER_PANEL_BACKGROUND,
+       READER_PANEL_BACKGROUND_PREVIEW, READER_PANEL_KEY_PICKER, READER_PANEL_FONT_RECOVERY };
 '''
-for name in ('reader_landscape_active', 'reader_rotation_now', 'reader_relayout_keep_page',
-             'reader_sync_rotation', 'reader_touch_to_landscape', 'reader_gesture_to_landscape'):
+for name in ('reader_panel_landscape', 'reader_landscape_active', 'reader_rotation_now',
+             'reader_relayout_keep_page', 'reader_sync_rotation', 'reader_touch_to_landscape',
+             'reader_gesture_to_landscape'):
     unit += function(name, book) + '\n'
 unit += r'''
 int main(void){
@@ -96,9 +102,10 @@ int main(void){
  assert(reader_gesture_to_landscape(UI_GESTURE_SWIPE_D)==UI_GESTURE_SWIPE_L);
  s_rotation=EPD_ROT_INVERTED_PORTRAIT;
  assert(reader_gesture_to_landscape(UI_GESTURE_SWIPE_L)==UI_GESTURE_SWIPE_L);
- // 对账状态机：开横屏锚定重排并切旋转；开关面板回到竖屏再重排；快切方向只换旋转。
- // Reconcile: enabling re-anchors and swaps; panels fall back to portrait and re-anchor back;
- // switching direction alone only swaps the rotation.
+ // 对账状态机：开横屏锚定重排并切旋转；横屏面板保持同向不重排，恢复面板回落竖屏；
+ // 快切方向只换旋转。
+ // Reconcile: enabling re-anchors and swaps; landscape panels keep the orientation without a
+ // relayout, the recovery sheet falls back to portrait; switching direction only swaps rotation.
  s_view=READING;s_text="t";s_reader_panel=READER_PANEL_NONE;s_clear_confirm=false;
  landscape_mode=0;page_start=700;page_for=9;
  reader_sync_rotation();
@@ -107,7 +114,13 @@ int main(void){
  reader_sync_rotation();
  assert(build_calls==1&&s_reader_landscape_layout&&
         s_rotation==EPD_ROT_INVERTED_LANDSCAPE);
+ // 统计面板与正文同向：打开不再回落竖屏，也不触发重排。
+ // The stats sheet shares the body orientation: opening it neither falls back nor re-anchors.
  s_reader_panel=READER_PANEL_STATS;
+ reader_sync_rotation();
+ assert(build_calls==1&&s_reader_landscape_layout&&
+        s_rotation==EPD_ROT_INVERTED_LANDSCAPE);
+ s_reader_panel=READER_PANEL_FONT_RECOVERY;
  reader_sync_rotation();
  assert(build_calls==2&&!s_reader_landscape_layout&&
         s_rotation==EPD_ROT_INVERTED_PORTRAIT);
@@ -126,7 +139,7 @@ int main(void){
  s_text=NULL;landscape_mode=1;
  reader_sync_rotation();
  assert(!s_reader_landscape_layout&&s_rotation==EPD_ROT_INVERTED_PORTRAIT);
- puts("PASS: landscape touch corners, gesture pairs, anchored reconcile, panel fallback and direction swap");
+ puts("PASS: landscape touch corners, gesture pairs, anchored reconcile, panel orientation keep/fallback and direction swap");
  return 0;
 }
 '''

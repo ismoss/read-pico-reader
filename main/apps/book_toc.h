@@ -26,6 +26,10 @@ int book_toc_rows(void);
 int book_toc_hit(uint16_t x, uint16_t y, int page, size_t chapters);
 int book_toc_jump_hit(uint16_t x, uint16_t y);
 int book_toc_jump_percent(uint16_t x);
+/// 跳转弹窗卡片矩形（含横竖屏平移原点）：拖动过程按它做局部差分刷新。
+/// The jump sheet's card rect (with the portrait/landscape origin applied); local area refreshes
+/// during the drag use it.
+EpdRect book_toc_jump_sheet_rect(void);
 int book_toc_page_from_percent(int percent, int pages);
 EpdRect book_toc_row_rect(int cell);
 void book_toc_render(uint8_t *fb, const char *book_title, size_t chapters,

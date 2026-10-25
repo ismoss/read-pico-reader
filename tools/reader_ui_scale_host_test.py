@@ -91,6 +91,14 @@ static bool app_settings_reader_vertical_turn(void){return true;}
 static bool app_settings_reader_power_turn(void){return true;}
 static bool app_settings_reader_immersive(void){return true;}
 static bool app_settings_reader_hide_images(void){return false;}
+// 面板横屏分支在本测试保持竖屏：视口/门控/顶位全部固定为竖屏值。
+// Panel landscape branches stay portrait in this test: viewport, gate and tops pin portrait values.
+static bool reader_panel_landscape(void){return false;}
+static int reader_w(void){return 684;}
+static int reader_h(void){return 1216;}
+static int reader_layout_top(void){return 500;}
+static int bookmarks_top(void){return 560;}
+static EpdRect reader_panel_footer_rect(void){return (EpdRect){36,1141,612,58};}
 '''
 unit+=function('ui_text_box',kit).replace('void ui_text_box(', 'static void actual_text_box(')+'\n'
 unit+=r'''

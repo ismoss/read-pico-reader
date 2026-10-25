@@ -306,6 +306,25 @@ void ui_text_line_span_px(int px, const char* text, int* above, int* below) {
     if (below) *below = b;
 }
 
+int ui_text_ink_center_y(int y_top, int px, const char *text) {
+    // ui_text 把基线放在 y_top + ascender，墨迹自基线上下伸展（above/below 相对基线），
+    // 因此墨迹中心 = 基线 - (above - below) / 2，与 ui_text_fixed_context_vc 的落笔公式同源。
+    // ui_text puts the baseline at y_top + ascender with ink spreading around it, so the ink
+    // centre is baseline - (above - below) / 2 — the same placement ui_text_fixed_context_vc uses.
+    px = ui_text_effective_px(px);
+    int above = 0, below = 0, ascender = 0;
+    if (text && text[0]) {
+        if ((!s_system_ttf || ttf_font_is_builtin()) && ui_font_has_text(text)) {
+            ui_font_measure_line_px(px, text, &above, &below);
+            ascender = ui_font_ascender_px(px);
+        } else {
+            ttf_measure_line_px(px, text, &above, &below);
+            ascender = ttf_ascender_px(px);
+        }
+    }
+    return y_top + ascender - (above - below) / 2;
+}
+
 int ui_text_fixed_width_px(int px, const char* text) {
     return ui_text_fixed_context_width_px(px, text, text);
 }

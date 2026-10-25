@@ -166,6 +166,12 @@ int book_toc_jump_percent(uint16_t x) {
     return ((int)x - 92 - dx) * 100 / 500;
 }
 
+EpdRect book_toc_jump_sheet_rect(void) {
+    int dx = 0, dy = 0;
+    toc_jump_origin(&dx, &dy);
+    return (EpdRect){44 + dx, 356 + dy, 596, 572};
+}
+
 int book_toc_page_from_percent(int percent, int pages) {
     if (pages <= 1 || percent <= 0) return 0;
     if (percent >= 100) return pages - 1;

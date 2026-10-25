@@ -39,6 +39,15 @@ for name in ('app_settings_book_paragraph_value','app_settings_book_paragraph_le
 unit+=re.search(r'static struct \{\s+bool active, cancelled, repeated;[\s\S]*?\} s_indent_hold;',text)[0]+'\n'
 unit+=r'''
 static int saved,reflows,draws,pushes,invalidated;
+// 横屏分支在本测试保持竖屏：桩固定竖屏几何与旋转。
+// The landscape branches stay portrait in this test: stubs pin portrait geometry and rotation.
+typedef enum EpdRotation { EPD_ROT_LANDSCAPE, EPD_ROT_PORTRAIT, EPD_ROT_INVERTED_LANDSCAPE,
+                           EPD_ROT_INVERTED_PORTRAIT } EpdRotation;
+static EpdRotation epd_get_rotation(void){return EPD_ROT_INVERTED_PORTRAIT;}
+static void reader_touch_to_landscape(uint16_t *x,uint16_t *y){(void)x;(void)y;}
+static bool reader_panel_landscape(void){return false;}
+static int reader_layout_top(void){return 500;}
+static EpdRect reader_panel_footer_rect(void){return (EpdRect){36,1141,612,58};}
 static int app_settings_book_indent_adjust(void){return saved;}
 static int app_settings_book_indent(void){return 2;}
 static bool ui_rect_hit(EpdRect r,int x,int y){return x>=r.x&&x<r.x+r.width&&y>=r.y&&y<r.y+r.height;}

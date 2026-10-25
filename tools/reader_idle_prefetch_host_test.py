@@ -96,6 +96,7 @@ __attribute__((unused)) static void reader_sync_rotation(void){}
 for name in ['lock_draw','unlock_draw','invalidate_prep','reader_prefetch_step','reader_prefetch_buffer','prep_task','kick_prep','reader_prefetch_end','reader_prefetch_resume','reader_prefetch_idle']:
  unit+=function(name,book)+'\n'
 assert 'reader_prefetch_end(prep);' in function('present',book)
+assert 'reader_prefetch_flush();' in function('present',book)
 assert 'reader_prefetch_resume(s_page)' in function('paint_reading',book)
 unit+=r'''
 static void destroy_worker(void){if(s_prep_task){vTaskDelete(s_prep_task);s_prep_task=NULL;}if(s_prep_done){vSemaphoreDelete(s_prep_done);s_prep_done=NULL;}if(s_draw_lock){vSemaphoreDelete(s_draw_lock);s_draw_lock=NULL;}}

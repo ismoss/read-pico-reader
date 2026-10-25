@@ -49,6 +49,7 @@ static int64_t s_reader_clock_minute,s_reader_clock_painted_minute,s_du_ms;
 static const char *s_text="text";
 static EpdRect s_area,s_du_area;
 static void reader_prefetch_end(bool started){assert(!started);}
+static void reader_prefetch_flush(void){}
 static int calls,selected,fail,rendered,prepares,images,tick;
 static bool background,immersive;
 static EpdRect areas[8];

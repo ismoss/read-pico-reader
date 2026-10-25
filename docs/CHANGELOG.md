@@ -23,6 +23,16 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## 待发布 / Unreleased
 
+- 全部二级阅读面板横屏化：阅读统计（含本章跳转键盘、最近 30 天）、阅读设置、翻页模式、按键控制与功能选择、字体设置（含字号滑杆、字重、排版、阅读线、字体选择）、书签、阅读背景与背景预览，共 15 个面板与正文同向铺满横屏视口，进出面板不再旋转；打开面板时仅统计组横屏分栏与压缩行距，竖屏面板布局逐像素保持原样。
+  Every secondary reader panel goes landscape-native: stats (with the chapter-jump keypad and the 30-day chart), reading settings, turn mode, key settings and the key picker, font settings (size rail, weight, layout, reading line, font picker), bookmarks, and the background directory with its preview — fifteen sheets now share the body orientation and fill the landscape viewport without rotating in or out; portrait layouts stay pixel-identical.
+- 目录跳转条拖动修复：按下曾返回整页重绘，app_loop 随之取消手势状态机，MOVE/SWIPE 再也不会产生，任何速度的拖动都只剩按下定位；改为按下只做弹窗局部差分，快拖的 SWIPE 按松手坐标落定百分比，横屏下刷新区域随弹窗原点平移。
+  TOC jump-bar drag fix: the press used to return a full page redraw, which made app_loop cancel the gesture state machine so neither MOVE nor the release SWIPE ever arrived, leaving every drag speed at its press position; the press now refreshes only the sheet locally, a fast drag's SWIPE settles the percent at the release coordinates, and the landscape refresh area follows the sheet origin.
+- 设置主页提示行与「设置」标题的视觉中心精确对齐：新增 ui_kit 的 ui_text_ink_center_y（与 ui_text 完全同轨的基线/上下沿实测），提示中心不再随内置字体的固定假设偏上。
+  The settings-home notice now aligns exactly on the title's visual centre: ui_kit gains ui_text_ink_center_y (measured baseline and extents on the same path ui_text draws), so the notice no longer rides high on the built-in face's fixed assumptions.
+- 冷启动「准备资源」开机图横屏适配：上次锁屏上下文在书内且阅读横屏时，开机图按阅读方向绘制，呈现后立即交还竖屏，锁屏验证与各页面不受影响。
+  The cold-start splash adapts to landscape: when the last lock context sat inside a book with landscape reading, the splash draws in the reading orientation and hands the rotation straight back after output, leaving the boot gate and every page portrait.
+- 首次翻页卡顿优化：入书/唤醒首帧输出成功后立即同步补完下一页预渲染（有界 250ms），冷启动缓存空时首翻直接命中预渲染缓存，不再退化成同步整页重绘。
+  First-turn lag fix: right after the first reader frame outputs successfully, the next-page prefetch finishes synchronously (bounded at 250ms), so a cold start's first turn hits the cache instead of degrading into a synchronous full repaint.
 - 目录页横屏化：与正文同向，双列布局每页 8 节（竖屏 7 节），翻页键与百分比跳转条按视口宽均分，跳转弹窗居中；进出目录不再旋转画面。
   The TOC goes landscape-native with the body: two columns hold eight entries per page against the portrait seven, the pager and the percent jump bar span the viewport, the jump sheet centres, and entering or leaving the TOC no longer rotates the view.
 - 设置主页的提示行（如「WiFi 对时完成，内部时钟已接管」）移到标题右侧同一行并按标题实际墨迹垂直居中：任何字面高度的自导入字体都不会再与「设置」标题重叠。

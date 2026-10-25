@@ -124,12 +124,16 @@ void ui_text(
     uint8_t* framebuffer, int x, int y_top, int px, const char* text,
     enum EpdFontFlags align, bool inverted
 );
-/// 与 ui_text 同一条路径下测一行字的上下沿（相对行上沿，below 为正数），换字体/换字号后
+/// 与 ui_text 同一条路径下测一行字的上下沿（相对基线，above 向上、below 向下为正），换字体/换字号后
 /// 调用方都能按实际占位排版，避免按内置字体预留的固定间隙被大字面字体压住。
-/// Measure a line's ink extents on the same path ui_text draws (both relative to the line top,
-/// below positive), so callers can lay out by the real footprint of any face or size instead of
+/// Measure a line's ink extents on the same path ui_text draws (relative to the baseline, above
+/// up and below down), so callers can lay out by the real footprint of any face or size instead of
 /// fixed gaps reserved for the built-in face.
 void ui_text_line_span_px(int px, const char* text, int* above, int* below);
+/// ui_text 在 y_top 放一行后的墨迹垂直中心；同行小字对齐标题视觉中心时直接取这个值。
+/// Vertical ink centre of a line ui_text would place at y_top; smaller text on the same row can
+/// align to the title's visual centre by passing this straight to ui_text_fixed_vc.
+int ui_text_ink_center_y(int y_top, int px, const char *text);
 /// Draw UI metadata at the exact requested size, independent of the global UI-size preference.
 /// 按指定像素字号绘制系统信息，不受全局系统字号设置影响。
 void ui_text_fixed(
