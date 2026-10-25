@@ -216,6 +216,10 @@ void ui_nav_status(uint8_t *fb) {
     const pmu_snapshot_t *pmu = read_pico_pmu_get();
     char clock[12]; clock_text(clock,sizeof(clock));
     const int status_center_y = 40;
+    // 布局跟随旋转后的逻辑宽度：主页竖屏 684，横屏阅读状态栏 1216，两端锚点同步平移。
+    // Layout follows the rotated logical width: 684 on portrait main pages, 1216 on the
+    // landscape reader status bar, with both edge anchors shifting together.
+    const int nav_w = epd_rotated_display_width();
     // 固定状态栏字号，让系统字体缩放时文字仍与图标共用中心线。
     // Keep status type fixed so text and glyphs share one centerline at every system font scale.
     ui_text_fixed_vc(fb, 36, status_center_y, UI_STATUS_TIME_PX, clock, EPD_DRAW_ALIGN_LEFT, false);
@@ -228,45 +232,45 @@ void ui_nav_status(uint8_t *fb) {
     if (gauge_percent >= 0) snprintf(percent, sizeof(percent), "%u%%", (unsigned)gauge_percent);
     // 按实际百分比宽度排列网络图标，留 10 像素间隔；墨色与电池相同。
     // Place the network marks 10 px before the measured percentage, using the battery ink.
-    const int percent_left = 595 - status_number_width(percent);
+    const int percent_left = nav_w - 89 - status_number_width(percent);
     const int network_right = percent_left - 10;
     const int wifi_center = network_right - UI_NAV_NETWORK_ICON_PX / 2;
     const int bluetooth_center = wifi_center - (wifi_visible ? UI_NAV_NETWORK_ICON_PX + 8 : 0);
     int signature_width = 280;
     const int clock_right = 36 + status_number_width(clock);
-    int available = 2 * (UI_LOCK_WIDTH / 2 - clock_right - 12);
+    int available = 2 * (nav_w / 2 - clock_right - 12);
     if (available < signature_width) signature_width = available > 0 ? available : 0;
     int group_left = percent_left;
     if (wifi_visible || bluetooth_visible) {
         group_left = (bluetooth_visible ? bluetooth_center : wifi_center) - UI_NAV_NETWORK_ICON_PX / 2;
     }
-    available = 2 * (group_left - 12 - UI_LOCK_WIDTH / 2);
+    available = 2 * (group_left - 12 - nav_w / 2);
     if (available < signature_width) signature_width = available > 0 ? available : 0;
     char signature[96];
     snprintf(signature, sizeof(signature), "%s", app_settings_status_signature());
     status_fit_signature(signature, signature_width);
-    if (signature[0]) ui_text_fixed_vc(fb, UI_LOCK_WIDTH / 2, status_center_y, UI_STATUS_SIGNATURE_PX,
+    if (signature[0]) ui_text_fixed_vc(fb, nav_w / 2, status_center_y, UI_STATUS_SIGNATURE_PX,
                                       signature, EPD_DRAW_ALIGN_CENTER, false);
     if (wifi_visible) ui_nav_wifi_icon(fb, wifi_center, status_center_y, UI_NAV_NETWORK_ICON_PX, UI_GRAY_BLACK);
     if (bluetooth_visible)
         ui_draw_icon(fb, bluetooth_center, status_center_y, UI_NAV_NETWORK_ICON_PX,
                      UI_ICON_BLUETOOTH, UI_GRAY_BLACK);
-    EpdRect battery = {606, status_center_y - 11, 40, 22};
+    EpdRect battery = {nav_w - 78, status_center_y - 11, 40, 22};
     ui_draw_round_rect(fb, battery, 6, UI_GRAY_BLACK);
-    ui_fill_round_rect(fb, (EpdRect){648, status_center_y - 4, 5, 8}, 2, UI_GRAY_BLACK);
+    ui_fill_round_rect(fb, (EpdRect){nav_w - 36, status_center_y - 4, 5, 8}, 2, UI_GRAY_BLACK);
     bool charging = pmu_battery_charging(pmu);
     if (gauge_percent >= 0) {
         int width = (31 * gauge_percent + 50) / 100;
-        if (width > 0) ui_fill_round_rect(fb, (EpdRect){610, status_center_y - 7, width, 14}, 4, UI_GRAY_BLACK);
+        if (width > 0) ui_fill_round_rect(fb, (EpdRect){nav_w - 74, status_center_y - 7, width, 14}, 4, UI_GRAY_BLACK);
     }
     if (charging) {
         // 固定黑底与白色闪电描边，0%时也有完整对比，不依赖电量填充宽度。
         // A fixed black well and white bolt outline retain contrast even at0%, independent of the charge fill.
-        ui_fill_round_rect(fb,(EpdRect){614,status_center_y-10,26,20},3,UI_GRAY_BLACK);
-        ui_draw_icon(fb, 627, status_center_y, 22, UI_ICON_ZAP, UI_GRAY_WHITE);
+        ui_fill_round_rect(fb,(EpdRect){nav_w - 70,status_center_y-10,26,20},3,UI_GRAY_BLACK);
+        ui_draw_icon(fb, nav_w - 57, status_center_y, 22, UI_ICON_ZAP, UI_GRAY_WHITE);
 
     }
-    ui_text_fixed_vc(fb, 595, status_center_y, UI_STATUS_PERCENT_PX, percent, EPD_DRAW_ALIGN_RIGHT, false);
+    ui_text_fixed_vc(fb, nav_w - 89, status_center_y, UI_STATUS_PERCENT_PX, percent, EPD_DRAW_ALIGN_RIGHT, false);
     ui_status_mark_visible(fb);
     s_power_signature=power_signature();
 }

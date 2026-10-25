@@ -3907,7 +3907,7 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
         // 周期清理使用完整原厂灰阶定稿，保留饱和驱动；一次输出，不叠加擦白或文字补刷。
         // Periodic cleanup retains the complete vendor settling/saturation phases in one output, without erase or text replay.
         err = update_display_area_full_with(ctx->hl, &E0470_FULL_WAVEFORM, MODE_GC16,
-                                            (EpdRect){0, 0, UI_LOCK_WIDTH, UI_LOCK_HEIGHT});
+                                            (EpdRect){0, 0, reader_w(), reader_h()});
     else if (redraw == APP_REDRAW_FULL) err = update_display_full(ctx->hl);
     else if (redraw == APP_REDRAW_AREA && s_view == SHELF && s_shelf_feedback_pending) {
         // 抽出与复位只驱动发生变化的像素，避免整张封面被反复压黑。
@@ -4026,7 +4026,13 @@ static app_redraw_t paint_reading(app_ctx_t* ctx, enum EpdDrawMode mode) {
     if (cached && reader_status_visible()) reader_status_paint(ctx->fb);
     unlock_draw();
     ESP_LOGI(TAG, "paint cached=%d ms=%lld", cached, (esp_timer_get_time() - started) / 1000);
-    s_area = reader_area();
+    // 横屏翻页按整页提交差分：区域差分在横屏旋转下被真机观察到只驱动一半正文，
+    // 整页差分仍只驱动变化像素，多花几毫秒计算但走经过验证的路径。
+    // Landscape turns submit a whole-page diff: the area diff was observed on hardware to
+    // drive only half the body under rotation; a whole-page diff still drives only changed
+    // pixels and follows the verified path.
+    s_area = s_reader_landscape_layout
+        ? (EpdRect){0, 0, reader_w(), reader_h()} : reader_area();
     s_reader_footer_pending = !s_reader_fullscreen;
     s_mode = mode;
     return APP_REDRAW_AREA;
@@ -5188,8 +5194,7 @@ static app_redraw_t turn_page(app_ctx_t* ctx, int dir) {
         book_layout_page_image_count(s_page) == 0 && !app_settings_book_background_path()[0];
     s_water_turn_pending = !chrome_changed && redraw == APP_REDRAW_AREA && !s_reader_cleanup &&
                            app_settings_reader_turn_effect() == 1 && from_text_frame &&
-                           book_layout_page_image_count(s_page) == 0 && !app_settings_book_background_path()[0] &&
-                           !s_reader_landscape_layout;
+                           book_layout_page_image_count(s_page) == 0 && !app_settings_book_background_path()[0];
     s_water_turn_dir = dir > 0 ? E0470_TURN_RTL : E0470_TURN_LTR;
     return chrome_changed ? APP_REDRAW_PAGE : redraw;
 }
@@ -6399,7 +6404,7 @@ static app_redraw_t zoom_jump(app_ctx_t* ctx, int scale, int fx, int fy) {
     render(ctx, ctx->fb);
     guard_draw_result(ctx->hl, update_display_area_full_with(
         ctx->hl, &E0470_FULL_WAVEFORM, MODE_GC16,
-        (EpdRect){0, 0, UI_LOCK_WIDTH, UI_LOCK_HEIGHT}));
+        (EpdRect){0, 0, reader_w(), reader_h()}));
     return APP_REDRAW_DONE;
 }
 
@@ -6418,7 +6423,7 @@ static app_redraw_t inline_zoom_toggle(app_ctx_t* ctx, uint16_t x, uint16_t y) {
         render(ctx, ctx->fb);
         guard_draw_result(ctx->hl, update_display_area_full_with(
             ctx->hl, &E0470_FULL_WAVEFORM, MODE_GC16,
-            (EpdRect){0, 0, UI_LOCK_WIDTH, UI_LOCK_HEIGHT}));
+            (EpdRect){0, 0, reader_w(), reader_h()}));
         return APP_REDRAW_DONE;
     }
     int slot = -1;
@@ -7005,7 +7010,7 @@ static app_redraw_t zoom_settle(app_ctx_t* ctx) {
     // picture-only difference cannot clear, so drive every pixel of the panel.
     guard_draw_result(ctx->hl, update_display_area_full_with(
         ctx->hl, &E0470_FULL_WAVEFORM, MODE_GC16,
-        (EpdRect){0, 0, UI_LOCK_WIDTH, UI_LOCK_HEIGHT}));
+        (EpdRect){0, 0, reader_w(), reader_h()}));
     return APP_REDRAW_DONE;
 }
 
