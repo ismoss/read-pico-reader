@@ -107,6 +107,10 @@ static void check_group(const char *name, const EpdRect *rects, int count) {
          check_group(name, rs, (count)); } while (0)
 
 int main(void){
+ // 门控需要横屏面板在开：统计面板只是载体，几何函数各自按面板语义取横屏分支。
+ // The gate needs a landscape panel open: the stats sheet is just the carrier, each geometry
+ // helper takes its landscape branch on its own panel semantics.
+ s_reader_panel = READER_PANEL_STATS;
  // 统计组：七个控件、14 个键盘键都在视口内且互不重叠。
  // Stats group: the seven controls and the 14 keypad keys fit without overlap.
  CHECK_GENERATOR("stats controls", reader_stats_control_rect(i + 1), 7);
