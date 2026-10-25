@@ -21,11 +21,13 @@
 #define BOOK_TOC_JUMP_TRACK (-10)
 
 int book_toc_pages(size_t chapters);
+/// 当前视口每页章节数：竖屏单列 7，横屏双列 8。/ Entries per page for the live viewport: 7 in the portrait column, 8 across landscape's two columns.
+int book_toc_rows(void);
 int book_toc_hit(uint16_t x, uint16_t y, int page, size_t chapters);
 int book_toc_jump_hit(uint16_t x, uint16_t y);
 int book_toc_jump_percent(uint16_t x);
 int book_toc_page_from_percent(int percent, int pages);
-EpdRect book_toc_row_rect(int row);
+EpdRect book_toc_row_rect(int cell);
 void book_toc_render(uint8_t *fb, const char *book_title, size_t chapters,
                      size_t current, int page, const char *message);
 void book_toc_render_jump(uint8_t *fb, size_t chapters, int percent);

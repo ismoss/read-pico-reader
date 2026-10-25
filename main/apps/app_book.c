@@ -563,8 +563,12 @@ static size_t fb_bytes(void) { return (size_t)epd_width() * epd_height() / 2; }
 static EpdRect body_rect(void);
 static bool s_reader_landscape_layout;
 static bool reader_landscape_active(void) {
-    return app_settings_reader_landscape() != 0 && s_view == READING && s_text &&
-        (s_reader_panel == READER_PANEL_NONE || s_reader_panel == READER_PANEL_TOOLS) &&
+    // 目录已横屏化（双列），与正文同向；其余二级面板仍竖屏弹出。
+    // The TOC is landscape-native (two columns) and shares the body orientation; other
+    // secondary panels still pop up portrait.
+    return app_settings_reader_landscape() != 0 && s_text &&
+        (s_view == READING || s_view == TOC) &&
+        (s_view == TOC || s_reader_panel == READER_PANEL_NONE || s_reader_panel == READER_PANEL_TOOLS) &&
         !s_clear_confirm;
 }
 static enum EpdRotation reader_rotation_now(void) {
@@ -5168,7 +5172,7 @@ static app_redraw_t turn_page(app_ctx_t* ctx, int dir) {
     else if (dir > 0 && s_chapter + 1 < book_chapter_count()) { save_progress(); changed = load_chapter(ctx, s_chapter + 1, 0, false); }
     else if (dir < 0 && s_chapter) { save_progress(); changed = load_chapter(ctx, s_chapter - 1, 0, true); }
     else return reader_turn_chrome(ctx) ? APP_REDRAW_PAGE : APP_REDRAW_NONE;
-    if (!changed) { set_reader_view(s_text ? TOC : SHELF); ctx->leaf = s_text ? s_chapter / BOOK_TOC_ROWS : 0; return APP_REDRAW_PAGE; }
+    if (!changed) { set_reader_view(s_text ? TOC : SHELF); ctx->leaf = s_text ? s_chapter / book_toc_rows() : 0; return APP_REDRAW_PAGE; }
     skip_hidden_image_pages(ctx, dir);
     if (!s_text) { s_view = SHELF; return APP_REDRAW_PAGE; }
     // 先选择旧布局的目标页，再切全屏，保留目标位置而不是跨过未读段落。
@@ -5779,7 +5783,7 @@ static app_redraw_t reader_panel_action(app_ctx_t* ctx, uint16_t x, uint16_t y) 
                 s_toc_jump_open = s_toc_jump_drag = false;
                 s_reader_panel = READER_PANEL_NONE;
                 size_t toc = current_toc_position();
-                ctx->leaf = toc == SIZE_MAX ? 0 : (int)(toc / BOOK_TOC_ROWS);
+                ctx->leaf = toc == SIZE_MAX ? 0 : (int)(toc / book_toc_rows());
             } else if (i == 1) {
                 (void)bookmark_toggle();
             } else if (i == 2) {
@@ -7321,7 +7325,7 @@ static app_redraw_t gesture_event(app_ctx_t* ctx, const ui_gesture_event_t* even
             set_reader_view(TOC);
             s_message[0] = 0;
             size_t toc = current_toc_position();
-            ctx->leaf = toc == SIZE_MAX ? 0 : (int)(toc / BOOK_TOC_ROWS);
+            ctx->leaf = toc == SIZE_MAX ? 0 : (int)(toc / book_toc_rows());
             return APP_REDRAW_PAGE;
         }
     }

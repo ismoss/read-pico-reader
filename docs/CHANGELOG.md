@@ -23,6 +23,10 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## 待发布 / Unreleased
 
+- 目录页横屏化：与正文同向，双列布局每页 8 节（竖屏 7 节），翻页键与百分比跳转条按视口宽均分，跳转弹窗居中；进出目录不再旋转画面。
+  The TOC goes landscape-native with the body: two columns hold eight entries per page against the portrait seven, the pager and the percent jump bar span the viewport, the jump sheet centres, and entering or leaving the TOC no longer rotates the view.
+- 设置主页的提示行（如「WiFi 对时完成，内部时钟已接管」）移到标题右侧同一行并按标题实际墨迹垂直居中：任何字面高度的自导入字体都不会再与「设置」标题重叠。
+  The settings-home notice (e.g. the WiFi time-sync result) moves beside the title on the same row, vertically centred on the title's measured ink, so imported faces of any height no longer overlap the title.
 - 横屏阅读修复：翻页改按整页提交差分（区域差分在横屏旋转下真机只驱动一半正文）；状态栏布局跟随旋转宽度，横屏下时间居左、签名居中、WiFi/蓝牙/电量居右铺满整条；水波纹翻页效果在横屏恢复（揭页库本就按旋转映射方向）；周期清理与插图缩放定稿的整屏区域不再使用竖屏硬编码。
   Landscape fixes: turns submit a whole-page diff (the area diff drove only half the body under rotation on hardware); the status bar follows the rotated width with the clock left, signature centred and network/battery right; the ripple effect returns in landscape (the turn library already maps direction through rotation); cleanup and zoom settling no longer use portrait-hardcoded full rects.
 - 锁屏密码解锁宽限期修复：mod4 引入的档位循环把位标志当索引（`& 4`），点按卡死且 5 分/1 时/8 时档不生效；改为有界查表并按 5 档循环。

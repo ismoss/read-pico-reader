@@ -291,6 +291,21 @@ void ui_text(
     else ttf_draw_text_px(framebuffer, x, y_top + ttf_ascender_px(px), px, text, align, fg, bg);
 }
 
+void ui_text_line_span_px(int px, const char* text, int* above, int* below) {
+    // 与 ui_text 完全同一条字体路径：内置位图与 TTF 的字面高度不同，换字体后按实测排。
+    // Exactly the ui_text face path: the bitmap and TTF faces differ in ink height, so layout
+    // follows the measured extents after any face change.
+    px = ui_text_effective_px(px);
+    int a = 0, b = 0;
+    if (text && text[0]) {
+        if ((!s_system_ttf || ttf_font_is_builtin()) && ui_font_has_text(text))
+            ui_font_measure_line_px(px, text, &a, &b);
+        else ttf_measure_line_px(px, text, &a, &b);
+    }
+    if (above) *above = a;
+    if (below) *below = b;
+}
+
 int ui_text_fixed_width_px(int px, const char* text) {
     return ui_text_fixed_context_width_px(px, text, text);
 }

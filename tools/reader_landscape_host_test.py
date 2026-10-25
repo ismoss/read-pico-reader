@@ -59,7 +59,7 @@ static void invalidate_prep(void){}
 static void free_book(void){assert(false);}
 static void copy_text(char *d,size_t n,const char *s){snprintf(d,n,"%s",s);}
 static char s_message[64];
-enum { READING, SHELF, READER_PANEL_NONE, READER_PANEL_TOOLS, READER_PANEL_STATS };
+enum { READING, SHELF, TOC, READER_PANEL_NONE, READER_PANEL_TOOLS, READER_PANEL_STATS };
 '''
 for name in ('reader_landscape_active', 'reader_rotation_now', 'reader_relayout_keep_page',
              'reader_sync_rotation', 'reader_touch_to_landscape', 'reader_gesture_to_landscape'):

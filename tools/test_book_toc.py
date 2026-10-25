@@ -15,6 +15,11 @@ enum EpdFontFlags {EPD_DRAW_ALIGN_LEFT=0, EPD_DRAW_ALIGN_CENTER=1, EPD_DRAW_ALIG
 void epd_fill_rect(EpdRect rect, uint8_t color, uint8_t *fb);
 void epd_fill_circle(int x,int y,int radius,uint8_t color,uint8_t *fb);
 void epd_draw_circle(int x,int y,int radius,uint8_t color,uint8_t *fb);
+typedef int EpdRotation;
+enum {EPD_ROT_LANDSCAPE=0,EPD_ROT_PORTRAIT=1,EPD_ROT_INVERTED_LANDSCAPE=2,EPD_ROT_INVERTED_PORTRAIT=3};
+EpdRotation epd_get_rotation(void);
+int epd_width(void);
+int epd_rotated_display_height(void);
 """,
     "book_source.h": """#pragma once
 #include <stddef.h>
@@ -65,6 +70,12 @@ void epd_fill_rect(EpdRect rect,uint8_t color,uint8_t *fb){(void)rect;(void)colo
 void ui_fill_rect_fast(EpdRect rect,uint8_t color,uint8_t *fb){epd_fill_rect(rect,color,fb);}
 void epd_fill_circle(int x,int y,int radius,uint8_t color,uint8_t *fb){(void)x;(void)y;(void)radius;(void)color;(void)fb;}
 void epd_draw_circle(int x,int y,int radius,uint8_t color,uint8_t *fb){(void)x;(void)y;(void)radius;(void)color;(void)fb;}
+// 宿主默认竖屏；测试里可切到横屏验证双列布局与命中。
+// The host defaults to portrait; tests flip to landscape to check the two-column layout and hits.
+static EpdRotation s_toc_rotation=EPD_ROT_INVERTED_PORTRAIT;
+EpdRotation epd_get_rotation(void){return s_toc_rotation;}
+int epd_width(void){return 1216;}
+int epd_rotated_display_height(void){return s_toc_rotation&1?1216:684;}
 void ui_clear_page(uint8_t *fb){(void)fb;}
 void ui_fill_round_rect(uint8_t *fb,EpdRect r,int radius,uint8_t gray){(void)fb;(void)r;(void)radius;(void)gray;cards++;}
 void ui_draw_round_rect(uint8_t *fb,EpdRect r,int radius,uint8_t gray){(void)fb;(void)r;(void)radius;assert(gray<=0x60);borders++;}
@@ -120,6 +131,19 @@ int main(void){
     assert(book_toc_jump_hit(480,880)==BOOK_TOC_JUMP_CONFIRM);
     assert(book_toc_jump_hit(342,640)==BOOK_TOC_JUMP_TRACK);
     assert(book_toc_jump_percent(92)==0 && book_toc_jump_percent(592)==100);
+    // 横屏双列：每页 8 节、左右列各自命中、底部翻页带与跳转条就位。
+    // Landscape two columns: eight entries per page, each column hits, pager band and jump bar in place.
+    s_toc_rotation=EPD_ROT_INVERTED_LANDSCAPE;
+    assert(book_toc_rows()==8 && book_toc_pages(8)==1 && book_toc_pages(9)==2);
+    assert(book_toc_hit(100,240,0,8)==0);
+    assert(book_toc_hit(100,320,0,8)==1);
+    assert(book_toc_hit(700,240,0,8)==4);
+    assert(book_toc_hit(700,240,1,8)==-1);
+    assert(book_toc_hit(60,588,0,80)==BOOK_TOC_SKIP_PREV);
+    assert(book_toc_hit(1160,588,0,80)==BOOK_TOC_SKIP_NEXT);
+    assert(book_toc_hit(600,650,0,80)==BOOK_TOC_JUMP);
+    assert(book_toc_jump_hit(342+268,640-300)==BOOK_TOC_JUMP_TRACK);
+    s_toc_rotation=EPD_ROT_INVERTED_PORTRAIT;
     assert(book_toc_page_from_percent(0,24)==0);
     assert(book_toc_page_from_percent(4,24)==0);
     assert(book_toc_page_from_percent(60,24)==14);

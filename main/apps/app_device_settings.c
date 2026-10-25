@@ -1531,7 +1531,17 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
     ui_fill_rect_fast((EpdRect){0,0,UI_LOCK_WIDTH,160},UI_GRAY_WHITE,fb);
     ui_nav_status(fb);
     ui_text(fb, 36, 91, 52, "设置", EPD_DRAW_ALIGN_LEFT, false);
-    if (s_notice[0]) ui_text_fixed_vc(fb, 36, 138, 20, s_notice, EPD_DRAW_ALIGN_LEFT, false);
+    if (s_notice[0]) {
+        // 提示放在标题右侧同一行、以标题墨迹垂直居中：水平分离对任何字面高度都安全，
+        // 大字面自导入字体不再把提示压到标题或下方的列表上。
+        // The notice sits on the title's row to its right, vertically centred on the title ink:
+        // horizontal separation is safe at every face height, so tall imported faces no longer
+        // push it over the title or the list below.
+        int above = 0, below = 0;
+        ui_text_line_span_px(52, "设置", &above, &below);
+        const int notice_x = 36 + 2 * ui_text_effective_px(52) + 24;
+        ui_text_fixed_vc(fb, notice_x, 91 + above / 2, 20, s_notice, EPD_DRAW_ALIGN_LEFT, false);
+    }
     settings_navigation(fb);
 }
 
