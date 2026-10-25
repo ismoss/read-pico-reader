@@ -13,6 +13,8 @@
 bool mod_monitor_enabled(void);
 /// 设置开关并立即启停服务器；返回是否变化。/ Set the switch, start/stop at once; true when changed.
 bool mod_monitor_set_enabled(bool on);
+/// 开机时读取持久化的开关（NVS）。/ Read the persisted switch at boot (NVS).
+void mod_monitor_init(void);
 /// 每轮主循环调用：按需起停服务器并记录帧缓冲指针（不阻塞，内部 1s 节流）。
 /// Called every main-loop pass: starts/stops the server as needed and records the framebuffer
 /// pointer (non-blocking, throttled internally to 1 s).
