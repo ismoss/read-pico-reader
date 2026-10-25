@@ -30,24 +30,11 @@ static SemaphoreHandle_t s_mutex, s_done, s_flash_display;
 static pico_update_status_t *s_status;
 static atomic_bool s_cancel;
 static bool s_joinable, s_download;
-// 每秒心跳：仅在线等待/读取循环里触发，回调由界面注册；不画屏、不改状态。
-// Per-second heartbeat fired only inside network wait/read loops; the UI registers the
-// callback, and this module neither paints nor touches status.
-static void (*s_wait_hook)(int64_t, void *);
-static void *s_wait_hook_user;
-static int64_t s_wait_origin_us, s_wait_last_beat_us;
-void pico_online_set_wait_hook(void (*hook)(int64_t, void *), void *user) {
-    s_wait_hook = hook;
-    s_wait_hook_user = user;
-}
-static void wait_beat_reset(void) { s_wait_origin_us = s_wait_last_beat_us = esp_timer_get_time(); }
-static void wait_beat(void) {
-    if (!s_wait_hook) return;
-    const int64_t now = esp_timer_get_time();
-    if (now - s_wait_last_beat_us < 1000000) return;
-    s_wait_last_beat_us = now;
-    s_wait_hook(now - s_wait_origin_us, s_wait_hook_user);
-}
+// 无逐秒心跳回调：检查/下载都在后台任务里跑，UI 侧注册的回调会在任务启动的一瞬被注销，
+// 从来不可靠；界面在主循环 tick 里自己计时（app_device_settings 的 on_tick）。
+// No per-second wait callback: checks and downloads run in a background task, so a UI-registered
+// hook is deregistered the instant the task spawns and never fires; the UI keeps its own clock
+// in the main-loop tick (on_tick in app_device_settings).
 static const esp_partition_t *s_verified;
 
 static bool initialize(void) {
@@ -136,7 +123,6 @@ static bool online(bool *owned) {
     }
     int64_t deadline = esp_timer_get_time() + 30000000;
     while (!atomic_load(&s_cancel)) {
-        wait_beat();
         read_pico_transfer_service_poll();
         read_pico_transfer_get_status(&status);
         if (status.mode == READ_PICO_TRANSFER_MODE_STA && status.network_ready) {
@@ -205,7 +191,6 @@ static esp_http_client_handle_t open_http(const char *url, int *status, int64_t 
 static bool wait_network(void) {
     int64_t deadline = esp_timer_get_time() + 30000000;
     while (!atomic_load(&s_cancel) && esp_timer_get_time() < deadline) {
-        wait_beat();
         read_pico_transfer_service_poll();
         read_pico_transfer_status_t status;
         read_pico_transfer_get_status(&status);
@@ -219,7 +204,6 @@ static bool wait_network(void) {
 // Retry temporary read timeouts and renew the idle deadline after each chunk.
 static int read_chunk(esp_http_client_handle_t client, uint8_t *buffer, int cap, int64_t *idle) {
     while (!atomic_load(&s_cancel) && esp_timer_get_time() < *idle) {
-        wait_beat();
         read_pico_transfer_service_poll();
         int n = esp_http_client_read(client, (char *)buffer, cap);
         if (n > 0) { *idle = esp_timer_get_time() + 30000000; return n; }
@@ -403,7 +387,6 @@ failed:
     return false;
 }
 static void worker(void *unused) {
-    wait_beat_reset();
     (void)unused;
     bool owned = false;
     wifi_ps_type_t previous_ps = WIFI_PS_MIN_MODEM;

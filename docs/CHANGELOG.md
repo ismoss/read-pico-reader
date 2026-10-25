@@ -22,6 +22,8 @@
 User-visible changes by release; see [README](../README.md) for usage.
 
 ## 待发布 / Unreleased
+- 检查期动画修复（点动画三连败的真根因）：检查更新的每秒点动画与心跳秒数此前由联网任务的等待回调驱动，而检查任务是后台异步的——回调在任务启动的一瞬就被注销，检查期两条动画通道从未上屏（下载期走的是另一条驱动所以看起来正常）。现在检查与下载统一由界面主循环每秒驱动动画；下载期心跳盒让位百分比数字，两块区域不再每秒互相抹除；从未生效的等待回调机制连同其微秒/毫秒单位错一并移除。
+  The check-phase animation fix (the real cause behind three failed attempts): the per-second dots and heartbeat seconds were driven by the network worker's wait callback, but the check runs as a background task — the callback was deregistered the instant the task spawned, so neither channel ever painted during a check (downloads looked fine because they use a different driver). Both phases now get their animation from the UI loop's per-second tick; the downloading heartbeat box yields to the percent digits so the two areas stop erasing each other, and the never-working callback machinery (with its microsecond/millisecond unit bug) is gone.
 - 升级页自动检查：进入系统升级页时已联网且空闲就自动检查一次更新，结果直接上屏，省一次点按。
   The upgrade page auto-checks on entry when the network is up and the stack is idle, so the result is on screen without an extra tap.
 - 检查更新的点动画按反馈重做：省略号回到提示文字右侧（30px 大字，一秒一步），心跳盒恢复每秒秒数——两条反馈通道并存，总有一条看得见。

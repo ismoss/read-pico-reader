@@ -24,10 +24,6 @@
 // 自建源上的公共 DNS 列表，供「特殊功能」页在线获取。/ Public DNS list on the self-hosted origin for the special-features page.
 #define PICO_OTA_DNS_URL "https://ismoss.github.io/read-pico-reader/dns.json"
 
-/// 每秒等待提示回调：联网等待与读取期间的活体提示；由界面注册并绘制，本模块不画屏。
-/// Per-second wait callback as a liveness hint during network waits and reads; the UI owns painting.
-void pico_online_set_wait_hook(void (*hook)(int64_t elapsed_ms, void *user), void *user);
-
 typedef enum { PICO_UPDATE_IDLE, PICO_UPDATE_CHECKING, PICO_UPDATE_AVAILABLE,
                PICO_UPDATE_LATEST, PICO_UPDATE_DOWNLOADING, PICO_UPDATE_READY,
                PICO_UPDATE_FAILED, PICO_UPDATE_CANCELLED } pico_update_state_t;
