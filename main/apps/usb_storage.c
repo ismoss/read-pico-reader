@@ -10,6 +10,7 @@
 #include "book_cover_jobs.h"
 #include "book_lock_collage.h"
 #include "usb_storage.h"
+#include "book_store.h"
 #include <stdlib.h>
 #include "driver/sdmmc_host.h"
 #include "esp_log.h"
@@ -172,5 +173,9 @@ cleanup:
     s_active = false;
     s_cleanup_pending = false;
     restore_local();
+    // 电脑端可能增删过文件；bump 存储版本让书架缓存与索引在下一次进入时失效重扫。
+    // The PC may have added or removed files; bump the store revision so the shelf cache and
+    // the index invalidate on the next entry.
+    book_store_notify_changed();
     return ESP_OK;
 }

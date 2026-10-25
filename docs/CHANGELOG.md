@@ -23,6 +23,10 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## 待发布 / Unreleased
 
+- 书架索引持久化（阶段B）：扫描成功后把书架（含分类与触发条件）写入内置存储，冷启动/深睡唤醒毫秒级呈现完整列表，随后用分片扫描在影子数组里静默对账，完成后原位换入——显示全程不闪空。USB 读卡会话结束时同步 bump 存储版本，电脑端增删的书不会被陈旧索引漏掉。
+  Shelf index persistence (phase B): a successful scan writes the shelf (categories and trigger values included) to internal storage; cold boots and deep-sleep wakes paint the full list in milliseconds, then a shadow-array reconcile runs through the chunked scanner and swaps in place — the display never flashes empty. USB card sessions bump the store revision on exit, so books changed on the PC are never missed by a stale index.
+- 远程监看修复与增强：修掉 /screen 从未写入 BMP 文件头导致画面永远加载失败的问题；设置页改为开关行 + 二维码 + 大字地址，地址首次出现/消失时页面自动重绘（不再需要退出重进），并重排提示文案。
+  Remote monitor fixes and polish: /screen never wrote a BMP file header, which is why the image never loaded; the settings page now shows the toggle, a QR code and a large address line, repainting itself the moment the address appears or disappears, with the notices reworded.
 - 新增远程监看（设置 → 个性化功能 → 远程监看）：开关默认关闭，开启并联网后用浏览器打开屏幕上显示的地址，即可在局域网内看到设备当前画面（每秒黑白灰度 BMP）并直接点按、拖动操作设备；画面按触摸坐标系出图，设备横竖屏时点按都落在正确控件上。无密码保护，仅建议可信局域网使用，不用时请关闭开关。
   New remote monitor (Settings → Personalization → Remote monitor): off by default; once enabled and online, a browser at the shown address mirrors the device screen (1 Hz grayscale BMP) and taps or drags straight onto it over the LAN. The image uses the touch coordinate space, so taps land on the right control at any rotation. No password — trusted LANs only; switch it off when not in use.
 - 书架扫描改造为分片协作式：进入书架立即显示「正在扫描书架…」并保持全程可响应（可随时切页、进书），扫描在每轮循环的时间片内推进，不再整段冻结界面；扫描完成的呈现与缓存口径不变。

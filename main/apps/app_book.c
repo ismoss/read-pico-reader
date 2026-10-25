@@ -505,6 +505,7 @@ static EpdRect reader_slider_rect(int slider);
 static int reading_settings_top(void);
 static EpdRect reader_panel_footer_rect(void);
 static void shelf_scan_finalize(app_ctx_t *ctx);
+static void shelf_index_save(void);
 static void copy_text(char* dst, size_t cap, const char* src);
 static void fit_text(char* text, int px, int width);
 static void free_book(void);
@@ -5131,6 +5132,7 @@ typedef struct {
 // must abort first to release the handles and the directory stack.
 static struct {
     bool active;
+    bool shadow;                 // 静默对账：写影子数组，收尾换入 / silent reconcile into the shadow array
     int stage;                   // 0 = 逐 root 目录扫描，1 = 收尾 / 0 = per-root walk, 1 = finalize
     uint32_t progress_revision;
     book_store_root_t roots[BOOK_STORE_ROOT_MAX];
@@ -5142,6 +5144,34 @@ static struct {
     bool is_flash;
     char root[BOOK_STORE_PATH_MAX];
 } s_scan;
+
+// 影子列表：静默对账写进第二数组，收尾时与现列表整体换入，显示全程不闪空。
+// The shadow list: a silent reconcile fills a second array and swaps it in at finalize, so the
+// visible list never flashes empty mid-pass.
+static shelf_entry_t *s_shelf_next;
+static size_t s_shelf_next_capacity;
+static int s_count_next;
+// 对账/扫描共用的写入端：影子模式写 s_shelf_next，普通模式写 s_shelf。
+// The shared commit side: shadow mode writes s_shelf_next, normal mode writes s_shelf.
+static shelf_entry_t *scan_items(void) { return s_scan.shadow ? s_shelf_next : s_shelf; }
+static int scan_count(void) { return s_scan.shadow ? s_count_next : s_count; }
+static bool scan_reserve(void) {
+    if (!s_scan.shadow) return shelf_reserve();
+    if ((size_t)s_count_next < s_shelf_next_capacity) return true;
+    if (s_count_next == INT_MAX) return false;
+    size_t cap = s_shelf_next_capacity ? s_shelf_next_capacity * 2 : 32;
+    if (cap > INT_MAX || cap > SIZE_MAX / sizeof(*s_shelf_next)) return false;
+    shelf_entry_t* entries = heap_caps_realloc(s_shelf_next, cap * sizeof(*entries), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!entries) return false;
+    s_shelf_next = entries;
+    s_shelf_next_capacity = cap;
+    return true;
+}
+static void scan_commit(shelf_entry_t candidate) {
+    if (!scan_reserve()) { s_scan.truncated = true; return; }
+    if (s_scan.shadow) s_shelf_next[s_count_next++] = candidate;
+    else s_shelf[s_count++] = candidate;
+}
 
 // 分片扫描的目录栈：跨主循环保留，每轮 tick 推进一个时间片，UI 全程可响应。
 // The chunked scan's directory stack persists across loop passes; each tick advances one time
@@ -5208,7 +5238,7 @@ static void scan_dir_chunk(int64_t deadline) {
         if (s_scan.hidden && shelf_hidden_read_handle(s_scan.hidden, path)) continue;
         if (strlen(ent->d_name) >= sizeof(((shelf_entry_t *)0)->name) ||
             st.st_size < 0 || (uint64_t)st.st_size > UINT32_MAX) { s_scan.skipped = true; continue; }
-        if (!shelf_reserve()) { s_scan.truncated = true; break; }
+        if (!scan_reserve()) { s_scan.truncated = true; break; }
         shelf_entry_t candidate = {0};
         shelf_entry_t *item = &candidate;
         copy_text(item->path, sizeof(item->path), path);
@@ -5232,7 +5262,7 @@ static void scan_dir_chunk(int64_t deadline) {
         item->chapter = item->has_progress ? p.chapter : 0;
         item->recent = item->has_progress ? p.last_open_s : 0;
         item->favorite = s_scan.favorites && favorite_read_handle(s_scan.favorites, item->path);
-        s_shelf[s_count++] = candidate;
+        scan_commit(candidate);
     }
     scan_dir_end();
 }
@@ -5254,8 +5284,8 @@ static bool shelf_backfill_visit(const char* path, const book_progress_t* progre
     // 历史可能来自其他固件；只补入当前阅读器支持的真实文件格式。
     // History may come from another firmware; admit only file formats this reader supports.
     if (!book_file_path_supported(path)) return true;
-    for (int i = 0; i < s_count; ++i)
-        if (!strcmp(s_shelf[i].path, path)) return true;   // 书根目录已经收录
+    for (int i = 0; i < scan_count(); ++i)
+        if (!strcmp(scan_items()[i].path, path)) return true;   // 书根目录已经收录
     struct stat st;
     if (stat(path, &st) != 0 || !S_ISREG(st.st_mode) || st.st_size < 0 ||
         (uint64_t)st.st_size > UINT32_MAX || (uint32_t)st.st_size != progress->file_size)
@@ -5264,7 +5294,7 @@ static bool shelf_backfill_visit(const char* path, const book_progress_t* progre
     const char* base = strrchr(path, '/');
     base = base ? base + 1 : path;
     if (strlen(base) >= sizeof(((shelf_entry_t*)0)->name)) return true;
-    if (!shelf_reserve()) { scan->truncated = true; return false; }
+    if (!scan_reserve()) { scan->truncated = true; return false; }
     shelf_entry_t candidate = {0};
     shelf_entry_t* item = &candidate;
     copy_text(item->path, sizeof(item->path), path);
@@ -5288,7 +5318,7 @@ static bool shelf_backfill_visit(const char* path, const book_progress_t* progre
     item->recent = progress->last_open_s;
     item->search_match = read_pico_search_match(item->name, s_query);
     item->favorite = scan->favorites && favorite_read_handle(scan->favorites, item->path);
-    s_shelf[s_count++] = candidate;
+    scan_commit(candidate);
     return true;
 }
 
@@ -5320,18 +5350,24 @@ static void shelf_scan_abort(void) {
     s_scan.root_count = s_scan.root_index = 0;
 }
 
-static void shelf_scan_begin(app_ctx_t *ctx) {
+static void shelf_scan_begin(app_ctx_t *ctx, bool shadow) {
     shelf_scan_abort();
     memset(&s_scan, 0, sizeof(s_scan));
     s_scan.active = true;
+    s_scan.shadow = shadow;
     s_scan.stage = 0;
     s_scan.progress_revision = book_progress_revision();
-    shelf_category_init();
-    for (int i = 2; i < s_category_count; ++i) s_categories[i].available = false;
-    s_count = 0;
-    s_visible_count = 0;
-    copy_text(s_message, sizeof(s_message), "正在扫描书架…");
-    s_shelf_warning[0] = 0;
+    if (!shadow) {
+        // 常规扫描清空重建并提示；静默对账保留现列表，只在影子数组里重建。
+        // A regular scan clears and rebuilds with a notice; a silent reconcile keeps the current
+        // list on screen and rebuilds into the shadow array.
+        shelf_category_init();
+        for (int i = 2; i < s_category_count; ++i) s_categories[i].available = false;
+        s_count = 0;
+        s_visible_count = 0;
+        copy_text(s_message, sizeof(s_message), "正在扫描书架…");
+        s_shelf_warning[0] = 0;
+    }
     // 内置分区每次启动都必须重新挂载；已有文件不会因此格式化。
     // Flash mounts on each boot; existing files are not formatted by that mount.
     esp_err_t root_err = book_store_roots(s_scan.roots, &s_scan.root_count);
@@ -5385,17 +5421,30 @@ static void shelf_scan_finalize(app_ctx_t *ctx) {
     // Finish old cleanup even if the path reappears, before new reading can create progress.
     for (delete_retry_t* p = s_delete_retries; p; p = p->next) {
         int i = 0;
-        while (i < s_count && strcmp(s_shelf[i].path, p->entry.path)) ++i;
-        if (i == s_count) {
-            if (!shelf_reserve()) { s_scan.truncated = true; continue; }
-            ++s_count;
+        while (i < scan_count() && strcmp(scan_items()[i].path, p->entry.path)) ++i;
+        if (i == scan_count()) {
+            if (!scan_reserve()) { s_scan.truncated = true; continue; }
+            if (s_scan.shadow) ++s_count_next; else ++s_count;
         }
-        s_shelf[i] = p->entry;
-        s_shelf[i].selected = false;
-        s_shelf[i].search_match = read_pico_search_match(p->entry.name, s_query);
+        scan_items()[i] = p->entry;
+        scan_items()[i].selected = false;
+        scan_items()[i].search_match = read_pico_search_match(p->entry.name, s_query);
     }
     if (s_scan.favorites) { nvs_close(s_scan.favorites); s_scan.favorites = 0; }
     if (s_scan.hidden) { nvs_close(s_scan.hidden); s_scan.hidden = 0; }
+    if (s_scan.shadow) {
+        // 静默对账收尾：影子列表整体换入，显示不闪空。
+        // Silent reconcile wrap-up: swap the shadow list in wholesale; the display never flashes.
+        if (s_shelf_next) {
+            free(s_shelf);
+            s_shelf = s_shelf_next;
+            s_shelf_capacity = s_shelf_next_capacity;
+        }
+        s_shelf_next = NULL;
+        s_shelf_next_capacity = 0;
+        s_count = s_count_next;
+        s_count_next = 0;
+    }
     // 补齐书根目录之外读过的书；显式移出书架的除外。
     // Backfill books read outside the roots, minus the ones removed from the shelf.
     (void)shelf_backfill_read_books(&s_scan.truncated);
@@ -5427,6 +5476,171 @@ static void shelf_scan_finalize(app_ctx_t *ctx) {
     s_progress_revision = s_scan.progress_revision;
     s_shelf_cache_valid = !s_scan.unreadable && !s_scan.truncated;
     ESP_LOGI(TAG, "shelf books=%d roots=%d", s_count, s_scan.root_count);
+    if (s_shelf_cache_valid) shelf_index_save();
+}
+
+/* ---- 书架索引持久化 / Shelf index persistence ---- */
+// 冷启动先上索引（毫秒级列表），再用分片扫描静默对账；触发值不符（换卡/样式/存储变化）
+// 时索引作废走常规扫描。索引放内置存储，点文件名以 . 开头不会被扫描收录。
+// Cold boots paint from the index (a millisecond-scale list) and reconcile silently with the
+// chunked scan; a trigger mismatch (card swap, style or storage change) discards it for a
+// regular scan. The index lives on internal flash; its dotted name stays out of scans.
+#define SHELF_INDEX_MAGIC UINT32_C(0x49534950)
+#define SHELF_INDEX_VERSION 1u
+#define SHELF_INDEX_PATH "/flash/books/.shelf_index"
+#define SHELF_INDEX_MAX 2000
+typedef struct {
+    uint32_t magic, version, count;
+    uint8_t sd_present, sd_mounted, shelf_style, reserved;
+    uint32_t store_revision, progress_revision;
+} shelf_index_header_t;
+typedef struct {
+    char path[BOOK_STORE_PATH_MAX];
+    char name[sizeof(((shelf_entry_t *)0)->name)];
+    char author[sizeof(((shelf_entry_t *)0)->author)];
+    uint32_t size, recent;
+    uint16_t chapter;
+    uint8_t is_flash, has_progress, pct, favorite;
+} shelf_index_entry_t;
+
+static void shelf_index_save(void) {
+    if (s_count > SHELF_INDEX_MAX) return;
+    FILE *f = fopen(SHELF_INDEX_PATH ".tmp", "wb");
+    if (!f) return;
+    shelf_index_header_t h = {
+        .magic = SHELF_INDEX_MAGIC, .version = SHELF_INDEX_VERSION, .count = (uint32_t)s_count,
+        .sd_present = s_cache_sd_present ? 1 : 0, .sd_mounted = s_cache_sd_mounted ? 1 : 0,
+        .shelf_style = app_settings_shelf_style(),
+        .store_revision = book_store_revision(), .progress_revision = book_progress_revision(),
+    };
+    const uint32_t cats_count_tmp = (uint32_t)s_category_count;
+    bool ok = fwrite(&h, sizeof(h), 1, f) == 1;
+    for (int i = 0; ok && i < s_count; ++i) {
+        shelf_index_entry_t e = {0};
+        copy_text(e.path, sizeof(e.path), s_shelf[i].path);
+        copy_text(e.name, sizeof(e.name), s_shelf[i].name);
+        copy_text(e.author, sizeof(e.author), s_shelf[i].author);
+        e.size = s_shelf[i].size;
+        e.recent = s_shelf[i].recent;
+        e.chapter = s_shelf[i].chapter;
+        e.is_flash = s_shelf[i].is_flash ? 1 : 0;
+        e.has_progress = s_shelf[i].has_progress ? 1 : 0;
+        e.pct = s_shelf[i].pct;
+        e.favorite = s_shelf[i].favorite ? 1 : 0;
+        ok = fwrite(&e, sizeof(e), 1, f) == 1;
+    }
+    // 分类段：条目之后写分类数与分类数组（含固定两栏），载入端据此重建分类页。
+    // The category section: after the entries, the count plus the array (the two fixed tabs
+    // included), so the loader can rebuild the category pages.
+    if (ok && s_category_count > 0)
+        ok = fwrite(&cats_count_tmp, sizeof(cats_count_tmp), 1, f) == 1 &&
+             fwrite(s_categories, (size_t)s_category_count * sizeof(*s_categories), 1, f) == 1;
+    ok = fclose(f) == 0 && ok;
+    if (ok) rename(SHELF_INDEX_PATH ".tmp", SHELF_INDEX_PATH);
+    else remove(SHELF_INDEX_PATH ".tmp");
+}
+
+static bool shelf_index_try_load(app_ctx_t *ctx, const read_pico_sd_info_t *sd) {
+    if (s_scan.active || !book_store_flash_ready()) return false;
+    FILE *f = fopen(SHELF_INDEX_PATH, "rb");
+    if (!f) return false;
+    shelf_index_header_t h = {0};
+    bool ok = fread(&h, sizeof(h), 1, f) == 1 &&
+              h.magic == SHELF_INDEX_MAGIC && h.version == SHELF_INDEX_VERSION &&
+              h.count <= SHELF_INDEX_MAX &&
+              h.sd_present == (uint8_t)(sd->present ? 1 : 0) &&
+              h.sd_mounted == (uint8_t)(sd->mounted ? 1 : 0) &&
+              h.shelf_style == app_settings_shelf_style() &&
+              h.store_revision == book_store_revision();
+    if (!ok) { fclose(f); return false; }
+    // 先读进临时数组，整份有效才换入现列表（半截文件不污染显示）。
+    // Read into a scratch array first and swap in only when the whole file validates.
+    shelf_entry_t *items = NULL;
+    size_t capacity = 0;
+    int count = 0;
+    for (uint32_t i = 0; ok && i < h.count; ++i) {
+        shelf_index_entry_t e = {0};
+        ok = fread(&e, sizeof(e), 1, f) == 1;
+        if (!ok) break;
+        if ((size_t)count == capacity) {
+            size_t cap = capacity ? capacity * 2 : 32;
+            if (cap > SIZE_MAX / sizeof(*items)) { ok = false; break; }
+            shelf_entry_t *grown = heap_caps_realloc(items, cap * sizeof(*items), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+            if (!grown) { ok = false; break; }
+            items = grown;
+            capacity = cap;
+        }
+        shelf_entry_t *it = &items[count++];
+        memset(it, 0, sizeof(*it));
+        copy_text(it->path, sizeof(it->path), e.path);
+        copy_text(it->name, sizeof(it->name), e.name);
+        copy_text(it->author, sizeof(it->author), e.author);
+        it->size = e.size;
+        it->recent = e.recent;
+        it->chapter = e.chapter;
+        it->is_flash = e.is_flash != 0;
+        it->has_progress = e.has_progress != 0;
+        it->pct = e.pct;
+        it->favorite = e.favorite != 0;
+        it->search_match = read_pico_search_match(it->name, s_query);
+    }
+    uint32_t cats = 0;
+    shelf_category_t *cat_items = NULL;
+    if (ok) {
+        ok = fread(&cats, sizeof(cats), 1, f) == 1 && cats <= SHELF_CATEGORY_LIMIT;
+        if (ok && cats > 0) {
+            cat_items = heap_caps_malloc((size_t)cats * sizeof(*cat_items), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+            ok = cat_items && fread(cat_items, (size_t)cats * sizeof(*cat_items), 1, f) == 1;
+        }
+    }
+    ok = ok && ferror(f) == 0;
+    if (fclose(f) != 0) ok = false;
+    if (!ok) {
+        free(items);
+        heap_caps_free(cat_items);
+        return false;
+    }
+    // 载入即接管列表与分类（recount 立即修正 available），再恢复可见页。
+    // The load takes over the list and the categories (recount fixes availability right away),
+    // then the visible pages restore.
+    if (cat_items) {
+        free(s_categories);
+        s_categories = cat_items;
+        s_category_count = (int)cats;
+        s_category_capacity = (int)cats;
+    }
+    shelf_category_init();
+    // init 只在根变化时重建；这里确保 0/1 两栏存在且自定义分类可用位交给 recount。
+    // init only rebuilds when the root changed; make sure the two fixed tabs exist and hand
+    // the custom availability to recount.
+    for (int i = 2; i < s_category_count; ++i) s_categories[i].available = true;
+    free(s_shelf);
+    s_shelf = items;
+    s_shelf_capacity = capacity;
+    s_count = count;
+    s_visible_count = 0;
+    s_message[0] = 0;
+    s_shelf_warning[0] = 0;
+    s_storage[0] = 0;
+    s_cache_sd_present = h.sd_present != 0;
+    s_cache_sd_mounted = h.sd_mounted != 0;
+    s_cache_shelf_style = h.shelf_style;
+    s_store_revision = h.store_revision;
+    s_progress_revision = h.progress_revision;
+    char last_path[BOOK_STORE_PATH_MAX];
+    if (book_progress_last_path(last_path, sizeof(last_path))) {
+        for (int i = 0; i < s_count; ++i) {
+            if (!strcmp(s_shelf[i].path, last_path) && !s_shelf[i].removed) {
+                copy_text(s_latest_path, sizeof(s_latest_path), last_path);
+                break;
+            }
+        }
+    }
+    shelf_categories_recount();
+    sort_shelf(ctx);
+    shelf_category_restore(ctx);
+    ESP_LOGI(TAG, "shelf index loaded books=%d cats=%d", s_count, (int)cats);
+    return true;
 }
 
 
@@ -7105,6 +7319,13 @@ static void on_enter(app_ctx_t* ctx) {
     if (reuse) {
         refresh_cached_progress(ctx);
         (void)open_requested_book(ctx);
+    } else if (shelf_index_try_load(ctx, &sd)) {
+        // 冷启动命中索引：列表毫秒级呈现，随后起一次静默对账保持新鲜。
+        // An index hit on cold boots: the full list paints at once and a silent reconcile
+        // keeps it fresh.
+        s_scan_pending = false;
+        if (open_requested_book(ctx)) return;
+        shelf_scan_begin(ctx, true);
     } else {
         s_count = s_visible_count = 0;
         s_message[0] = 0;
@@ -8038,7 +8259,7 @@ static app_redraw_t on_tick(app_ctx_t* ctx) {
         read_pico_sd_info_t info = {0};
         if (read_pico_sd_get_info(&info) == ESP_ERR_NOT_FINISHED) return APP_REDRAW_NONE;
         s_scan_pending = false;
-        shelf_scan_begin(ctx);
+        shelf_scan_begin(ctx, false);
         return APP_REDRAW_PAGE;
     }
     if (s_scan.active) {

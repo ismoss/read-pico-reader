@@ -403,6 +403,7 @@ unit += r'''
 // Mirror of the chunked-scan state: fields must track app_book.c's s_scan; the compile enforces it.
 static struct {
     bool active;
+    bool shadow;
     int stage;
     uint32_t progress_revision;
     book_store_root_t roots[BOOK_STORE_ROOT_MAX];
@@ -438,7 +439,7 @@ unit += r'''
 // 桩时钟不前进，单个时间片会一路跑完整个扫描（与旧的阻塞行为一致）。
 // The stub clock never advances, so one slice runs the whole scan - the old blocking behaviour.
 static void scan_shelf(app_ctx_t* ctx){
-    shelf_scan_begin(ctx);
+    shelf_scan_begin(ctx, false);
     while(s_scan.active) shelf_scan_chunk(ctx);
 }
 '''

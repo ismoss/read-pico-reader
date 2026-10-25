@@ -118,6 +118,24 @@ static esp_err_t page_handler(httpd_req_t *req) {
     return httpd_resp_send(req, page, sizeof(page) - 1);
 }
 
+// 8bit 灰度 BMP 文件头（含 256 项灰阶调色板，共 1078 字节）：分配时写一次即可复用。
+// The 8-bit grayscale BMP file header (with the 256-entry gray palette, 1078 bytes total):
+// written once at allocation and reused for every request.
+static void write_bmp_header(void) {
+    uint8_t *h = s_bmp;
+    const uint32_t body = (uint32_t)MON_W * MON_H, file = MON_BMP_HEADER + body;
+    h[0] = 'B'; h[1] = 'M';
+    for (int i = 0; i < 4; ++i) { h[2 + i] = (uint8_t)(file >> (8 * i)); h[14 + i] = (uint8_t)(1078 >> (8 * i)); h[34 + i] = (uint8_t)(body >> (8 * i)); }
+    for (int i = 0; i < 4; ++i) { h[18 + i] = (uint8_t)(MON_W >> (8 * i)); h[22 + i] = (uint8_t)(MON_H >> (8 * i)); }
+    h[26] = 1; h[28] = 8;
+    for (int i = 30; i < 54; ++i) h[i] = 0;
+    for (int i = 0; i < 256; ++i) {
+        uint8_t *p = h + 54 + i * 4;
+        p[0] = p[1] = p[2] = (uint8_t)i;
+        p[3] = 0;
+    }
+}
+
 // 物理网格写进 BMP：logical x = 683-py, y = px；文件行自底向上，直接按行序生成。
 // Physical grid into BMP: logical x = 683-py, y = px; bottom-up file rows, generated in place.
 static void build_frame(void) {
@@ -178,6 +196,7 @@ static void start_server(void) {
     if (s_http || s_bmp) stop_server();
     s_bmp = heap_caps_malloc(MON_BMP_SIZE, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!s_bmp) { ESP_LOGW(TAG, "frame buffer alloc failed"); return; }
+    write_bmp_header();
     if (!s_inject.lock) s_inject.lock = xSemaphoreCreateMutex();
     httpd_config_t http = HTTPD_DEFAULT_CONFIG();
     http.server_port = MOD_MONITOR_PORT;

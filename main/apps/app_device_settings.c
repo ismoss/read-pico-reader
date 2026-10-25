@@ -69,6 +69,7 @@
 #include "ota_update.h"
 #include "ota_online.h"
 #include "mod_monitor.h"
+#include "esp_qrcode.h"
 #include "esp_app_desc.h"
 #include "esp_attr.h"
 #include "esp_system.h"
@@ -94,6 +95,7 @@ typedef enum { SETTINGS_MAIN, SETTINGS_WIFI, SETTINGS_TIME,
                SETTINGS_MONITOR } settings_page_t;
 static settings_page_t s_page;
 static bool s_dns_fetch_pending;  // 特殊功能页的在线 DNS 列表请求 / online DNS list request on the special page
+static bool s_monitor_url_shown;  // 监看地址是否已绘上屏（出现/消失触发重绘）/ whether the monitor address has been painted
 static int settings_content_end(void) {
     return UI_NAV_REFRESH_END;
 }
@@ -1231,20 +1233,61 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
         settings_navigation(fb);
         return;
     }
+// 把二维码绘制进当前帧缓冲：白色静区 + 4px 模块，返回是否生成成功。
+// Draw the QR into the current framebuffer: white quiet zone with 4 px modules; false on failure.
+static uint8_t *s_qr_fb;
+static int s_qr_cx, s_qr_cy;
+static int monitor_qr_write(esp_qrcode_t q) {
+    const int n = esp_qrcode_get_size(q), span = n * 4;
+    ui_fill_rect_fast((EpdRect){s_qr_cx - span / 2 - 8, s_qr_cy - span / 2 - 8, span + 16, span + 16},
+                     UI_GRAY_WHITE, s_qr_fb);
+    for (int y = 0; y < n; ++y)
+        for (int x = 0; x < n; ++x)
+            if (esp_qrcode_get_module(q, x, y))
+                ui_fill_rect_fast((EpdRect){s_qr_cx - span / 2 + x * 4, s_qr_cy - span / 2 + y * 4, 4, 4},
+                                 UI_GRAY_BLACK, s_qr_fb);
+    return 0;
+}
+static bool monitor_qr_draw(uint8_t *fb, int cx, int cy, const char *url) {
+    esp_qrcode_config_t cfg = {
+        .display_func = monitor_qr_write,
+        .max_qrcode_version = 6,
+        .qrcode_ecc_level = ESP_QRCODE_ECC_LOW,
+    };
+    s_qr_fb = fb;
+    s_qr_cx = cx;
+    s_qr_cy = cy;
+    return esp_qrcode_generate(&cfg) == ESP_OK;
+}
+// 地址是否已可用（开关开着且服务器已在网）。/ Whether the address is live (switch on, server online).
+static bool monitor_url_ready(void) {
+    char url[64];
+    mod_monitor_url(url, sizeof(url));
+    return mod_monitor_enabled() && url[0];
+}
     if (s_page == SETTINGS_MONITOR) {
         back_header(fb, "远程监看");
         section(fb, 248, "局域网看屏与触摸");
         row(fb, 292, "远程监看", mod_monitor_enabled() ? "已开启" : "已关闭");
         char url[64]; mod_monitor_url(url, sizeof(url));
         if (mod_monitor_enabled() && url[0]) {
-            ui_text(fb, 54, 384, 22, url, EPD_DRAW_ALIGN_LEFT, false);
-            ui_text(fb, 54, 424, 19, "浏览器打开地址即可看到当前画面并点按操作。", EPD_DRAW_ALIGN_LEFT, false);
+            // 二维码 + 地址：手机扫码或输入均可进入；地址首次出现时 on_tick 会自动重绘本页。
+            // QR plus the address: scan or type to enter; on_tick repaints this page once the
+            // address first appears.
+            if (monitor_qr_draw(fb, 342, 470, url)) {
+                ui_text_fixed_vc(fb, 342, 570, 24, url, EPD_DRAW_ALIGN_CENTER, false);
+            } else {
+                ui_text_fixed_vc(fb, 342, 470, 24, url, EPD_DRAW_ALIGN_CENTER, false);
+            }
+            ui_text_fixed_vc(fb, 342, 610, 19, "浏览器打开或扫码：看实时画面并点按操作，每秒刷新。",
+                             EPD_DRAW_ALIGN_CENTER, false);
         } else if (mod_monitor_enabled()) {
-            ui_text(fb, 54, 384, 19, "已开启；联网后地址显示在这里（需已保存 WiFi）。", EPD_DRAW_ALIGN_LEFT, false);
+            ui_text_fixed_vc(fb, 342, 430, 20, "已开启；设备联网后，地址和二维码显示在这里。",
+                             EPD_DRAW_ALIGN_CENTER, false);
         }
-        ui_text(fb, 54, 476, 19, "仅建议可信局域网使用；无密码保护，不用时请关闭开关。",
-                EPD_DRAW_ALIGN_LEFT, false);
-        if (s_notice[0]) ui_text(fb, 54, 516, 21, s_notice, EPD_DRAW_ALIGN_LEFT, false);
+        ui_text_fixed_vc(fb, 342, 650, 19, "仅建议可信局域网使用；无密码保护，不用时请关闭开关。",
+                         EPD_DRAW_ALIGN_CENTER, false);
+        if (s_notice[0]) ui_text_fixed_vc(fb, 342, 690, 21, s_notice, EPD_DRAW_ALIGN_CENTER, false);
         settings_navigation(fb);
         return;
     }
@@ -1698,6 +1741,12 @@ static app_redraw_t on_tick(app_ctx_t *ctx) {
         }
     }
     if(s_reset_pending && s_page==SETTINGS_FACTORY_RESET)return reset_tick();
+    if (s_page == SETTINGS_MONITOR && mod_monitor_enabled() && s_monitor_url_shown != monitor_url_ready()) {
+        // 地址从无到有（或消失）时自动重绘一次，页面不再要求退出重进。
+        // Repaint once when the address appears or disappears; no more exit-and-reenter.
+        s_monitor_url_shown = monitor_url_ready();
+        return APP_REDRAW_PAGE;
+    }
     if (s_dns_fetch_pending && s_page == SETTINGS_SPECIAL) {
         // 页面已把“正在获取”提示推上屏，这里阻塞完成联网与解析后一次性回报结果。
         // The hint page is already presented; this blocking pass finishes networking and parsing, then reports once.
@@ -2219,7 +2268,8 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         if (y >= 292 && y < 380) {
             const bool on = !mod_monitor_enabled();
             mod_monitor_set_enabled(on);
-            snprintf(s_notice, sizeof(s_notice), on ? "已开启；如已联网，地址见下方" : "已关闭");
+            s_monitor_url_shown = false;
+            snprintf(s_notice, sizeof(s_notice), on ? "已开启" : "已关闭");
             return APP_REDRAW_PAGE;
         }
         return APP_REDRAW_NONE;
