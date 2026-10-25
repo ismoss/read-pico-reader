@@ -136,17 +136,27 @@ static esp_err_t page_handler(httpd_req_t *req) {
 // 8bit 灰度 BMP 文件头（含 256 项灰阶调色板，共 1078 字节）：分配时写一次即可复用。
 // The 8-bit grayscale BMP file header (with the 256-entry gray palette, 1078 bytes total):
 // written once at allocation and reused for every request.
+// BITMAPFILEHEADER(14) + BITMAPINFOHEADER(40)：字段偏移逐字节对齐规范，
+// 保留位与数据偏移必须落位（此前把 1078 写进了 biSize，浏览器永远判定非法图）。
+// BITMAPFILEHEADER(14) + BITMAPINFOHEADER(40): every field at its spec offset — the reserved
+// words and the pixel-data offset must land exactly (1078 previously went into biSize, so
+// browsers always rejected the image).
 static void write_bmp_header(void) {
     uint8_t *h = s_bmp;
     const uint32_t body = (uint32_t)MON_STRIDE * MON_H, file = MON_BMP_HEADER + body;
     h[0] = 'B'; h[1] = 'M';
-    for (int i = 0; i < 4; ++i) { h[2 + i] = (uint8_t)(file >> (8 * i)); h[14 + i] = (uint8_t)(1078 >> (8 * i)); h[34 + i] = (uint8_t)(body >> (8 * i)); }
-    for (int i = 0; i < 4; ++i) { h[18 + i] = (uint8_t)(MON_W >> (8 * i)); h[22 + i] = (uint8_t)(MON_H >> (8 * i)); }
-    h[26] = 1; h[28] = 8;
-    for (int i = 30; i < 54; ++i) h[i] = 0;
+    for (int i = 0; i < 4; ++i) h[2 + i] = (uint8_t)(file >> (8 * i));   // 文件大小 / file size
+    for (int i = 6; i < 10; ++i) h[i] = 0;                               // 保留位 / reserved
+    for (int i = 0; i < 4; ++i) h[10 + i] = (uint8_t)(1078 >> (8 * i));  // 像素数据偏移 / pixel offset
+    for (int i = 0; i < 4; ++i) h[14 + i] = (uint8_t)(40 >> (8 * i));    // biSize = 40
+    for (int i = 0; i < 4; ++i) h[18 + i] = (uint8_t)(MON_W >> (8 * i));
+    for (int i = 0; i < 4; ++i) h[22 + i] = (uint8_t)(MON_H >> (8 * i));
+    h[26] = 1;                                                            // biPlanes
+    h[28] = 8;                                                            // biBitCount
+    for (int i = 30; i < 54; ++i) h[i] = 0;                               // 压缩/尺寸/分辨率/色数 / rest
     for (int i = 0; i < 256; ++i) {
         uint8_t *p = h + 54 + i * 4;
-        p[0] = p[1] = p[2] = (uint8_t)i;
+        p[0] = p[1] = p[2] = (uint8_t)i;                                  // B=G=R 灰阶 / gray
         p[3] = 0;
     }
 }

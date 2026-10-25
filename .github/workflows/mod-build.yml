@@ -54,6 +54,7 @@ jobs:
           python3 tools/reader_spacing_host_test.py
           python3 tools/reader_landscape_host_test.py
           python3 tools/reader_panel_landscape_host_test.py
+          python3 tools/monitor_bmp_host_test.py
           python3 tools/test_book_toc.py
           node tools/flasher_integrity_host_test.cjs
           python3 tools/vertical_punctuation_host_test.py
