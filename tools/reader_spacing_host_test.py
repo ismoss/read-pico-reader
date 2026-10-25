@@ -83,10 +83,11 @@ static app_redraw_t apply_reader_layout(app_ctx_t *ctx,int px,int margin,int lin
  app_settings_set_book_paragraph_spacing(para);save_progress();return APP_REDRAW_PAGE;
 }
 '''
-# 滑杆几何新增的横屏分支在此保持竖屏：桩固定竖屏顶位。
-# The slider geometry's new landscape branch stays portrait here: stubs pin the portrait tops.
+# 滑杆几何新增的横屏分支在此保持竖屏：桩固定竖屏顶位与视口宽。
+# The slider geometry's new landscape branch stays portrait here: stubs pin the portrait tops and viewport.
 unit += r'''
 static bool reader_panel_landscape(void){return false;}
+static int reader_w(void){return 684;}
 static int reader_font_top(void){return 580;}
 static int reader_layout_top(void){return 500;}
 '''
