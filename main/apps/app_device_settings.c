@@ -929,6 +929,38 @@ static char s_avatar_path[288];
 static bool s_avatar_ready, s_avatar_pending;
 static char s_main_wifi[33];
 static bool s_main_wifi_saved;
+// 把二维码绘制进当前帧缓冲：白色静区 + 4px 模块，返回是否生成成功。
+// Draw the QR into the current framebuffer: white quiet zone with 4 px modules; false on failure.
+static uint8_t *s_qr_fb;
+static int s_qr_cx, s_qr_cy;
+static void monitor_qr_write(esp_qrcode_handle_t q) {
+    const int n = esp_qrcode_get_size(q), span = n * 4;
+    ui_fill_rect_fast((EpdRect){s_qr_cx - span / 2 - 8, s_qr_cy - span / 2 - 8, span + 16, span + 16},
+                     UI_GRAY_WHITE, s_qr_fb);
+    for (int y = 0; y < n; ++y)
+        for (int x = 0; x < n; ++x)
+            if (esp_qrcode_get_module(q, x, y))
+                ui_fill_rect_fast((EpdRect){s_qr_cx - span / 2 + x * 4, s_qr_cy - span / 2 + y * 4, 4, 4},
+                                 UI_GRAY_BLACK, s_qr_fb);
+}
+static bool monitor_qr_draw(uint8_t *fb, int cx, int cy, const char *url) {
+    esp_qrcode_config_t cfg = {
+        .display_func = monitor_qr_write,
+        .max_qrcode_version = 6,
+        .qrcode_ecc_level = ESP_QRCODE_ECC_LOW,
+    };
+    s_qr_fb = fb;
+    s_qr_cx = cx;
+    s_qr_cy = cy;
+    return esp_qrcode_generate(&cfg, url) == ESP_OK;
+}
+// 地址是否已可用（开关开着且服务器已在网）。/ Whether the address is live (switch on, server online).
+static bool monitor_url_ready(void) {
+    char url[64];
+    mod_monitor_url(url, sizeof(url));
+    return mod_monitor_enabled() && url[0];
+}
+
 static void render_content(app_ctx_t *ctx, uint8_t *fb) {
     (void)ctx;
     if (s_page == SETTINGS_PIN_ENTRY) { ui_pinpad_paint(fb, &s_pinpad, ui_pinpad_full()); return; }
@@ -1233,37 +1265,6 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
         settings_navigation(fb);
         return;
     }
-// 把二维码绘制进当前帧缓冲：白色静区 + 4px 模块，返回是否生成成功。
-// Draw the QR into the current framebuffer: white quiet zone with 4 px modules; false on failure.
-static uint8_t *s_qr_fb;
-static int s_qr_cx, s_qr_cy;
-static void monitor_qr_write(esp_qrcode_handle_t q) {
-    const int n = esp_qrcode_get_size(q), span = n * 4;
-    ui_fill_rect_fast((EpdRect){s_qr_cx - span / 2 - 8, s_qr_cy - span / 2 - 8, span + 16, span + 16},
-                     UI_GRAY_WHITE, s_qr_fb);
-    for (int y = 0; y < n; ++y)
-        for (int x = 0; x < n; ++x)
-            if (esp_qrcode_get_module(q, x, y))
-                ui_fill_rect_fast((EpdRect){s_qr_cx - span / 2 + x * 4, s_qr_cy - span / 2 + y * 4, 4, 4},
-                                 UI_GRAY_BLACK, s_qr_fb);
-}
-static bool monitor_qr_draw(uint8_t *fb, int cx, int cy, const char *url) {
-    esp_qrcode_config_t cfg = {
-        .display_func = monitor_qr_write,
-        .max_qrcode_version = 6,
-        .qrcode_ecc_level = ESP_QRCODE_ECC_LOW,
-    };
-    s_qr_fb = fb;
-    s_qr_cx = cx;
-    s_qr_cy = cy;
-    return esp_qrcode_generate(&cfg, url) == ESP_OK;
-}
-// 地址是否已可用（开关开着且服务器已在网）。/ Whether the address is live (switch on, server online).
-static bool monitor_url_ready(void) {
-    char url[64];
-    mod_monitor_url(url, sizeof(url));
-    return mod_monitor_enabled() && url[0];
-}
     if (s_page == SETTINGS_MONITOR) {
         back_header(fb, "远程监看");
         section(fb, 248, "局域网看屏与触摸");
