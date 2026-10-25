@@ -36,7 +36,8 @@ names = ('reader_panel_landscape', 'reader_ui_extra', 'reader_font_top', 'reader
          'rule_offset_rect', 'reader_layout_top', 'indent_adjust_rect', 'reader_layout_back_rect',
          'reader_turn_top', 'reader_key_top', 'reader_key_card', 'reader_key_hold_rect',
          'reader_key_preset_card', 'reader_key_pick_row', 'reader_font_picker_top',
-         'reader_font_pick_rect', 'bookmarks_top', 'bookmark_row_step', 'bookmark_row_rect',
+         'reader_font_pick_rect', 'bookmarks_top', 'bookmark_row_step', 'bookmark_rows',
+         'bookmark_row_rect',
          'reader_background_top', 'reader_background_row', 'reader_stats_top',
          'reader_stats_control_rect', 'reader_jump_top', 'reader_chapter_key_rect',
          'reader_stats_recent_top')
@@ -48,11 +49,8 @@ unit = r'''
 #include <stdio.h>
 #include <string.h>
 typedef struct {int x,y,width,height;} EpdRect;
-typedef enum EpdRotation { EPD_ROT_LANDSCAPE, EPD_ROT_PORTRAIT, EPD_ROT_INVERTED_LANDSCAPE,
-                           EPD_ROT_INVERTED_PORTRAIT } EpdRotation;
 static int epd_width(void){return 1216;}
 static int epd_height(void){return 684;}
-static EpdRotation epd_get_rotation(void){return EPD_ROT_INVERTED_PORTRAIT;}
 enum { SHELF, READING, TOC, READER_PANEL_NONE, READER_PANEL_TOOLS, READER_PANEL_STATS,
        READER_PANEL_CHAPTER_JUMP, READER_PANEL_STATS_RECENT, READER_PANEL_REFRESH_SETTINGS,
        READER_PANEL_TURN_SETTINGS, READER_PANEL_KEY_SETTINGS, READER_PANEL_FONT_SETTINGS,
@@ -63,7 +61,6 @@ static int s_view = READING, s_reader_panel;
 static const char *s_text = "t";
 static unsigned landscape_mode = 1;
 static bool s_bookmark_edit;
-static int s_background_page;
 static unsigned font_scale = 100;
 static unsigned app_settings_reader_landscape(void){return landscape_mode;}
 static unsigned app_settings_system_font_size(void){return font_scale;}
@@ -146,6 +143,15 @@ int main(void){
      EpdRect r = reader_chapter_key_rect(i);
      assert((r.width >= 65 && r.height == 65) || r.width >= 260);
  }
+ // 其余提取控件同样落进视口：字号滑杆、返回条、字重钮与滑杆三/四。
+ // The remaining extracted controls also stay inside: the size rail, the return bar and the
+ // weight buttons plus the layout rails.
+ assert(inside(reader_slider_rect(0), reader_w(), reader_h()));
+ assert(inside(reader_slider_rect(3), reader_w(), reader_h()));
+ assert(inside(reader_slider_rect(4), reader_w(), reader_h()));
+ assert(inside(reader_layout_back_rect(), reader_w(), reader_h()));
+ assert(inside(reader_weight_rect(0), reader_w(), reader_h()));
+ assert(inside(reader_weight_rect(1), reader_w(), reader_h()));
  assert(reader_stats_top() >= 0 && reader_jump_top() >= 0 && reader_stats_recent_top() >= 0);
  assert(reader_font_top() >= 0 && reading_settings_top() >= 0 && reader_turn_top() >= 0);
  assert(reader_key_top() >= 0 && reader_font_picker_top() >= 0 && bookmarks_top() >= 0);
@@ -159,6 +165,6 @@ with tempfile.TemporaryDirectory() as tmp:
     p = Path(tmp) / 'test.c'
     p.write_text(unit)
     exe = Path(tmp) / 'test'
-    subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror',
+    subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror', '-Wno-unused-function',
                     '-fsanitize=address,undefined', str(p), '-o', str(exe)], check=True)
     subprocess.run([str(exe)], check=True)
