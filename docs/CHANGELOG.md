@@ -22,6 +22,12 @@
 User-visible changes by release; see [README](../README.md) for usage.
 
 ## 待发布 / Unreleased
+- 升级页自动检查：进入系统升级页时已联网且空闲就自动检查一次更新，结果直接上屏，省一次点按。
+  The upgrade page auto-checks on entry when the network is up and the stack is idle, so the result is on screen without an extra tap.
+- 检查更新的点动画按反馈重做：省略号回到提示文字右侧（30px 大字，一秒一步），心跳盒恢复每秒秒数——两条反馈通道并存，总有一条看得见。
+  The check-update dots are redone per feedback: the ellipsis returns beside the notice text at 30 px (one step per second) while the heartbeat box returns to per-second elapsed seconds — two channels so at least one is always visible.
+- 远程监看页状态自刷新：地址出现/消失（含空闲自动关撤掉开关）都会自动重绘本页，不再显示过期状态。
+  The monitor settings page repaints itself when the address appears or disappears (including the idle auto-off clearing the switch), so stale states are gone.
 - 远程监看体验修复：画面改半分辨率出图并把载荷降到四分之一（省电模式下也能在轮询周期内送达——修复手机浏览器上画面一直加载失败）；服务期间关闭 WiFi 省电、停止后恢复；10 分钟没有任何网页访问自动关闭开关；二维码放大到 6px 模块、地址换大字排版。
   Remote-monitor experience: the frame now serves at half resolution with a quarter-size payload so it completes within a polling period under WiFi power save (fixing the phone browser's never-loading image); WiFi power save is disabled while serving and restored after; the switch auto-clears after ten minutes without any web access; the QR code and address render larger.
 - 网络自动回连修复：连接超时后栈会停在 ERROR 态反复重试旧热点，换环境后解锁不会切换网络；现在解锁触发与主循环每 3 分钟的空闲兜底都会重启连接栈，触发已知网络扫描并切到在场信号最好的一路（在线/启动中/接收中/USB 会话不受打扰）。
