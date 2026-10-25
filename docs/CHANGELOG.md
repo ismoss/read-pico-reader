@@ -23,6 +23,8 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## 待发布 / Unreleased
 
+- 横屏字体设置里「阅读线」的取值（无/虚线/点线）与右缘箭头重叠修复；按键控制的「中键长按」取值同样压箭头，一并按竖屏的原右缘间距修正。
+  Landscape fixes for values overlapping the trailing chevron: the reading-line value in font settings (reported) and the hold-action value in key settings (same class, found in review) now keep the portrait right-edge gap.
 - 检查更新提示行的省略号动画：「正在连接并检查更新」后跟一个点→两个点→三个点→回到一个点，一秒一步；与已有的每秒耗时数字同一套小区域跟随 DU 机制，检查期间能确认确实在尝试。
   The check notice gains an ellipsis animation — one dot, two dots, three dots, back to one, one step per second — through the same small-area FOLLOW DU mechanism as the existing per-second elapsed label, so a slow check visibly keeps trying.
 - 检查更新失败提示分阶段：设备未联网 / 无法连接更新服务器 / 服务器响应异常（HTTP 状态码）/ 更新清单内容无效 / 连接中断分别提示，不再合并为一句「连接失败或清单无效」，在设备上就能区分云端问题与本地网络。

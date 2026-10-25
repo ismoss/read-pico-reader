@@ -2483,9 +2483,10 @@ static void draw_font_settings(uint8_t* fb) {
     static const char *const rule_names[] = {"无", "虚线", "点线"};
     int selected_rule = app_settings_book_reading_line();
     ui_text_box(fb,(EpdRect){rule.x+22,rule.y+10,142,rule.height-20},25,"阅读线",EPD_DRAW_ALIGN_LEFT,false);
-    // 横屏卡片更宽：取值贴右缘；竖屏保持原列位。
-    // Wider landscape cards right-align the value; portrait keeps its column.
-    ui_text_box(fb,(EpdRect){reader_panel_landscape() ? rule.x+rule.width-99 : rule.x+172,
+    // 横屏卡片更宽：取值右缘与竖屏同样留出箭头位（值距右缘 49px）；竖屏保持原列位。
+    // Wider landscape cards keep the portrait 49px right gap so the value clears the chevron;
+    // portrait keeps its column.
+    ui_text_box(fb,(EpdRect){reader_panel_landscape() ? rule.x+rule.width-126 : rule.x+172,
                              rule.y+10,77,rule.height-20},25,rule_names[selected_rule],EPD_DRAW_ALIGN_RIGHT,false);
     ui_draw_icon(fb,rule.x+rule.width-24,rule.y+rule.height/2,27,UI_ICON_CHEVRON_RIGHT,0x38);
     EpdRect aa = s_antialias_card;
@@ -2890,7 +2891,8 @@ static void draw_key_settings(uint8_t *fb) {
     ui_fill_round_rect(fb, hold, 20, 0xf0); ui_draw_control_frame(fb, hold, 20, 0x58);
     if (wide) {
         ui_text_box(fb,(EpdRect){hold.x+22,hold.y+6,238,48},26,"中键长按",EPD_DRAW_ALIGN_LEFT,false);
-        ui_text_box(fb,(EpdRect){hold.x+hold.width-292,hold.y+6,270,48},25,reader_key_label(app_settings_reader_hold_action()),EPD_DRAW_ALIGN_RIGHT,false);
+        // 取值右缘照竖屏留出 56px，避免压到箭头图标。/ Keep the portrait 56px right gap so the value clears the chevron.
+        ui_text_box(fb,(EpdRect){hold.x+hold.width-326,hold.y+6,270,48},25,reader_key_label(app_settings_reader_hold_action()),EPD_DRAW_ALIGN_RIGHT,false);
         ui_draw_icon(fb, hold.x + hold.width - 23, hold.y + hold.height / 2, 20, UI_ICON_CHEVRON_DOWN, 0x38);
         // 横屏压缩竖屏的两行提示为一行；双击全屏说明与翻页模式面板一致，不另占行。
         // Landscape folds the portrait hint pair into one line; the double-tap note matches
