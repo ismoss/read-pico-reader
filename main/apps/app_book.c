@@ -504,7 +504,7 @@ static void draw_reader_panel(uint8_t* fb);
 static EpdRect reader_slider_rect(int slider);
 static int reading_settings_top(void);
 static EpdRect reader_panel_footer_rect(void);
-static void scan_shelf(app_ctx_t* ctx);
+static void shelf_scan_finalize(app_ctx_t *ctx);
 static void copy_text(char* dst, size_t cap, const char* src);
 static void fit_text(char* text, int px, int width);
 static void free_book(void);
@@ -5126,44 +5126,77 @@ typedef struct {
     DIR *dir;
     char path[BOOK_STORE_PATH_MAX];
 } shelf_scan_frame_t;
-static void scan_shelf_dir(app_ctx_t *ctx, const char *root, bool is_flash, nvs_handle_t favorites,
-                           nvs_handle_t hidden, bool *truncated, bool *unreadable,
-                           bool *skipped) {
-    if (*truncated) return;
-    shelf_scan_frame_t *frames = heap_caps_calloc(BOOK_SCAN_DEPTH_LIMIT + 1, sizeof(*frames),
-                                                  MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (!frames) { *truncated = true; return; }
-    size_t root_len = strnlen(root, sizeof(frames[0].path));
-    if (root_len >= sizeof(frames[0].path)) { *skipped = true; free(frames); return; }
-    frames[0].dir = opendir(root);
-    if (!frames[0].dir) { *unreadable = true; free(frames); return; }
-    memcpy(frames[0].path, root, root_len + 1);
-    int depth = 0;
-    while (depth >= 0 && !*truncated) {
-        if (s_view == SHELF && app_poll_main_navigation(ctx)) break;
+// 分片扫描状态：跨主循环保留，媒体事件、退出应用与切页都要先 abort 释放句柄与目录栈。
+// Chunked-scan state persisting across loop passes; media events, app exit and page switches
+// must abort first to release the handles and the directory stack.
+static struct {
+    bool active;
+    int stage;                   // 0 = 逐 root 目录扫描，1 = 收尾 / 0 = per-root walk, 1 = finalize
+    uint32_t progress_revision;
+    book_store_root_t roots[BOOK_STORE_ROOT_MAX];
+    int root_count, root_index;
+    nvs_handle_t favorites, hidden;
+    bool truncated, unreadable, skipped;
+    shelf_scan_frame_t *frames;
+    int depth;
+    bool is_flash;
+    char root[BOOK_STORE_PATH_MAX];
+} s_scan;
+
+// 分片扫描的目录栈：跨主循环保留，每轮 tick 推进一个时间片，UI 全程可响应。
+// The chunked scan's directory stack persists across loop passes; each tick advances one time
+// slice and the UI stays responsive throughout.
+static void scan_dir_begin(const char *root, bool is_flash) {
+    s_scan.frames = heap_caps_calloc(BOOK_SCAN_DEPTH_LIMIT + 1, sizeof(*s_scan.frames),
+                                     MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!s_scan.frames) { s_scan.truncated = true; return; }
+    const size_t root_len = strnlen(root, sizeof(s_scan.frames[0].path));
+    if (root_len >= sizeof(s_scan.frames[0].path)) { s_scan.skipped = true; free(s_scan.frames); s_scan.frames = NULL; return; }
+    s_scan.frames[0].dir = opendir(root);
+    if (!s_scan.frames[0].dir) { s_scan.unreadable = true; free(s_scan.frames); s_scan.frames = NULL; return; }
+    memcpy(s_scan.frames[0].path, root, root_len + 1);
+    s_scan.depth = 0;
+    s_scan.is_flash = is_flash;
+    copy_text(s_scan.root, sizeof(s_scan.root), root);
+}
+
+static void scan_dir_end(void) {
+    if (s_scan.frames) {
+        for (int i = 0; i <= s_scan.depth; ++i)
+            if (s_scan.frames[i].dir) closedir(s_scan.frames[i].dir);
+        free(s_scan.frames);
+        s_scan.frames = NULL;
+    }
+    s_scan.depth = 0;
+}
+
+static void scan_dir_chunk(int64_t deadline) {
+    while (s_scan.depth >= 0 && !s_scan.truncated) {
+        if (esp_timer_get_time() >= deadline) return;
         errno = 0;
-        struct dirent *ent = readdir(frames[depth].dir);
+        struct dirent *ent = readdir(s_scan.frames[s_scan.depth].dir);
         if (!ent) {
-            if (errno) *unreadable = true;
-            closedir(frames[depth].dir);
-            frames[depth].dir = NULL;
-            --depth;
+            if (errno) s_scan.unreadable = true;
+            closedir(s_scan.frames[s_scan.depth].dir);
+            s_scan.frames[s_scan.depth].dir = NULL;
+            --s_scan.depth;
             continue;
         }
         if (ent->d_name[0] == '.') continue;
         char path[BOOK_STORE_PATH_MAX];
-        int len = snprintf(path, sizeof(path), "%s/%s", frames[depth].path, ent->d_name);
-        if (len < 0 || (size_t)len >= sizeof(path)) { *skipped = true; continue; }
+        int len = snprintf(path, sizeof(path), "%s/%s", s_scan.frames[s_scan.depth].path, ent->d_name);
+        if (len < 0 || (size_t)len >= sizeof(path)) { s_scan.skipped = true; continue; }
         struct stat st;
-        if (stat(path, &st) != 0) { *unreadable = true; continue; }
+        if (stat(path, &st) != 0) { s_scan.unreadable = true; continue; }
         if (S_ISDIR(st.st_mode)) {
-            if (!is_flash && depth==0 && !strcmp(root,app_settings_books_dir())) shelf_category_add(path);
-            if (depth == BOOK_SCAN_DEPTH_LIMIT) { *skipped = true; continue; }
+            if (!s_scan.is_flash && s_scan.depth == 0 && !strcmp(s_scan.root, app_settings_books_dir()))
+                shelf_category_add(path);
+            if (s_scan.depth == BOOK_SCAN_DEPTH_LIMIT) { s_scan.skipped = true; continue; }
             DIR *child = opendir(path);
-            if (!child) { *unreadable = true; continue; }
-            ++depth;
-            frames[depth].dir = child;
-            memcpy(frames[depth].path, path, (size_t)len + 1);
+            if (!child) { s_scan.unreadable = true; continue; }
+            ++s_scan.depth;
+            s_scan.frames[s_scan.depth].dir = child;
+            memcpy(s_scan.frames[s_scan.depth].path, path, (size_t)len + 1);
             continue;
         }
         if (!S_ISREG(st.st_mode)) continue;
@@ -5172,10 +5205,10 @@ static void scan_shelf_dir(app_ctx_t *ctx, const char *root, bool is_flash, nvs_
         // 显式移出书架的书不再列入；文件仍在存储卡上，随时可以重新读回书架。
         // Books the user removed stay off the shelf; the file stays on the card and reading it
         // again puts it back.
-        if (hidden && shelf_hidden_read_handle(hidden, path)) continue;
+        if (s_scan.hidden && shelf_hidden_read_handle(s_scan.hidden, path)) continue;
         if (strlen(ent->d_name) >= sizeof(((shelf_entry_t *)0)->name) ||
-            st.st_size < 0 || (uint64_t)st.st_size > UINT32_MAX) { *skipped = true; continue; }
-        if (!shelf_reserve()) { *truncated = true; break; }
+            st.st_size < 0 || (uint64_t)st.st_size > UINT32_MAX) { s_scan.skipped = true; continue; }
+        if (!shelf_reserve()) { s_scan.truncated = true; break; }
         shelf_entry_t candidate = {0};
         shelf_entry_t *item = &candidate;
         copy_text(item->path, sizeof(item->path), path);
@@ -5192,18 +5225,16 @@ static void scan_shelf_dir(app_ctx_t *ctx, const char *root, bool is_flash, nvs_
         }
         item->search_match = read_pico_search_match(item->name, s_query);
         item->size = st.st_size;
-        item->is_flash = is_flash;
+        item->is_flash = s_scan.is_flash;
         book_progress_t p;
         item->has_progress = book_progress_load(item->path, item->size, &p);
         item->pct = item->has_progress ? p.pct : 0;
         item->chapter = item->has_progress ? p.chapter : 0;
         item->recent = item->has_progress ? p.last_open_s : 0;
-        item->favorite = favorites && favorite_read_handle(favorites, item->path);
+        item->favorite = s_scan.favorites && favorite_read_handle(s_scan.favorites, item->path);
         s_shelf[s_count++] = candidate;
     }
-    for (int i = 0; i <= depth; ++i)
-        if (frames[i].dir) closedir(frames[i].dir);
-    free(frames);
+    scan_dir_end();
 }
 
 // 阅读过的书即使不在书根目录内也要上书架：文件管理可以直接打开存储卡任意位置的 TXT/EPUB，
@@ -5280,60 +5311,94 @@ static bool shelf_backfill_read_books(bool* truncated) {
     return s_count != before;
 }
 
-static void scan_shelf(app_ctx_t* ctx) {
-    const uint32_t progress_revision=book_progress_revision();
+static void shelf_scan_abort(void) {
+    if (!s_scan.active) return;
+    s_scan.active = false;
+    scan_dir_end();
+    if (s_scan.favorites) { nvs_close(s_scan.favorites); s_scan.favorites = 0; }
+    if (s_scan.hidden) { nvs_close(s_scan.hidden); s_scan.hidden = 0; }
+    s_scan.root_count = s_scan.root_index = 0;
+}
+
+static void shelf_scan_begin(app_ctx_t *ctx) {
+    shelf_scan_abort();
+    memset(&s_scan, 0, sizeof(s_scan));
+    s_scan.active = true;
+    s_scan.stage = 0;
+    s_scan.progress_revision = book_progress_revision();
     shelf_category_init();
-    for (int i=2;i<s_category_count;++i) s_categories[i].available=false;
+    for (int i = 2; i < s_category_count; ++i) s_categories[i].available = false;
     s_count = 0;
     s_visible_count = 0;
-    s_message[0] = 0;
+    copy_text(s_message, sizeof(s_message), "正在扫描书架…");
     s_shelf_warning[0] = 0;
     // 内置分区每次启动都必须重新挂载；已有文件不会因此格式化。
     // Flash mounts on each boot; existing files are not formatted by that mount.
-    book_store_root_t roots[BOOK_STORE_ROOT_MAX];
-    int n = 0;
-    esp_err_t root_err = book_store_roots(roots, &n);
-    bool truncated = false, unreadable = root_err != ESP_OK || book_store_roots_degraded(), skipped = false;
-    nvs_handle_t favorites = 0;
-    nvs_handle_t hidden = 0;
-    (void)nvs_open("rp_favs", NVS_READONLY, &favorites);
-    (void)nvs_open(SHELF_HIDDEN_NS, NVS_READONLY, &hidden);
+    esp_err_t root_err = book_store_roots(s_scan.roots, &s_scan.root_count);
+    s_scan.unreadable = root_err != ESP_OK || book_store_roots_degraded();
+    (void)nvs_open("rp_favs", NVS_READONLY, &s_scan.favorites);
+    (void)nvs_open(SHELF_HIDDEN_NS, NVS_READONLY, &s_scan.hidden);
     s_storage[0] = 0;
-    for (int i = 0; i < n; ++i) {
-        if (i == 0 || roots[i].is_flash || roots[i - 1].is_flash) {
+    for (int i = 0; i < s_scan.root_count; ++i) {
+        if (i == 0 || s_scan.roots[i].is_flash || s_scan.roots[i - 1].is_flash) {
             char capacity[64];
             snprintf(capacity, sizeof(capacity), "%s%s %.1f MB", s_storage[0] ? " · " : "",
-                     roots[i].is_flash ? "内置余" : "TF余", book_store_free_bytes(&roots[i]) / 1048576.0);
+                     s_scan.roots[i].is_flash ? "内置余" : "TF余",
+                     book_store_free_bytes(&s_scan.roots[i]) / 1048576.0);
             strncat(s_storage, capacity, sizeof(s_storage) - strlen(s_storage) - 1);
         }
-        if (s_view == SHELF && app_poll_main_navigation(ctx)) break;
-        scan_shelf_dir(ctx, roots[i].path, roots[i].is_flash, favorites, hidden,
-                       &truncated, &unreadable, &skipped);
     }
+    (void)ctx;
+}
+
+// 每 tick 跑一个时间片；返回 PAGE 表示扫描完成（含收尾），NONE 表示仍在进行或已中止。
+// One time slice per tick; PAGE means the scan finished (finalize included), NONE means it is
+// still running or was aborted.
+static app_redraw_t shelf_scan_chunk(app_ctx_t *ctx) {
+    if (!s_scan.active) return APP_REDRAW_NONE;
     if (ctx->request_app) {
-        if (favorites) nvs_close(favorites);
-        if (hidden) nvs_close(hidden);
-        s_shelf_cache_valid = false; s_scan_pending = true;
-        return;
+        // 中途切页：照旧作废缓存并标记重扫，由目标页面自然接管。
+        // A mid-scan page switch: invalidate the cache and flag a rescan, as before.
+        shelf_scan_abort();
+        s_shelf_cache_valid = false;
+        s_scan_pending = true;
+        return APP_REDRAW_NONE;
     }
+    const int64_t deadline = esp_timer_get_time() + 20000;
+    if (s_scan.stage == 0) {
+        if (!s_scan.frames && s_scan.root_index < s_scan.root_count)
+            scan_dir_begin(s_scan.roots[s_scan.root_index].path, s_scan.roots[s_scan.root_index].is_flash);
+        if (s_scan.frames) scan_dir_chunk(deadline);
+        if (!s_scan.frames) {
+            ++s_scan.root_index;
+            if (s_scan.root_index >= s_scan.root_count || s_scan.truncated) s_scan.stage = 1;
+        }
+        return APP_REDRAW_NONE;
+    }
+    shelf_scan_finalize(ctx);
+    return APP_REDRAW_PAGE;
+}
+static void shelf_scan_finalize(app_ctx_t *ctx) {
+    s_scan.active = false;
+    s_message[0] = 0;
     // 同路径重新出现也先完成旧清理，避免新阅读进度被后续重试擦掉。
     // Finish old cleanup even if the path reappears, before new reading can create progress.
     for (delete_retry_t* p = s_delete_retries; p; p = p->next) {
         int i = 0;
         while (i < s_count && strcmp(s_shelf[i].path, p->entry.path)) ++i;
         if (i == s_count) {
-            if (!shelf_reserve()) { truncated = true; continue; }
+            if (!shelf_reserve()) { s_scan.truncated = true; continue; }
             ++s_count;
         }
         s_shelf[i] = p->entry;
         s_shelf[i].selected = false;
         s_shelf[i].search_match = read_pico_search_match(p->entry.name, s_query);
     }
-    if (favorites) nvs_close(favorites);
-    if (hidden) nvs_close(hidden);
+    if (s_scan.favorites) { nvs_close(s_scan.favorites); s_scan.favorites = 0; }
+    if (s_scan.hidden) { nvs_close(s_scan.hidden); s_scan.hidden = 0; }
     // 补齐书根目录之外读过的书；显式移出书架的除外。
     // Backfill books read outside the roots, minus the ones removed from the shelf.
-    (void)shelf_backfill_read_books(&truncated);
+    (void)shelf_backfill_read_books(&s_scan.truncated);
     shelf_categories_recount();
     sort_shelf(ctx);
     if (s_view==SHELF) shelf_category_restore(ctx);
@@ -5347,22 +5412,23 @@ static void scan_shelf(app_ctx_t* ctx) {
             }
         }
     }
-    if (!n) copy_text(s_storage, sizeof(s_storage), "存储不可用，请检查 TF 卡");
-    if (truncated) snprintf(s_shelf_warning, sizeof(s_shelf_warning), "内存不足，仅列 %d 本；释放后重扫", s_count);
-    else if (unreadable) copy_text(s_shelf_warning, sizeof(s_shelf_warning), "部分目录或文件不可读，请检查后重扫");
-    else if (skipped) copy_text(s_shelf_warning, sizeof(s_shelf_warning), "部分文件过大或名称过长，未列入");
+    if (!s_scan.root_count) copy_text(s_storage, sizeof(s_storage), "存储不可用，请检查 TF 卡");
+    if (s_scan.truncated) snprintf(s_shelf_warning, sizeof(s_shelf_warning), "内存不足，仅列 %d 本；释放后重扫", s_count);
+    else if (s_scan.unreadable) copy_text(s_shelf_warning, sizeof(s_shelf_warning), "部分目录或文件不可读，请检查后重扫");
+    else if (s_scan.skipped) copy_text(s_shelf_warning, sizeof(s_shelf_warning), "部分文件过大或名称过长，未列入");
     else if (s_pending_invalidated) copy_text(s_shelf_warning, sizeof(s_shelf_warning), "图书已更新，旧待保存进度已作废");
-    if (!s_count && !unreadable && !truncated) copy_text(s_message, sizeof(s_message), "暂无图书，请传入 TXT 或 EPUB");
+    if (!s_count && !s_scan.unreadable && !s_scan.truncated) copy_text(s_message, sizeof(s_message), "暂无图书，请传入 TXT 或 EPUB");
     read_pico_sd_info_t cache_sd = {0};
     read_pico_sd_get_info(&cache_sd);
     s_cache_sd_present = cache_sd.present;
     s_cache_sd_mounted = cache_sd.mounted;
     s_cache_shelf_style = app_settings_shelf_style();
     s_store_revision = book_store_revision();
-    s_progress_revision = progress_revision;
-    s_shelf_cache_valid = !unreadable && !truncated;
-    ESP_LOGI(TAG, "shelf books=%d roots=%d", s_count, n);
+    s_progress_revision = s_scan.progress_revision;
+    s_shelf_cache_valid = !s_scan.unreadable && !s_scan.truncated;
+    ESP_LOGI(TAG, "shelf books=%d roots=%d", s_count, s_scan.root_count);
 }
+
 
 static void refresh_cached_progress(app_ctx_t* ctx) {
     const uint32_t revision=book_progress_revision();
@@ -5397,7 +5463,12 @@ static void refresh_cached_progress(app_ctx_t* ctx) {
 }
 static void return_to_cached_shelf(app_ctx_t* ctx) {
     if (s_shelf_cache_valid && s_store_revision == book_store_revision()) refresh_cached_progress(ctx);
-    else scan_shelf(ctx);
+    else {
+        // 分片扫描交给主循环推进，本帧先呈现“正在扫描书架…”。
+        // The chunked scan advances on the main loop; this frame paints the scanning notice.
+        s_scan_pending = true;
+        copy_text(s_message, sizeof(s_message), "正在扫描书架…");
+    }
 }
 
 static void refresh_capacity(void) {
@@ -6635,7 +6706,8 @@ static app_redraw_t batch_action(app_ctx_t* ctx, uint16_t x, uint16_t y) {
         s_batch_message[0] = 0;
         if (!i) select_page(ctx->leaf);
         else if (i == 1) clear_selection();
-        else if (i == 2) { clear_selection(); s_batch_message[0] = 0; scan_shelf(ctx); }
+        else if (i == 2) { clear_selection(); s_batch_message[0] = 0;
+            s_scan_pending = true; copy_text(s_batch_message, sizeof(s_batch_message), "后台重新扫描中…"); }
         else if (selected_count()) {
             s_batch_kind = i == 3 ? BATCH_DELETE : i == 4 ? BATCH_CLEAR : BATCH_UNSHELF;
             s_batch_confirm = true;
@@ -7049,6 +7121,7 @@ static void on_enter(app_ctx_t* ctx) {
 
 }
 static void book_on_exit(app_ctx_t* ctx) {
+    shelf_scan_abort();
     reader_indent_hold_cancel();
     // 离开阅读页把旋转交还竖屏；其余页面永远以竖屏绘制。
     // Leaving Books hands the rotation back; every other page always draws portrait.
@@ -7086,6 +7159,7 @@ static void book_on_exit(app_ctx_t* ctx) {
 // 先停止使用旧卡句柄与字体预渲染，主循环随后切换内置字体。
 // Stop old-card handles and font preparation before the loop switches to the builtin font.
 static void book_on_media_lost(app_ctx_t* ctx) {
+    shelf_scan_abort();
     reader_indent_hold_cancel();
     s_shelf_key_mode=s_shelf_key_paint_pending=false;s_shelf_key_delta=s_shelf_key_pressed=0;
     shelf_category_remember(ctx);
@@ -7113,8 +7187,9 @@ static void book_on_media_lost(app_ctx_t* ctx) {
 }
 static void book_on_media_ready(app_ctx_t* ctx) {
     (void)ctx;
+    shelf_scan_abort();
     s_shelf_cache_valid = false;
-    if (s_view == SHELF) s_scan_pending = true;
+    s_scan_pending = true;
 }
 // 控件编号仅用于保持按下与抬起命中同一个目标。/ IDs pair a press with release on the same control.
 static int control_at(app_ctx_t* ctx, uint16_t x, uint16_t y, EpdRect* rect) {
@@ -7963,10 +8038,18 @@ static app_redraw_t on_tick(app_ctx_t* ctx) {
         read_pico_sd_info_t info = {0};
         if (read_pico_sd_get_info(&info) == ESP_ERR_NOT_FINISHED) return APP_REDRAW_NONE;
         s_scan_pending = false;
-        scan_shelf(ctx);
-        if (ctx->request_app) return APP_REDRAW_NONE;
-        (void)open_requested_book(ctx);
+        shelf_scan_begin(ctx);
         return APP_REDRAW_PAGE;
+    }
+    if (s_scan.active) {
+        // 分片推进：完成帧呈现完整列表；中途切页由 chunk 内部作废缓存并标记重扫。
+        // Chunked progress: the final frame presents the complete list; a mid-scan switch
+        // invalidates the cache inside the chunk and flags a rescan.
+        if (shelf_scan_chunk(ctx) != APP_REDRAW_NONE) {
+            if (ctx->request_app) return APP_REDRAW_NONE;
+            (void)open_requested_book(ctx);
+            return APP_REDRAW_PAGE;
+        }
     }
     if ((s_view == SHELF || s_view == MANAGE) && !(ctx->touch && ctx->touch->touched)) {
         (void)prepare_cover_batch(ctx, false);

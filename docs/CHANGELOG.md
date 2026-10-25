@@ -23,6 +23,10 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## 待发布 / Unreleased
 
+- 新增远程监看（设置 → 个性化功能 → 远程监看）：开关默认关闭，开启并联网后用浏览器打开屏幕上显示的地址，即可在局域网内看到设备当前画面（每秒黑白灰度 BMP）并直接点按、拖动操作设备；画面按触摸坐标系出图，设备横竖屏时点按都落在正确控件上。无密码保护，仅建议可信局域网使用，不用时请关闭开关。
+  New remote monitor (Settings → Personalization → Remote monitor): off by default; once enabled and online, a browser at the shown address mirrors the device screen (1 Hz grayscale BMP) and taps or drags straight onto it over the LAN. The image uses the touch coordinate space, so taps land on the right control at any rotation. No password — trusted LANs only; switch it off when not in use.
+- 书架扫描改造为分片协作式：进入书架立即显示「正在扫描书架…」并保持全程可响应（可随时切页、进书），扫描在每轮循环的时间片内推进，不再整段冻结界面；扫描完成的呈现与缓存口径不变。
+  The shelf scan becomes chunked and cooperative: the shelf paints a "scanning" notice at once and stays responsive the whole time (switch away or open a book at any moment) while the scan advances in per-loop time slices; the finished presentation and cache rules are unchanged.
 - 横屏字体设置里「阅读线」的取值（无/虚线/点线）与右缘箭头重叠修复；按键控制的「中键长按」取值同样压箭头，一并按竖屏的原右缘间距修正。
   Landscape fixes for values overlapping the trailing chevron: the reading-line value in font settings (reported) and the hold-action value in key settings (same class, found in review) now keep the portrait right-edge gap.
 - 检查更新提示行的省略号动画：「正在连接并检查更新」后跟一个点→两个点→三个点→回到一个点，一秒一步；与已有的每秒耗时数字同一套小区域跟随 DU 机制，检查期间能确认确实在尝试。

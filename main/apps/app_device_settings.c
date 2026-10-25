@@ -68,6 +68,7 @@
 #include "book_cover.h"
 #include "ota_update.h"
 #include "ota_online.h"
+#include "mod_monitor.h"
 #include "esp_app_desc.h"
 #include "esp_attr.h"
 #include "esp_system.h"
@@ -89,7 +90,8 @@ typedef enum { SETTINGS_MAIN, SETTINGS_WIFI, SETTINGS_TIME,
                SETTINGS_CONFIG, SETTINGS_UPGRADE, SETTINGS_BOOT, SETTINGS_FACTORY_RESET,
                SETTINGS_POWER_SLEEP, SETTINGS_AUTO_LOCK, SETTINGS_PROFILE, SETTINGS_AVATAR,
                SETTINGS_BLUETOOTH, SETTINGS_BLE_SCAN,
-               SETTINGS_LOCK_PIN, SETTINGS_PIN_ENTRY, SETTINGS_TEXT_EDIT, SETTINGS_SPECIAL } settings_page_t;
+               SETTINGS_LOCK_PIN, SETTINGS_PIN_ENTRY, SETTINGS_TEXT_EDIT, SETTINGS_SPECIAL,
+               SETTINGS_MONITOR } settings_page_t;
 static settings_page_t s_page;
 static bool s_dns_fetch_pending;  // 特殊功能页的在线 DNS 列表请求 / online DNS list request on the special page
 static int settings_content_end(void) {
@@ -382,7 +384,7 @@ static int settings_main_row_height(void) {
 #define SETTINGS_ROW_H settings_main_row_height()
 #define SETTINGS_WIRELESS_ROWS 3
 #define SETTINGS_DISPLAY_ROWS 7
-#define SETTINGS_PERSONAL_ROWS 5
+#define SETTINGS_PERSONAL_ROWS 6
 #define SETTINGS_MAINTENANCE_ROWS 5
 #define SETTINGS_WIRELESS_Y (180 + settings_profile_height() + 77)
 #define SETTINGS_DISPLAY_Y (SETTINGS_WIRELESS_Y + SETTINGS_WIRELESS_ROWS * SETTINGS_ROW_H + 78)
@@ -813,6 +815,7 @@ static void setting_icon(uint8_t *fb, int index, int cx, int cy) {
         UI_ICON_ROTATE_CW,         // 17 屏幕修复 / panel repair
         UI_ICON_LOCK,              // 18 双击解锁 / double-press unlock
     UI_ICON_ZAP,               // 19 特殊功能（二改）/ special features (mod)
+    UI_ICON_RADIO_TOWER,       // 20 远程监看（二改）/ remote monitor (mod)
     };
     if (index < 0 || index >= (int)(sizeof(icons) / sizeof(icons[0]))) return;
     ui_draw_icon(fb, cx, cy, SETTINGS_ICON_PX, icons[index], SETTINGS_ICON_INK);
@@ -1228,6 +1231,23 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
         settings_navigation(fb);
         return;
     }
+    if (s_page == SETTINGS_MONITOR) {
+        back_header(fb, "远程监看");
+        section(fb, 248, "局域网看屏与触摸");
+        row(fb, 292, "远程监看", mod_monitor_enabled() ? "已开启" : "已关闭");
+        char url[64]; mod_monitor_url(url, sizeof(url));
+        if (mod_monitor_enabled() && url[0]) {
+            ui_text(fb, 54, 384, 22, url, EPD_DRAW_ALIGN_LEFT, false);
+            ui_text(fb, 54, 424, 19, "浏览器打开地址即可看到当前画面并点按操作。", EPD_DRAW_ALIGN_LEFT, false);
+        } else if (mod_monitor_enabled()) {
+            ui_text(fb, 54, 384, 19, "已开启；联网后地址显示在这里（需已保存 WiFi）。", EPD_DRAW_ALIGN_LEFT, false);
+        }
+        ui_text(fb, 54, 476, 19, "仅建议可信局域网使用；无密码保护，不用时请关闭开关。",
+                EPD_DRAW_ALIGN_LEFT, false);
+        if (s_notice[0]) ui_text(fb, 54, 516, 21, s_notice, EPD_DRAW_ALIGN_LEFT, false);
+        settings_navigation(fb);
+        return;
+    }
     if (s_page == SETTINGS_SPECIAL) {
         back_header(fb, "DNS 设置");
         section(fb, 248, "DNS 解析");
@@ -1529,12 +1549,13 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
     setting_group(fb,SETTINGS_DISPLAY_Y-49,"显示",SETTINGS_DISPLAY_Y,
                   display_icons,display_labels,display_values,SETTINGS_DISPLAY_ROWS);
     snprintf(signature,sizeof(signature),"%s",app_settings_status_signature()[0]?app_settings_status_signature():"未设置");
-    const char *personal_labels[]={"书架样式","锁屏样式","锁屏密码","状态栏签名","DNS 设置"};
+    const char *personal_labels[]={"书架样式","锁屏样式","锁屏密码","状态栏签名","DNS 设置","远程监看"};
     char dns_value[32]; snprintf(dns_value,sizeof(dns_value),"%s",mod_dns_entry(mod_dns_saved_index())->name);
     const char *personal_values[]={app_settings_shelf_style()==5?"列表书架":app_settings_shelf_style()==1?"深色书轨":"亚克力书架",
         app_settings_lock_style()==3?"透明书封":app_settings_lock_style()==2?"书架拼贴":app_settings_lock_style()==1?"壁纸":"阅读票根",
-        lock_pin_enabled()?"已开启":"已关闭",signature,dns_value};
-    const int personal_icons[]={4,5,16,10,19};
+        lock_pin_enabled()?"已开启":"已关闭",signature,dns_value,
+        mod_monitor_enabled()?"已开启":"已关闭"};
+    const int personal_icons[]={4,5,16,10,19,20};
     setting_group(fb,SETTINGS_PERSONAL_Y-49,"个性化功能",SETTINGS_PERSONAL_Y,
                   personal_icons,personal_labels,personal_values,SETTINGS_PERSONAL_ROWS);
     const char *maintenance_labels[]={"系统升级","保存与恢复","屏幕修复","BOOT 刷机","恢复出厂设置"};
@@ -2194,6 +2215,15 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         app_settings_set_system_contrast((uint8_t)(100 + index * 10));
         return APP_REDRAW_PAGE;
     }
+    if (s_page == SETTINGS_MONITOR) {
+        if (y >= 292 && y < 380) {
+            const bool on = !mod_monitor_enabled();
+            mod_monitor_set_enabled(on);
+            snprintf(s_notice, sizeof(s_notice), on ? "已开启；如已联网，地址见下方" : "已关闭");
+            return APP_REDRAW_PAGE;
+        }
+        return APP_REDRAW_NONE;
+    }
     if (s_page == SETTINGS_SPECIAL) {
         // 卡片带与渲染的 84px 间距一致；刷新行走 on_tick 阻塞联网，先画提示再取列表。
         // Card bands mirror the 84 px render pitch; the refresh row defers to a blocking on_tick fetch after painting the hint.
@@ -2452,7 +2482,8 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         else if(row==1)s_page=SETTINGS_LOCK_STYLE;
         else if(row==2){s_page=SETTINGS_LOCK_PIN;s_notice[0]=0;}
         else if(row==3) profile_editor_open(true);
-        else {s_page=SETTINGS_SPECIAL;s_notice[0]=0;}
+        else if(row==4) {s_page=SETTINGS_SPECIAL;s_notice[0]=0;}
+        else {s_page=SETTINGS_MONITOR;s_notice[0]=0;}
         return APP_REDRAW_PAGE;
     }
     if(y>=SETTINGS_MAINTENANCE_Y && y<SETTINGS_MAINTENANCE_Y+SETTINGS_MAINTENANCE_ROWS*SETTINGS_ROW_H) {

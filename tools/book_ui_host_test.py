@@ -398,9 +398,50 @@ static char s_category_root[288];
 unit += function("book_layout_balanced_rect", layout_source) + "\n"
 unit += function("set_reader_view") + "\n"
 unit += function("ble_pt_action_for_usage", source.parents[2] / "components/ble_page_turner/src/ble_page_turner.c") + "\n"
-for name in ("inline_ink_gray", "reader_margin_width", "reader_margin_levels", "reader_margin_level_for", "reader_margin_for_level", "slider_index", "reader_margin_input", "reader_area", "reader_fullscreen_progress_area", "body_rect_for_tracking", "body_rect", "progress_rect", "copy_text", "reader_footer_strip_number", "favorite_key", "favorite_read_handle", "shelf_hidden_key", "shelf_hidden_read_handle", "shelf_hidden_load", "shelf_hidden_save", "shelf_rows", "row_rect", "shelf_category_add", "shelf_category_init", "shelf_category_matches", "shelf_category_remember", "shelf_category_restore", "shelf_categories_recount", "shelf_matches", "compare_books", "sort_shelf", "shelf_reserve", "delete_retry_find", "delete_retry_reserve", "delete_retry_discard", "scan_shelf_dir", "shelf_backfill_visit", "shelf_backfill_read_books", "scan_shelf", "refresh_cached_progress",
+unit += r'''
+// 分片扫描状态镜像：字段必须与 app_book.c 的 s_scan 保持一致，编译期保证。
+// Mirror of the chunked-scan state: fields must track app_book.c's s_scan; the compile enforces it.
+static struct {
+    bool active;
+    int stage;
+    uint32_t progress_revision;
+    book_store_root_t roots[BOOK_STORE_ROOT_MAX];
+    int root_count, root_index;
+    nvs_handle_t favorites, hidden;
+    bool truncated, unreadable, skipped;
+    shelf_scan_frame_t *frames;
+    int depth;
+    bool is_flash;
+    char root[BOOK_STORE_PATH_MAX];
+} s_scan;
+// 横屏分支在本测试保持竖屏；退出/媒体桩保持空操作。
+// Landscape branches stay portrait here; exit/media stubs are no-ops.
+static bool reader_panel_landscape(void){return false;}
+static int reader_layout_top(void){return 500;}
+static int reader_font_top(void){return 580;}
+static void reader_rotation_leave(void){}
+static void reader_indent_hold_cancel(void){}
+static void book_cover_jobs_cancel(unsigned g){(void)g;}
+static void continuous_du_reset(void){}
+static void book_lock_collage_invalidate(void){}
+// book_shelf_saved_page 是头文件内联函数，包含 book_shelf_categories.h 的桩已可用。
+// book_shelf_saved_page is a header inline; the categories stub header already provides it.
+static int app_settings_book_paragraph_value(uint8_t level){(void)level;return 50;}
+static int app_settings_book_paragraph_level(int value){(void)value;return 0;}
+static uint32_t book_progress_revision(void){return test_progress_count;}
+static void reader_font_recovery_reset(void){}
+'''
+for name in ("inline_ink_gray", "reader_margin_width", "reader_margin_levels", "reader_margin_level_for", "reader_margin_for_level", "slider_index", "reader_margin_input", "reader_area", "reader_fullscreen_progress_area", "body_rect_for_tracking", "body_rect", "progress_rect", "copy_text", "reader_footer_strip_number", "favorite_key", "favorite_read_handle", "shelf_hidden_key", "shelf_hidden_read_handle", "shelf_hidden_load", "shelf_hidden_save", "shelf_rows", "row_rect", "shelf_category_add", "shelf_category_init", "shelf_category_matches", "shelf_category_remember", "shelf_category_restore", "shelf_categories_recount", "shelf_matches", "compare_books", "sort_shelf", "shelf_reserve", "delete_retry_find", "delete_retry_reserve", "delete_retry_discard", "scan_dir_begin", "scan_dir_end", "scan_dir_chunk", "shelf_backfill_visit", "shelf_backfill_read_books", "shelf_scan_abort", "shelf_scan_begin", "shelf_scan_chunk", "shelf_scan_finalize", "refresh_cached_progress",
              "pending_find", "pending_reserve", "pending_restore", "pending_discard", "pending_mark_latest", "pending_drop_invalidated", "pending_flush", "reader_page_offset", "save_progress", "retry_progress", "layout_name", "manage_panel", "manage_rect", "batch_rect", "manage_back_rect", "bulk_filter_rect", "bulk_nav_rect", "bulk_nav_hit", "leaves", "selected_count", "clear_selection", "toggle_selection", "select_page", "bookmark_compact", "search_begin", "refresh_search_matches", "search_finish", "refresh_capacity", "manage_apply", "manage_action", "batch_apply", "batch_action", "bulk_turn_page", "bulk_finish", "bulk_action", "bulk_control_at", "menu_handle_enabled", "reader_manual_refresh", "apply_reader_option", "reader_return", "reader_key_action", "on_key", "on_key_long", "draw_wrapped_name", "open_requested_book", "on_enter", "book_on_exit"):
     unit += function(name) + "\n"
+unit += r'''
+// 桩时钟不前进，单个时间片会一路跑完整个扫描（与旧的阻塞行为一致）。
+// The stub clock never advances, so one slice runs the whole scan - the old blocking behaviour.
+static void scan_shelf(app_ctx_t* ctx){
+    shelf_scan_begin(ctx);
+    while(s_scan.active) shelf_scan_chunk(ctx);
+}
+'''
 for name in ("book_remote_direction", "shelf_turn_page", "shelf_page_arrow_rect", "reader_swipe_direction"):
     unit += function(name) + "\n"
 unit += "static unsigned app_settings_system_font_size(void){return 100;}\n"

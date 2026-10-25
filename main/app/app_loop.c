@@ -68,6 +68,7 @@
 #include "read_pico_pmu.h"
 #include "read_pico_transfer.h"
 #include "read_pico_sd.h"
+#include "mod_monitor.h"
 #include "settings.h"
 #include "sleep.h"
 #include "time_service.h"
@@ -728,6 +729,13 @@ void app_loop_run(const app_loop_config_t* config) {
             memset(&touch, 0, sizeof(touch));
         }
 
+        // 二改：远程监看的触摸注入——会话期间用网页样本覆盖真实报点（含按下/抬起沿），
+        // 并当作一次有效读数，让下面的边沿判定照常工作。
+        // Mod: remote-monitor touch injection — during a session the web sample replaces the
+        // real report (press/release edges included) and counts as a valid read so the edge
+        // derivation below keeps working.
+        if (mod_monitor_inject(&touch)) err = ESP_OK;
+
         if(err!=ESP_OK||!touch.touched)s_nav_contact_down=s_nav_polled=false;
         const bool pressed = touch.touched && !was_touched;
         const bool released = !touch.touched && was_touched;
@@ -1038,6 +1046,10 @@ void app_loop_run(const app_loop_config_t* config) {
 
         ctx.now_ms = esp_timer_get_time() / 1000;
         rails_idle_check(ctx.now_ms);
+        // 二改：远程监看服务随开关与联网状态起停，并记录帧缓冲供网页取图。
+        // Mod: the remote-monitor server starts/stops with the switch and network readiness,
+        // recording the framebuffer for the web page.
+        mod_monitor_tick(ctx.fb);
 
         // 电源键短按默认锁屏；阅读正文可选择将它用于下一页。
         // A short power press normally locks; the reader body may use it for the next page.

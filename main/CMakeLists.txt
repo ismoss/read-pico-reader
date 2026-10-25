@@ -34,6 +34,7 @@ set(main_requires
     esp_app_format
     app_update
     esp_http_client
+    esp_http_server
     mbedtls
     espressif__cjson
 )
@@ -44,6 +45,7 @@ set(kiiko_selected_sources "app_main.c"
         "ota_online.c"
         "ota_release.c"
         "mod_dns.c"
+        "mod_monitor.c"
         "display.c"
         "display_main_waveform.c"
         "display_reader_waveform.c"
