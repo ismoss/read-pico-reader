@@ -15,23 +15,24 @@ unit = r'''
 #include <stdio.h>
 #include <string.h>
 typedef struct {int x,y,width,height;} EpdRect;
-// 面板物理矩阵 1216x684；竖屏逻辑 684x1216，横屏逻辑 1216x684。
-// Physical matrix 1216x684; portrait-logical 684x1216, landscape-logical 1216x684.
+// 面板物理矩阵 1216x684；竖屏逻辑 684x1216，横屏逻辑 1216x684。命名枚举让真实函数
+// 里的 "enum EpdRotation" 写法保持完整类型。
+// Physical matrix 1216x684; portrait-logical 684x1216, landscape-logical 1216x684. The named
+// enum keeps "enum EpdRotation" complete in the extracted bodies.
+typedef enum EpdRotation { EPD_ROT_LANDSCAPE, EPD_ROT_PORTRAIT, EPD_ROT_INVERTED_LANDSCAPE,
+                           EPD_ROT_INVERTED_PORTRAIT } EpdRotation;
+// epdiy 的 width/height 返回物理尺寸；旋转只改逻辑映射。
+// epdiy width/height report physical sizes; rotation only changes the logical mapping.
 static int epd_width(void){return 1216;}
 static int epd_height(void){return 684;}
-static enum { EPD_ROT_LANDSCAPE, EPD_ROT_PORTRAIT, EPD_ROT_INVERTED_LANDSCAPE,
-             EPD_ROT_INVERTED_PORTRAIT } s_rotation = EPD_ROT_INVERTED_PORTRAIT;
-static enum EpdRotationDummy { DUMMY } dummy_unused;
-'''
-# enum EpdRotation 由真实 epdiy 提供；宿主替身沿用同名 int 语义。
-unit = unit.replace('static enum EpdRotationDummy { DUMMY } dummy_unused;',
-                    'typedef int EpdRotation;')
-unit += r'''
-static enum EpdRotation epd_get_rotation(void){return s_rotation;}
-static void epd_set_rotation(enum EpdRotation r){s_rotation=r;}
+static EpdRotation s_rotation = EPD_ROT_INVERTED_PORTRAIT;
+static EpdRotation epd_get_rotation(void){return s_rotation;}
+static void epd_set_rotation(EpdRotation r){s_rotation=r;}
 typedef enum { UI_GESTURE_SWIPE_L, UI_GESTURE_SWIPE_R, UI_GESTURE_SWIPE_U,
                UI_GESTURE_SWIPE_D, UI_GESTURE_TAP, UI_GESTURE_CANCEL,
                UI_GESTURE_PRESS, UI_GESTURE_MOVE, UI_GESTURE_LONG_PRESS } ui_gesture_type_t;
+'''
+unit += r'''
 // 对账状态机的替身：记录锚定重排与旋转设置，正文几何用横屏标记推导。
 // State-machine stands-ins: record anchored relayouts; viewport follows the layout flag.
 static bool s_reader_landscape_layout;

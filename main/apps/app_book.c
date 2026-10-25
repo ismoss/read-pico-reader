@@ -7147,6 +7147,10 @@ static app_redraw_t reader_font_recovery_gesture(app_ctx_t *ctx, const ui_gestur
     return APP_REDRAW_NONE;
 }
 static app_redraw_t gesture_event(app_ctx_t* ctx, const ui_gesture_event_t* event) {
+    // 换算副本放在函数顶层：块作用域地址逃逸到 ev 会触发 dangling-pointer 告警。
+    // The converted copy lives at function scope: a block-scope address escaping into ev
+    // trips the dangling-pointer warning.
+    ui_gesture_event_t rotated;
     const ui_gesture_event_t* ev = event;
     if (epd_get_rotation() == EPD_ROT_LANDSCAPE || epd_get_rotation() == EPD_ROT_INVERTED_LANDSCAPE) {
         // 横屏只在正文/工具条期间生效，所以整个分发可以安全换到横屏逻辑系：报点平移到
@@ -7154,7 +7158,7 @@ static app_redraw_t gesture_event(app_ctx_t* ctx, const ui_gesture_event_t* even
         // Landscape only lives during the body and toolbar, so the whole dispatch safely moves
         // to the landscape grid: points remap and swipe directions rotate with it; portrait
         // paths never reach this branch.
-        ui_gesture_event_t rotated = *event;
+        rotated = *event;
         reader_touch_to_landscape(&rotated.x0, &rotated.y0);
         reader_touch_to_landscape(&rotated.x, &rotated.y);
         rotated.type = reader_gesture_to_landscape(rotated.type);
