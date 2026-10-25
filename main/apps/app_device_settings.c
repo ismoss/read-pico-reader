@@ -1909,7 +1909,7 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
     }
     if (s_page == SETTINGS_LOCK_PIN && ev->type == UI_GESTURE_TAP && lock_pin_enabled() &&
         ui_rect_hit((EpdRect){36, 606, 612, 84}, ev->x0, ev->y0)) {
-        app_settings_set_pin_grace_code((app_settings_pin_grace_code() + 1) & 4);
+        app_settings_set_pin_grace_code((app_settings_pin_grace_code() + 1) % 5);
         return APP_REDRAW_PAGE;
     }
 

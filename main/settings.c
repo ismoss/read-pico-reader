@@ -452,7 +452,7 @@ void app_settings_set_pin_grace_code(uint8_t code) {
 }
 unsigned app_settings_pin_grace_minutes(void) {
     static const unsigned minutes[5] = {0, 5, 60, 480, 1440};
-    return minutes[s_pin_grace_minutes & 4];
+    return s_pin_grace_minutes < 5 ? minutes[s_pin_grace_minutes] : 0;
 }
 uint32_t app_settings_pin_locked_at(void) { return s_pin_locked_at; }
 void app_settings_record_pin_lock(uint32_t unix_seconds) {
