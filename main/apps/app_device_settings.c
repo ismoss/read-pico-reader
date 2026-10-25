@@ -243,6 +243,10 @@ static void draw_upgrade_progress_delta(uint8_t *fb) {
 // 每秒耗时小区域：慢网络下证明还在跑而不是卡死；只重画这一个 ~100×44 区域（跟随 DU）。
 // A per-second elapsed label so slow networks still look alive; repaints only this ~100x44 area (FOLLOW DU).
 static const EpdRect s_upgrade_beat_area = {520, 462, 104, 42};
+// 进行中提示行（联网 OTA 卡片的详情行）：省略号逐秒推进，同一跟随 DU 机制。
+// The in-progress notice line (the OTA card's detail row): the ellipsis advances each second
+// with the same FOLLOW DU mechanism.
+static const EpdRect s_upgrade_notice_area = {52, 424, 464, 42};
 static int64_t s_upgrade_beat_ms;
 static int s_upgrade_beat_second = -1;
 static void upgrade_beat_paint(app_ctx_t *ctx, int64_t elapsed_ms) {
@@ -256,9 +260,22 @@ static void upgrade_beat_paint(app_ctx_t *ctx, int64_t elapsed_ms) {
     ui_text_fixed_vc(ctx->fb, s_upgrade_beat_area.x + s_upgrade_beat_area.width / 2,
                      s_upgrade_beat_area.y + s_upgrade_beat_area.height / 2, 24, text,
                      EPD_DRAW_ALIGN_CENTER, false);
+    // 排队中的检查/下载才动画提示行；TF 安装等旁路不碰它。
+    // Only a queued check/download animates the notice; the TF-install side path leaves it alone.
+    if (s_update.busy && s_update.message[0]) {
+        char animated[sizeof(s_update.message)];
+        snprintf(animated, sizeof(animated), "%s%.*s", s_update.message,
+                 second % 3 + 1, "...");
+        fit_value(animated, s_upgrade_notice_area.width - 8);
+        ui_fill_rect_fast(s_upgrade_notice_area, UI_GRAY_WHITE, ctx->fb);
+        ui_text(ctx->fb, 60, 436, 21, animated, EPD_DRAW_ALIGN_LEFT, false);
+    }
     epd_poweron();
     guard_draw_result(ctx->hl, update_display_area_diff_with(
         ctx->hl, &E0470_FOLLOW_WAVEFORM, MODE_DU, s_upgrade_beat_area));
+    if (s_update.busy && s_update.message[0])
+        guard_draw_result(ctx->hl, update_display_area_diff_with(
+            ctx->hl, &E0470_FOLLOW_WAVEFORM, MODE_DU, s_upgrade_notice_area));
     epd_poweroff();
 }
 // 检查更新是同步阻塞的，钩子在同一个 UI 任务里触发，直接画屏安全。

@@ -23,6 +23,10 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## 待发布 / Unreleased
 
+- 检查更新提示行的省略号动画：「正在连接并检查更新」后跟一个点→两个点→三个点→回到一个点，一秒一步；与已有的每秒耗时数字同一套小区域跟随 DU 机制，检查期间能确认确实在尝试。
+  The check notice gains an ellipsis animation — one dot, two dots, three dots, back to one, one step per second — through the same small-area FOLLOW DU mechanism as the existing per-second elapsed label, so a slow check visibly keeps trying.
+- 检查更新失败提示分阶段：设备未联网 / 无法连接更新服务器 / 服务器响应异常（HTTP 状态码）/ 更新清单内容无效 / 连接中断分别提示，不再合并为一句「连接失败或清单无效」，在设备上就能区分云端问题与本地网络。
+  Stage-aware check failures: offline device, unreachable server, unexpected HTTP status, invalid manifest and broken transfers now report separately instead of one collapsed message, so a cloud problem is distinguishable from the local network on the device itself.
 - 全部二级阅读面板横屏化：阅读统计（含本章跳转键盘、最近 30 天）、阅读设置、翻页模式、按键控制与功能选择、字体设置（含字号滑杆、字重、排版、阅读线、字体选择）、书签、阅读背景与背景预览，共 15 个面板与正文同向铺满横屏视口，进出面板不再旋转；打开面板时仅统计组横屏分栏与压缩行距，竖屏面板布局逐像素保持原样。
   Every secondary reader panel goes landscape-native: stats (with the chapter-jump keypad and the 30-day chart), reading settings, turn mode, key settings and the key picker, font settings (size rail, weight, layout, reading line, font picker), bookmarks, and the background directory with its preview — fifteen sheets now share the body orientation and fill the landscape viewport without rotating in or out; portrait layouts stay pixel-identical.
 - 目录跳转条拖动修复：按下曾返回整页重绘，app_loop 随之取消手势状态机，MOVE/SWIPE 再也不会产生，任何速度的拖动都只剩按下定位；改为按下只做弹窗局部差分，快拖的 SWIPE 按松手坐标落定百分比，横屏下刷新区域随弹窗原点平移。

@@ -237,17 +237,24 @@ static bool check_feed(void) {
     // Prefer GitHub Pages metadata, falling back to the website with one shared buffer and no concurrent TLS clients.
     static const char *const feeds[] = {PICO_OTA_FEED_URL, PICO_OTA_FEED_FALLBACK_URL};
     bool valid = false;
+    // 阶段线索：让失败提示区分「设备没网」「连不上服务器」「服务器异常」「清单无效」。
+    // Stage clues so the failure notice can tell an offline device from an unreachable server,
+    // a bad server response and an invalid manifest.
+    bool any_network = false, any_response = false, got_200 = false, broke_200 = false, bad_manifest = false;
+    int last_code = 0;
     for (size_t source = 0; source < sizeof(feeds) / sizeof(feeds[0]) && !atomic_load(&s_cancel); ++source) {
         char url[192]; snprintf(url, sizeof(url), "%s?t=%lld", feeds[source], (long long)time(NULL));
         int code = -1; int64_t length = -1;
         esp_http_client_handle_t client = NULL;
         for (int i = 0; i < 2 && !atomic_load(&s_cancel); ++i) {
-            if (wait_network()) client = open_http(url, &code, &length);
+            if (wait_network()) { any_network = true; client = open_http(url, &code, &length); }
             if (client) break;
             vTaskDelay(pdMS_TO_TICKS(250));
         }
         if (!client) continue;
+        any_response = true; last_code = code;
         if (code != 200 || length > 8192) { esp_http_client_cleanup(client); continue; }
+        got_200 = true;
         size_t received = 0;
         int64_t idle = esp_timer_get_time() + 30000000;
         int n = -1;
@@ -257,8 +264,24 @@ static bool check_feed(void) {
         esp_http_client_cleanup(client);
         json[received] = 0;
         if (n >= 0 && complete && pico_release_parse(json, received, release) == ESP_OK) { valid = true; break; }
+        if (n >= 0 && complete) bad_manifest = true; else broke_200 = true;
     }
-    if (!valid) { state(PICO_UPDATE_FAILED, "更新服务器连接失败或清单无效，请稍后重试"); goto failed; }
+    if (!valid) {
+        // 越具体的线索越优先：清单内容 → 200 中断 → 非 200 响应 → 连不上 → 设备没网。
+        // Most specific first: manifest body → broken 200 read → non-200 response →
+        // unreachable server → offline device.
+        if (bad_manifest) state(PICO_UPDATE_FAILED, "更新清单内容无效，请稍后重试");
+        else if (broke_200) state(PICO_UPDATE_FAILED, "更新服务器连接中断，请稍后重试");
+        else if (got_200) state(PICO_UPDATE_FAILED, "更新清单读取不完整，请稍后重试");
+        else if (any_response) {
+            char detail[64];
+            snprintf(detail, sizeof(detail), "更新服务器响应异常(HTTP %d)，请稍后重试", last_code);
+            state(PICO_UPDATE_FAILED, detail);
+        }
+        else if (any_network) state(PICO_UPDATE_FAILED, "无法连接更新服务器，请检查网络后重试");
+        else state(PICO_UPDATE_FAILED, "尚未连接网络，请先联网后重试");
+        goto failed;
+    }
     const esp_app_desc_t *running = esp_app_get_description();
     if (strcmp(release->project, running->project_name) || !layout_valid() ||
         pico_version_compare(running->version, release->minimum_base_version) < 0) {
