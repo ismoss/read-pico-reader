@@ -85,12 +85,13 @@ static int book_layout_draw_slice(uint8_t *fb,size_t page,EpdRect area,int px,bo
  return cursor->offset==36;
 }
 static int s_px=48;
-// 横屏视口替身：宿主侧保持竖屏，预绘逻辑不变。
-// Landscape stand-ins: the host stays portrait so the prefetch logic is unchanged.
+// 横屏视口替身：宿主侧保持竖屏，预绘逻辑不变；可能不被抽取体引用，抑制未用告警。
+// Landscape stand-ins: the host stays portrait; suppress unused warnings when no extracted
+// body references them.
 static bool s_reader_landscape_layout;
-static int reader_w(void){return 684;}
-static int reader_h(void){return 1216;}
-static void reader_sync_rotation(void){}
+__attribute__((unused)) static int reader_w(void){return 684;}
+__attribute__((unused)) static int reader_h(void){return 1216;}
+__attribute__((unused)) static void reader_sync_rotation(void){}
 '''
 for name in ['lock_draw','unlock_draw','invalidate_prep','reader_prefetch_step','reader_prefetch_buffer','prep_task','kick_prep','reader_prefetch_end','reader_prefetch_resume','reader_prefetch_idle']:
  unit+=function(name,book)+'\n'

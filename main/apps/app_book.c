@@ -550,7 +550,7 @@ static void draw_control(uint8_t* fb, EpdRect rect, const char* label, int id) {
     if (s_pressed_control == id) ui_draw_pressed_round_rect(fb, rect, UI_BTN_RADIUS);
     ui_draw_button(fb, rect, label, false);
 }
-static void lock_draw(void) { if (s_draw_lock) xSemaphoreTake(s_draw_lock, portMAX_WAIT); }
+static void lock_draw(void) { if (s_draw_lock) xSemaphoreTake(s_draw_lock, portMAX_DELAY); }
 static void unlock_draw(void) { if (s_draw_lock) xSemaphoreGive(s_draw_lock); }
 static size_t fb_bytes(void) { return (size_t)epd_width() * epd_height() / 2; }
 /* ---- 书内横屏 / In-book landscape ---- */

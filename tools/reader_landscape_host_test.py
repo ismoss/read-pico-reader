@@ -45,6 +45,9 @@ static int reader_h(void){return s_reader_landscape_layout?epd_height():1216;}
 static EpdRect body_rect(void){return (EpdRect){0,0,reader_w(),reader_h()};}
 static size_t page_start, page_for;
 static size_t s_page;
+static size_t s_text_len, s_block_count;
+static void *s_blocks;
+static int s_px = 48;
 static size_t book_layout_page_start_offset(size_t page){(void)page;return page_start;}
 static size_t book_layout_page_for_offset(size_t off){(void)off;return page_for;}
 static bool book_layout_build_blocks(const char *t,size_t len,void *b,size_t c,EpdRect r,int px){
