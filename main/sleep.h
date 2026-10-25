@@ -69,3 +69,8 @@ void app_restart_host(void);
 #ifdef __cplusplus
 }
 #endif
+
+/// 主循环低速兜底：未连接且栈空闲时每 3 分钟重试已保存网络（含 ERROR 卡死态的重启扫描）。
+/// Loop-side slow fallback: while disconnected and idle, retry saved networks every three
+/// minutes (restarting the stack out of a stuck ERROR state to rescan).
+void app_wifi_auto_connect_idle_check(void);

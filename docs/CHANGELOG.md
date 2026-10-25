@@ -22,7 +22,12 @@
 User-visible changes by release; see [README](../README.md) for usage.
 
 ## 待发布 / Unreleased
-
+- 远程监看体验修复：画面改半分辨率出图并把载荷降到四分之一（省电模式下也能在轮询周期内送达——修复手机浏览器上画面一直加载失败）；服务期间关闭 WiFi 省电、停止后恢复；10 分钟没有任何网页访问自动关闭开关；二维码放大到 6px 模块、地址换大字排版。
+  Remote-monitor experience: the frame now serves at half resolution with a quarter-size payload so it completes within a polling period under WiFi power save (fixing the phone browser's never-loading image); WiFi power save is disabled while serving and restored after; the switch auto-clears after ten minutes without any web access; the QR code and address render larger.
+- 网络自动回连修复：连接超时后栈会停在 ERROR 态反复重试旧热点，换环境后解锁不会切换网络；现在解锁触发与主循环每 3 分钟的空闲兜底都会重启连接栈，触发已知网络扫描并切到在场信号最好的一路（在线/启动中/接收中/USB 会话不受打扰）。
+  Auto-reconnect fix: after a connection timeout the stack sat in ERROR retrying the old hotspot, so unlocking in a new place never switched networks; the unlock trigger and a three-minute idle fallback in the main loop now restart the stack, which scans the known list and joins the best network in range (online, starting, receiving and USB sessions are left alone).
+- 检查更新的省略号循环移入右上角心跳盒（真机验证过的每秒重绘通道）并以更大字号显示；提示行尾的小点保留。
+  The check-update ellipsis cycle moves into the top-right heartbeat box — the per-second repaint channel verified on hardware — at a larger size; the small dots on the notice line stay.
 - 书架索引持久化（阶段B）：扫描成功后把书架（含分类与触发条件）写入内置存储，冷启动/深睡唤醒毫秒级呈现完整列表，随后用分片扫描在影子数组里静默对账，完成后原位换入——显示全程不闪空。USB 读卡会话结束时同步 bump 存储版本，电脑端增删的书不会被陈旧索引漏掉。
   Shelf index persistence (phase B): a successful scan writes the shelf (categories and trigger values included) to internal storage; cold boots and deep-sleep wakes paint the full list in milliseconds, then a shadow-array reconcile runs through the chunked scanner and swaps in place — the display never flashes empty. USB card sessions bump the store revision on exit, so books changed on the PC are never missed by a stale index.
 - 远程监看修复与增强：修掉 /screen 从未写入 BMP 文件头导致画面永远加载失败的问题；设置页改为开关行 + 二维码 + 大字地址，地址首次出现/消失时页面自动重绘（不再需要退出重进），并重排提示文案。

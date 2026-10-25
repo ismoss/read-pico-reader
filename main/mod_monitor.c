@@ -27,15 +27,24 @@
 
 #include "cst836u.h"
 #include "epdiy.h"
+#include "esp_wifi.h"
 #include "read_pico_transfer.h"
 
 #define MOD_MONITOR_PORT 8123
 #define MOD_MONITOR_NVS_NS "rp_monitor"
-// 物理 1216x684；逻辑/触摸 684x1216。/ Physical 1216x684; logical/touch 684x1216.
-#define MON_W 684
-#define MON_H 1216
+// 物理 1216x684；逻辑/触摸 684x1216。画面按半分辨率出图（342x608）：点按由网页按比例
+// 换算，不受影响；载荷缩到 1/4，省电模式下也能在下一轮轮询前送完。
+// Physical 1216x684; logical/touch 684x1216. The frame serves at half resolution (342x608):
+// the page maps taps by ratio, unaffected, and the quarter-size payload completes well within
+// one polling period even under WiFi power save.
+#define MON_LOGICAL_W 684
+#define MON_LOGICAL_H 1216
+#define MON_W (MON_LOGICAL_W / 2)
+#define MON_H (MON_LOGICAL_H / 2)
+#define MON_STRIDE ((MON_W + 3) & ~3)
 #define MON_BMP_HEADER 1078
-#define MON_BMP_SIZE (MON_BMP_HEADER + (size_t)MON_W * MON_H)
+#define MON_BMP_SIZE (MON_BMP_HEADER + (size_t)MON_STRIDE * MON_H)
+#define MOD_MONITOR_IDLE_MS 600000ll
 
 static const char *TAG = "monitor";
 
@@ -46,6 +55,7 @@ static uint8_t *s_bmp;              // BMP 头 + 按文件行序的 8bit 影像 
 static const uint8_t *s_fb;         // UI 渲染帧缓冲（app_loop 每轮记录）/ render framebuffer from app_loop
 static char s_url[48];              // "http://ip:8123"（联网就绪时）/ visit URL while online
 static int64_t s_next_check_ms;
+static int64_t s_last_seen_ms;      // 最近一次 HTTP 请求（空闲自动关用）/ last HTTP request
 
 // 注入会话：down → move… → up；up 消费一轮后结束。/ Injection session: down, moves, then one
 // consumed up sample ends it.
@@ -67,6 +77,7 @@ bool mod_monitor_set_enabled(bool on) {
         nvs_close(h);
     }
     s_next_check_ms = 0;  // 下一轮 tick 立即按开关起停 / the next tick applies the switch at once
+    s_last_seen_ms = esp_timer_get_time() / 1000;
     return true;
 }
 
@@ -78,6 +89,9 @@ static void stop_server(void) {
     if (!s_http) return;
     httpd_stop(s_http);
     s_http = NULL;
+    // 服务停了就恢复默认省电；启用期间以 PS_NONE 保证画面传输时限内送达。
+    // Restore default power save once serving stops; PS_NONE while up keeps frames on schedule.
+    esp_wifi_set_ps(WIFI_PS_MIN_MODEM);
     if (s_bmp) { heap_caps_free(s_bmp); s_bmp = NULL; }
     s_frame_ready = false;
     s_url[0] = 0;
@@ -113,6 +127,7 @@ static esp_err_t page_handler(httpd_req_t *req) {
         "s(0,q.x,q.y);e.preventDefault();});"
         "i.addEventListener('contextmenu',e=>e.preventDefault());"
         "</script></body></html>";
+    s_last_seen_ms = esp_timer_get_time() / 1000;
     httpd_resp_set_type(req, "text/html; charset=utf-8");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
     return httpd_resp_send(req, page, sizeof(page) - 1);
@@ -123,7 +138,7 @@ static esp_err_t page_handler(httpd_req_t *req) {
 // written once at allocation and reused for every request.
 static void write_bmp_header(void) {
     uint8_t *h = s_bmp;
-    const uint32_t body = (uint32_t)MON_W * MON_H, file = MON_BMP_HEADER + body;
+    const uint32_t body = (uint32_t)MON_STRIDE * MON_H, file = MON_BMP_HEADER + body;
     h[0] = 'B'; h[1] = 'M';
     for (int i = 0; i < 4; ++i) { h[2 + i] = (uint8_t)(file >> (8 * i)); h[14 + i] = (uint8_t)(1078 >> (8 * i)); h[34 + i] = (uint8_t)(body >> (8 * i)); }
     for (int i = 0; i < 4; ++i) { h[18 + i] = (uint8_t)(MON_W >> (8 * i)); h[22 + i] = (uint8_t)(MON_H >> (8 * i)); }
@@ -141,14 +156,16 @@ static void write_bmp_header(void) {
 static void build_frame(void) {
     static const int pw = 1216, ph = 684, stride = pw / 2;
     uint8_t *body = s_bmp + MON_BMP_HEADER;
+    // 影像行自底向上；半分辨率最近邻取样：影像 (ix,iy) = 逻辑 (2ix, 2iy)。
+    // Bottom-up image rows with 2x nearest-neighbour sampling: image (ix,iy) = logical (2ix, 2iy).
     for (int r = 0; r < MON_H; ++r) {
-        const int y_l = MON_H - 1 - r;          // 逻辑 y / logical y
-        uint8_t *out = body + (size_t)r * MON_W;
-        for (int x = 0; x < MON_W; ++x) {
-            const int py = ph - 1 - x, px = y_l;
+        const int ly = (MON_H - 1 - r) * 2;
+        uint8_t *out = body + (size_t)r * MON_STRIDE;
+        for (int ix = 0; ix < MON_W; ++ix) {
+            const int py = ph - 1 - ix * 2, px = ly;
             const uint8_t byte = s_fb[(size_t)py * stride + (px >> 1)];
             const uint8_t nib = (px & 1) ? (byte >> 4) : (byte & 0x0F);
-            out[x] = (uint8_t)(nib * 17);
+            out[ix] = (uint8_t)(nib * 17);
         }
     }
 }
@@ -158,6 +175,7 @@ static esp_err_t screen_handler(httpd_req_t *req) {
         httpd_resp_set_status(req, "503 Service Unavailable");
         return httpd_resp_sendstr(req, "frame not ready");
     }
+    s_last_seen_ms = esp_timer_get_time() / 1000;
     build_frame();
     httpd_resp_set_type(req, "image/bmp");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
@@ -171,8 +189,11 @@ static esp_err_t touch_handler(httpd_req_t *req) {
     if (httpd_query_key_value(query, "t", value, sizeof(value)) == ESP_OK) type = atoi(value);
     if (httpd_query_key_value(query, "x", value, sizeof(value)) == ESP_OK) x = atoi(value);
     if (httpd_query_key_value(query, "y", value, sizeof(value)) == ESP_OK) y = atoi(value);
-    if (x < 0 || x >= MON_W || y < 0 || y >= MON_H || type < 0 || type > 2) goto bad;
+    // 注入坐标仍是逻辑系 684x1216，与画面分辨率无关。/ Injected coordinates stay in the
+    // 684x1216 logical space regardless of the frame resolution.
+    if (x < 0 || x >= MON_LOGICAL_W || y < 0 || y >= MON_LOGICAL_H || type < 0 || type > 2) goto bad;
     if (!s_inject.lock) goto bad;
+    s_last_seen_ms = esp_timer_get_time() / 1000;
     xSemaphoreTake(s_inject.lock, portMAX_DELAY);
     if (type == 1) {
         s_inject.active = true;
@@ -224,6 +245,8 @@ static void start_server(void) {
             return;
         }
     s_frame_ready = true;
+    s_last_seen_ms = esp_timer_get_time() / 1000;
+    esp_wifi_set_ps(WIFI_PS_NONE);
     read_pico_transfer_status_t st;
     read_pico_transfer_get_status(&st);
     if (st.network_ready && !strncmp(st.url, "http://", 7))
@@ -238,6 +261,12 @@ void mod_monitor_tick(const uint8_t *framebuffer) {
     s_next_check_ms = now + 1000;
     read_pico_transfer_status_t st;
     read_pico_transfer_get_status(&st);
+    // 空闲自动关：10 分钟没有任何网页请求就停服并撤销开关（用户要求“不用就关掉”）。
+    // Idle auto-off: ten minutes without any web request stops serving and clears the switch.
+    if (s_enabled && s_http && now - s_last_seen_ms >= MOD_MONITOR_IDLE_MS) {
+        ESP_LOGI(TAG, "idle timeout, auto disable");
+        mod_monitor_set_enabled(false);
+    }
     const bool want = s_enabled && st.network_ready;
     if (want && !s_http) start_server();
     else if (!want && s_http) stop_server();

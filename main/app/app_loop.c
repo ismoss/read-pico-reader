@@ -745,6 +745,10 @@ void app_loop_run(const app_loop_config_t* config) {
         if (ctx.now_ms - last_network_poll_ms >= 500) {
             last_network_poll_ms = ctx.now_ms;
             read_pico_transfer_service_poll();
+            // 二改：断网状态下的低速自动回连（换环境后回到已保存网络）。
+            // Mod: the slow auto-reconnect while disconnected (rejoin a saved network after
+            // moving between places).
+            app_wifi_auto_connect_idle_check();
             app_time_service_poll(!touch.touched && ctx.now_ms - last_input_ms >= 10000 &&
                 !current->holds_pmu && !usb_storage_active() && !pico_online_busy() && !ble_pt_connected());
         }

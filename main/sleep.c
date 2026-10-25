@@ -44,6 +44,7 @@
 #include "display.h"
 #include "e0470_epaper_waveform.h"
 #include "ota_online.h"
+#include "usb_storage.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
 #include "esp_sleep.h"
@@ -689,10 +690,38 @@ static void auto_connect_after_unlock(void) {
     read_pico_transfer_get_status(&status);
     char ssid[33];
     bool configured = false;
-    if (status.state != READ_PICO_TRANSFER_STOPPED || pico_online_busy()) return;
+    if (pico_online_busy()) return;
+    // 连接超时后栈会停在 ERROR 态反复重试旧热点：换了环境（如 A 地 ↔ B 地）时旧热点不在场，
+    // 必须先停栈再重启——重启路径会扫描已知网络并切到在场信号最好的一路。
+    // After a connection timeout the stack sits in ERROR retrying the old hotspot; in a new
+    // place that hotspot is gone, so stop and restart — the start path scans the known list
+    // and picks the best network in range.
+    const bool stuck = status.state == READ_PICO_TRANSFER_ERROR;
+    if (status.state != READ_PICO_TRANSFER_STOPPED && !stuck) return;
+    if (stuck) read_pico_transfer_stop();
     if (read_pico_transfer_get_saved_wifi(ssid, &configured) != ESP_OK || !configured) return;
     read_pico_transfer_cfg_t cfg = {.mode = READ_PICO_TRANSFER_MODE_STA, .network_only = true};
     if (read_pico_transfer_start(&cfg) == ESP_OK) ESP_LOGI(TAG, "auto-connect after unlock");
+}
+
+// 主循环低速兜底：解锁触发的自动连网之外，未连接且栈空闲时每 3 分钟再试一次，
+// 体验对齐手机（换环境后不用解锁也会慢慢回到已保存网络）。
+// A slow loop-side fallback beyond the unlock trigger: while disconnected and idle, retry
+// every three minutes so a changed place rejoins a saved network without needing an unlock.
+void app_wifi_auto_connect_idle_check(void) {
+    static int64_t s_next_try_ms;
+    const int64_t now = esp_timer_get_time() / 1000;
+    if (now < s_next_try_ms) return;
+    s_next_try_ms = now + 180000;
+    read_pico_transfer_status_t status;
+    read_pico_transfer_get_status(&status);
+    // 在线、启动中、接收中、USB 读卡会话里都不打扰；只兜底 ERROR 卡死态。
+    // Leave online, starting, receiving and USB sessions alone; only the stuck ERROR state
+    // gets the restart.
+    if (status.state == READ_PICO_TRANSFER_READY && status.network_ready) return;
+    if (status.state == READ_PICO_TRANSFER_STARTING || status.state == READ_PICO_TRANSFER_UPLOADING) return;
+    if (usb_storage_active()) return;
+    auto_connect_after_unlock();
 }
 
 bool lock_pin_grace_active(void) {

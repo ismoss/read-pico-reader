@@ -258,11 +258,15 @@ static void upgrade_beat_paint(app_ctx_t *ctx, int64_t elapsed_ms) {
     const int second = (int)(elapsed_ms / 1000);
     if (second <= s_upgrade_beat_second) return;
     s_upgrade_beat_second = second;
+    // 心跳盒直接画省略号循环（一秒一步）：这是真机验证过的每秒重绘通道，
+    // 比往提示行尾追加小点醒目得多。
+    // The heartbeat box draws the ellipsis cycle itself (one step per second) on the proven
+    // per-second repaint channel — far more visible than dots appended to the notice line.
     char text[12];
-    snprintf(text, sizeof(text), "%ds", second);
+    snprintf(text, sizeof(text), "%.*s", second % 3 + 1, "...");
     ui_fill_rect_fast(s_upgrade_beat_area, UI_GRAY_WHITE, ctx->fb);
     ui_text_fixed_vc(ctx->fb, s_upgrade_beat_area.x + s_upgrade_beat_area.width / 2,
-                     s_upgrade_beat_area.y + s_upgrade_beat_area.height / 2, 24, text,
+                     s_upgrade_beat_area.y + s_upgrade_beat_area.height / 2, 34, text,
                      EPD_DRAW_ALIGN_CENTER, false);
     // 排队中的检查/下载才动画提示行；TF 安装等旁路不碰它。
     // Only a queued check/download animates the notice; the TF-install side path leaves it alone.
@@ -934,13 +938,13 @@ static bool s_main_wifi_saved;
 static uint8_t *s_qr_fb;
 static int s_qr_cx, s_qr_cy;
 static void monitor_qr_write(esp_qrcode_handle_t q) {
-    const int n = esp_qrcode_get_size(q), span = n * 4;
-    ui_fill_rect_fast((EpdRect){s_qr_cx - span / 2 - 8, s_qr_cy - span / 2 - 8, span + 16, span + 16},
+    const int n = esp_qrcode_get_size(q), span = n * 6;
+    ui_fill_rect_fast((EpdRect){s_qr_cx - span / 2 - 12, s_qr_cy - span / 2 - 12, span + 24, span + 24},
                      UI_GRAY_WHITE, s_qr_fb);
     for (int y = 0; y < n; ++y)
         for (int x = 0; x < n; ++x)
             if (esp_qrcode_get_module(q, x, y))
-                ui_fill_rect_fast((EpdRect){s_qr_cx - span / 2 + x * 4, s_qr_cy - span / 2 + y * 4, 4, 4},
+                ui_fill_rect_fast((EpdRect){s_qr_cx - span / 2 + x * 6, s_qr_cy - span / 2 + y * 6, 6, 6},
                                  UI_GRAY_BLACK, s_qr_fb);
 }
 static bool monitor_qr_draw(uint8_t *fb, int cx, int cy, const char *url) {
@@ -1271,23 +1275,23 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
         row(fb, 292, "远程监看", mod_monitor_enabled() ? "已开启" : "已关闭");
         char url[64]; mod_monitor_url(url, sizeof(url));
         if (mod_monitor_enabled() && url[0]) {
-            // 二维码 + 地址：手机扫码或输入均可进入；地址首次出现时 on_tick 会自动重绘本页。
-            // QR plus the address: scan or type to enter; on_tick repaints this page once the
-            // address first appears.
-            if (monitor_qr_draw(fb, 342, 470, url)) {
-                ui_text_fixed_vc(fb, 342, 570, 24, url, EPD_DRAW_ALIGN_CENTER, false);
+            // 二维码 + 大字地址：扫码或输入均可进入；地址首次出现时 on_tick 会自动重绘本页。
+            // QR plus a large address: scan or type to enter; on_tick repaints this page once
+            // the address first appears.
+            if (monitor_qr_draw(fb, 342, 480, url)) {
+                ui_text_fixed_vc(fb, 342, 620, 30, url, EPD_DRAW_ALIGN_CENTER, false);
             } else {
-                ui_text_fixed_vc(fb, 342, 470, 24, url, EPD_DRAW_ALIGN_CENTER, false);
+                ui_text_fixed_vc(fb, 342, 480, 30, url, EPD_DRAW_ALIGN_CENTER, false);
             }
-            ui_text_fixed_vc(fb, 342, 610, 19, "浏览器打开或扫码：看实时画面并点按操作，每秒刷新。",
+            ui_text_fixed_vc(fb, 342, 678, 22, "浏览器打开或扫码：看实时画面并点按操作，每秒刷新。",
                              EPD_DRAW_ALIGN_CENTER, false);
         } else if (mod_monitor_enabled()) {
-            ui_text_fixed_vc(fb, 342, 430, 20, "已开启；设备联网后，地址和二维码显示在这里。",
+            ui_text_fixed_vc(fb, 342, 440, 22, "已开启；设备联网后，地址和二维码显示在这里。",
                              EPD_DRAW_ALIGN_CENTER, false);
         }
-        ui_text_fixed_vc(fb, 342, 650, 19, "仅建议可信局域网使用；无密码保护，不用时请关闭开关。",
+        ui_text_fixed_vc(fb, 342, 720, 21, "仅建议可信局域网使用；无密码保护，不用时请关闭开关。",
                          EPD_DRAW_ALIGN_CENTER, false);
-        if (s_notice[0]) ui_text_fixed_vc(fb, 342, 690, 21, s_notice, EPD_DRAW_ALIGN_CENTER, false);
+        if (s_notice[0]) ui_text_fixed_vc(fb, 342, 762, 22, s_notice, EPD_DRAW_ALIGN_CENTER, false);
         settings_navigation(fb);
         return;
     }
