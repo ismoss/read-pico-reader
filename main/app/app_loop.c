@@ -820,7 +820,12 @@ void app_loop_run(const app_loop_config_t* config) {
                     cancel_gesture(&ctx, current, &gesture);
                     ctx.consumed = true;
                 }
-                if (action == UI_QUICK_OPEN || action == UI_QUICK_CLOSE) quick_present(&ctx, current, false);
+                // 快捷层永远按竖屏绘制：横屏正文里触发时先交还竖屏，正文随后自行重建。
+                // The quick layer always draws portrait: hand the rotation back from landscape reading; the body rebuilds itself.
+                if (action == UI_QUICK_OPEN || action == UI_QUICK_CLOSE) {
+                    app_book_rotation_leave();
+                    quick_present(&ctx, current, false);
+                }
                 else if (action == UI_QUICK_WIFI) {
                     quick_toggle_wifi();
                 } else if (action == UI_QUICK_BLUETOOTH) {
@@ -1068,6 +1073,9 @@ void app_loop_run(const app_loop_config_t* config) {
                         ctx.released = false;
                         app_present(&ctx, current, APP_REDRAW_PAGE);
                     } else {
+                        // 电源对话框按竖屏绘制：横屏正文期间先交还竖屏，正文随后自行重建。
+                        // The power dialog draws portrait: hand the rotation back from landscape reading.
+                        app_book_rotation_leave();
                         power_dialog_open = true;
                         ui_power_dialog_reset(&power_dialog, touch.touched);
                         ctx.request_app = NULL;

@@ -20,6 +20,9 @@ bool app_image_request_open(const char *path);
 void app_files_request_folder(int folder);
 void app_book_request_manage(void);
 bool app_book_reader_body_visible(void);
+/// 全局浮层（快捷菜单/电源对话框）按竖屏绘制：横屏正文期间先交还竖屏，正文随后由阅读页自行重建。
+/// Global overlays draw portrait: hand the rotation back during landscape reading; the reader rebuilds it afterwards.
+void app_book_rotation_leave(void);
 /// 模式/对比度变化时释放旧格式封面；绘制前由主循环一次调用。/ Drop obsolete cover formats once on mode/contrast changes, before drawing.
 void app_book_cover_mode_changed(void);
 void app_home_cover_mode_changed(void);

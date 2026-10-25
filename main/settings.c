@@ -75,6 +75,7 @@
 #define NVS_KEY_HOLD_ACTION "rd_key_hold"
 #define NVS_KEY_READER_KEYS_V2 "rd_keys_v2"
 #define NVS_KEY_VERTICAL_TURN "rd_vertical"
+#define NVS_KEY_READER_LANDSCAPE "rd_land"
 #define NVS_KEY_BLE_TURNER "ble_turn"
 #define NVS_KEY_SHELF_RECENT "shelf_recent"
 #define NVS_KEY_BOOK_LINE "bk_line"
@@ -133,6 +134,9 @@ static const char *s_reader_key_names[] = {"rd_key_l", "rd_key_m", "rd_key_r"};
 static uint8_t s_reader_hold_action = APP_READER_KEY_HOME;
 static uint8_t s_reader_keys[3] = {APP_READER_KEY_PREV, APP_READER_KEY_TOOLS, APP_READER_KEY_NEXT};
 static bool s_reader_vertical_turn;
+// 书内横屏：0 竖屏，1/2 两个持机方向；只在阅读正文生效，书架与面板保持竖屏。
+// In-book landscape: 0 portrait, 1/2 the two holding directions; body only, shelf and panels stay portrait.
+static uint8_t s_reader_landscape;
 static bool s_ble_turner;
 static bool s_shelf_recent_sort;
 // 书内自带字体默认开启：多数带字体的书排版就是靠它才对得上版。
@@ -308,6 +312,9 @@ void app_settings_init(void) {
     if (nvs_get_u8(h, NVS_KEY_IMMERSIVE, &immersive) == ESP_OK) s_reader_immersive = immersive == 1;
     uint8_t hold_refresh = 0;
     if (nvs_get_u8(h, NVS_KEY_HOLD_REFRESH, &hold_refresh) == ESP_OK) s_reader_hold_refresh = hold_refresh == 1;
+    uint8_t reader_landscape = 0;
+    if (nvs_get_u8(h, NVS_KEY_READER_LANDSCAPE, &reader_landscape) == ESP_OK && reader_landscape <= 2)
+        s_reader_landscape = reader_landscape;
     for (unsigned i = 0; i < 3; ++i) {
         uint8_t value;
         if (nvs_get_u8(h, s_reader_key_names[i], &value) == ESP_OK && value < APP_READER_KEY_COUNT)
@@ -706,6 +713,12 @@ void app_settings_set_reader_turn_effect(uint8_t effect) {
     if (effect > READER_TURN_EFFECT_MAX || effect == s_reader_turn_effect) return;
     s_reader_turn_effect = effect;
     nvs_put_u8(NVS_KEY_READER_TURN, effect);
+}
+uint8_t app_settings_reader_landscape(void) { return s_reader_landscape; }
+void app_settings_set_reader_landscape(uint8_t mode) {
+    if (mode > 2 || mode == s_reader_landscape) return;
+    s_reader_landscape = mode;
+    nvs_put_u8(NVS_KEY_READER_LANDSCAPE, mode);
 }
 bool app_settings_reader_power_turn(void) { return s_reader_power_turn; }
 void app_settings_set_reader_power_turn(bool on) {

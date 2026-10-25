@@ -40,6 +40,10 @@ static bool ui_rect_hit(EpdRect r,int x,int y){return x>=r.x&&x<r.x+r.width&&y>=
 static char s_reader_notice[64];
 static void copy_text(char *to,size_t cap,const char *from){snprintf(to,cap,"%s",from);}
 static int64_t esp_timer_get_time(void){return 1000000;}
+// 横屏视口替身：宿主侧保持竖屏，工具条手势的判定阈值不变。
+// Landscape stand-ins: the host stays portrait so the toolbar gesture band is unchanged.
+static int reader_w(void){return UI_LOCK_WIDTH;}
+static int reader_h(void){return UI_LOCK_HEIGHT;}
 '''
 unit+='static unsigned font_scale=100;\nstatic unsigned app_settings_system_font_size(void){return font_scale;}\n'
 unit+=function('reader_ui_extra',book)+'\n'+function('reader_font_card',book)+'\n'

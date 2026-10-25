@@ -133,6 +133,10 @@ void app_settings_set_reader_full_pages(uint8_t pages);
 /// 阅读翻页效果：0普通，1水波纹，2速读黑白；旧0/1配置不变。/ Reader effect:0 ordinary,1 ripple,2 fast BW; preserve legacy0/1 settings.
 uint8_t app_settings_reader_turn_effect(void);
 void app_settings_set_reader_turn_effect(uint8_t effect);
+/// 书内横屏：0 竖屏，1/2 两个持机方向；仅正文与工具条生效，其余界面保持竖屏。
+/// In-book landscape: 0 portrait, 1/2 two holding directions; body and toolbar only.
+uint8_t app_settings_reader_landscape(void);
+void app_settings_set_reader_landscape(uint8_t mode);
 /// 阅读正文里短按电源键翻下一页；默认关闭。/ Short power press turns forward only in reader body; off by default.
 bool app_settings_reader_power_turn(void);
 void app_settings_set_reader_power_turn(bool on);

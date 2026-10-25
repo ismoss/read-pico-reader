@@ -23,6 +23,8 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## 待发布 / Unreleased
 
+- 新增书内横屏阅读：工具栏新增「横屏」键，三档循环（竖屏→横屏·右→横屏·左）；仅正文与工具条横屏，书架、目录、二级面板、菜单与锁屏保持竖屏，进出正文按当前阅读位置自动重排。横屏下暂不显示阅读背景、翻页水波纹效果，插图缩放与双指平移照常。
+  In-book landscape reading: a new toolbar key cycles portrait→landscape right→landscape left; only the body and toolbar rotate while the shelf, TOC, panels, menus and lock stay portrait, re-anchoring at the current position on each switch. Landscape temporarily skips the reading background and the ripple turn effect; illustration zoom and two-finger pan keep working.
 - 深睡开机（密码验证通过）后也自动连网：此前只接了浅睡唤醒路径，按电源键从深睡开机漏了。
   Verified boots now auto-connect as well: previously only the light-sleep wake path was wired and the deep-sleep power-on was missed.
 - 设置开关改纯黑白样式：灰色轨道在滚动差分扫描下会经过深色过渡产生黑闪，黑白无灰阶过渡，任何刷新模式都不再闪。

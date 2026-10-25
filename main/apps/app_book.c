@@ -193,7 +193,8 @@
 #define BOOK_MARGIN_MIN 0
 #define BOOK_MARGIN_MAX 48
 #define BOOK_MARGIN_CHOICES 9
-#define BOOK_TOOL_COUNT 5
+#define BOOK_TOOL_COUNT 6
+#define BOOK_TOOL_LANDSCAPE 5
 #define BOOK_FONT_PAGE 9
 #define BOOKMARK_MAX 24
 #define BOOKMARK_ROWS 6
@@ -362,6 +363,11 @@ static char s_font_path[192];
 static char* s_text;
 bool app_book_reader_body_visible(void) {
     return s_view == READING && s_text && s_reader_panel == READER_PANEL_NONE && !s_clear_confirm;
+}
+void app_book_rotation_leave(void) {
+    // 供全局浮层（快捷菜单/电源对话框）绘制前调用；正文重画时由 present 头部的 sync 切回。
+    // For global overlays before they draw; the body's present-side sync switches back on repaint.
+    if (epd_get_rotation() != EPD_ROT_INVERTED_PORTRAIT) epd_set_rotation(EPD_ROT_INVERTED_PORTRAIT);
 }
 static blk_t* s_blocks;
 // 书内字体的 run 表与块表同生共死：都来自同一次 html_text 解析，排版直接借用。
@@ -544,35 +550,143 @@ static void draw_control(uint8_t* fb, EpdRect rect, const char* label, int id) {
     if (s_pressed_control == id) ui_draw_pressed_round_rect(fb, rect, UI_BTN_RADIUS);
     ui_draw_button(fb, rect, label, false);
 }
-static void lock_draw(void) { if (s_draw_lock) xSemaphoreTake(s_draw_lock, portMAX_DELAY); }
+static void lock_draw(void) { if (s_draw_lock) xSemaphoreTake(s_draw_lock, portMAX_WAIT); }
 static void unlock_draw(void) { if (s_draw_lock) xSemaphoreGive(s_draw_lock); }
 static size_t fb_bytes(void) { return (size_t)epd_width() * epd_height() / 2; }
-#define READER_FULLSCREEN_PROGRESS_TOP (UI_LOCK_HEIGHT - 12)
+/* ---- 书内横屏 / In-book landscape ---- */
+// 横屏只作用于阅读正文与工具条：书架、目录、二级面板和菜单/锁屏等全局界面永远按竖屏
+// 绘制。epdiy 的绘制原语与区域推屏都跟随 epd_set_rotation 换算坐标，所以这里只需在进出
+// 正文时切换旋转，并按新视口锚定重排一次。
+// Landscape applies to the reading body and toolbar only: the shelf, TOC, secondary panels and
+// global UI (menus, lock) always draw portrait. epdiy primitives and area updates follow
+// epd_set_rotation, so entering or leaving only swaps the rotation and re-anchors the layout.
+static EpdRect body_rect(void);
+static bool s_reader_landscape_layout;
+static bool reader_landscape_active(void) {
+    return app_settings_reader_landscape() != 0 && s_view == READING && s_text &&
+        (s_reader_panel == READER_PANEL_NONE || s_reader_panel == READER_PANEL_TOOLS) &&
+        !s_clear_confirm;
+}
+static enum EpdRotation reader_rotation_now(void) {
+    switch (app_settings_reader_landscape()) {
+        case 1: return EPD_ROT_INVERTED_LANDSCAPE;
+        case 2: return EPD_ROT_LANDSCAPE;
+        default: return EPD_ROT_INVERTED_PORTRAIT;
+    }
+}
+// 视口尺寸跟排版几何标记走：sync 保证画屏前标记与实际排版一致。
+// Viewport sizes follow the built-geometry flag; sync keeps the flag true to the layout.
+static int reader_w(void) { return s_reader_landscape_layout ? epd_width() : UI_LOCK_WIDTH; }
+static int reader_h(void) { return s_reader_landscape_layout ? epd_height() : UI_LOCK_HEIGHT; }
+static int reader_progress_top(void) { return reader_h() - 12; }
+// 进出横屏视口时按页首字节锚定重排；失败先回旧几何，再失败才弃书回书架。
+// Re-anchor on the page-start byte when the viewport flips; fall back to the old geometry
+// first and only drop the book when even that rebuild fails.
+static void reader_relayout_keep_page(bool landscape) {
+    size_t off = s_text ? book_layout_page_start_offset(s_page) : 0;
+    lock_draw();
+    invalidate_prep();
+    s_reader_landscape_layout = landscape;
+    if (s_text && !book_layout_build_blocks(s_text, s_text_len, s_blocks, s_block_count,
+                                            body_rect(), s_px)) {
+        s_reader_landscape_layout = !landscape;
+        if (!book_layout_build_blocks(s_text, s_text_len, s_blocks, s_block_count,
+                                      body_rect(), s_px)) {
+            unlock_draw();
+            free_book();
+            s_view = SHELF;
+            copy_text(s_message, sizeof(s_message), "排版失败，请重新扫描并打开图书");
+            return;
+        }
+        unlock_draw();
+        return;
+    }
+    if (s_text) s_page = book_layout_page_for_offset(off);
+    epd_set_rotation(landscape ? reader_rotation_now() : EPD_ROT_INVERTED_PORTRAIT);
+    unlock_draw();
+}
+// 画屏前的统一对账：期望态与排版几何不一致时切换旋转并重排；否则不动。
+// Reconcile before painting: flip the rotation and re-layout when the desired state disagrees
+// with the built geometry; a no-op otherwise.
+static void reader_sync_rotation(void) {
+    bool active = reader_landscape_active();
+    if (active != s_reader_landscape_layout) reader_relayout_keep_page(active);
+    else if (active && epd_get_rotation() != reader_rotation_now())
+        epd_set_rotation(reader_rotation_now());
+    else if (!active && epd_get_rotation() != EPD_ROT_INVERTED_PORTRAIT)
+        epd_set_rotation(EPD_ROT_INVERTED_PORTRAIT);
+}
+static void reader_rotation_leave(void) {
+    // 离开正文（锁屏/退页/全局对话框）前恢复竖屏；排版几何随后由 sync 按需重建。
+    // Restore portrait before leaving the body (lock/exit/global dialogs); the layout is
+    // rebuilt on demand by sync afterwards.
+    if (epd_get_rotation() != EPD_ROT_INVERTED_PORTRAIT)
+        epd_set_rotation(EPD_ROT_INVERTED_PORTRAIT);
+}
+// 触摸芯片坐标系与竖屏逻辑一致；横屏正文里把报点换算到横屏逻辑，并同步重映射滑动方向。
+// Touch reports portrait-logical coordinates; inside landscape they map to the landscape grid
+// and the swipe direction rotates with them.
+static void reader_touch_to_landscape(uint16_t *x, uint16_t *y) {
+    if (epd_get_rotation() == EPD_ROT_LANDSCAPE) {
+        int hx = (int)*y, hy = epd_height() - 1 - (int)*x;
+        *x = (uint16_t)hx; *y = (uint16_t)hy;
+    } else if (epd_get_rotation() == EPD_ROT_INVERTED_LANDSCAPE) {
+        int hx = epd_width() - 1 - (int)*y, hy = (int)*x;
+        *x = (uint16_t)hx; *y = (uint16_t)hy;
+    }
+}
+static ui_gesture_type_t reader_gesture_to_landscape(ui_gesture_type_t type) {
+    // 两轴在旋转后互换或翻转，四个滑动方向随之成对换向；验算以坐标公式为准。
+    // The two axes swap or flip, so the four swipe directions remap in pairs; derived from
+    // the coordinate formulas above.
+    switch (epd_get_rotation()) {
+        case EPD_ROT_LANDSCAPE:
+            switch (type) {
+                case UI_GESTURE_SWIPE_L: return UI_GESTURE_SWIPE_D;
+                case UI_GESTURE_SWIPE_R: return UI_GESTURE_SWIPE_U;
+                case UI_GESTURE_SWIPE_U: return UI_GESTURE_SWIPE_L;
+                case UI_GESTURE_SWIPE_D: return UI_GESTURE_SWIPE_R;
+                default: return type;
+            }
+        case EPD_ROT_INVERTED_LANDSCAPE:
+            switch (type) {
+                case UI_GESTURE_SWIPE_L: return UI_GESTURE_SWIPE_U;
+                case UI_GESTURE_SWIPE_R: return UI_GESTURE_SWIPE_D;
+                case UI_GESTURE_SWIPE_U: return UI_GESTURE_SWIPE_R;
+                case UI_GESTURE_SWIPE_D: return UI_GESTURE_SWIPE_L;
+                default: return type;
+            }
+        default: return type;
+    }
+}
+#define READER_FULLSCREEN_PROGRESS_TOP (reader_progress_top())
 // 正文上方留出一致的呼吸空间，下沿靠近进度区；两种模式共用排版与刷新边界。
 // Give the body a consistent top inset and extend it toward the progress strip in both modes.
 static EpdRect reader_area(void) {
     const int top = s_reader_fullscreen ? (app_settings_reader_immersive() ? 0 : 80) : 160;
     // 正文排版不占进度线；文字翻页合并差分时仅驱动实际变化的进度像素。
     // Keep text layout outside the progress strip; a fused text turn drives only changed progress pixels.
-    const int bottom = s_reader_fullscreen ? READER_FULLSCREEN_PROGRESS_TOP : UI_BAR_TOP + 8;
-    return (EpdRect){0, top, UI_LOCK_WIDTH, bottom - top};
+    const int bottom = s_reader_fullscreen ? READER_FULLSCREEN_PROGRESS_TOP
+                                           : reader_h() - (UI_BAR_MARGIN + UI_BAR_H - 8);
+    return (EpdRect){0, top, reader_w(), bottom - top};
 }
 static EpdRect reader_fullscreen_progress_area(void) {
     return (EpdRect){0, READER_FULLSCREEN_PROGRESS_TOP,
-                     UI_LOCK_WIDTH, UI_LOCK_HEIGHT - READER_FULLSCREEN_PROGRESS_TOP};
+                     reader_w(), reader_h() - READER_FULLSCREEN_PROGRESS_TOP};
 }
 static EpdRect body_rect_for_tracking(int tracking_index) {
     int top = s_reader_fullscreen ? (app_settings_reader_immersive() ? 24 : 96) : 188;
     int margin = s_margin;
     // Leave only a narrow strip for the full-book progress line in full screen.
-    int bottom = s_reader_fullscreen ? READER_FULLSCREEN_PROGRESS_TOP - 2 : UI_BAR_TOP + 8;
+    int bottom = s_reader_fullscreen ? READER_FULLSCREEN_PROGRESS_TOP - 2
+                                     : reader_h() - (UI_BAR_MARGIN + UI_BAR_H - 8);
     (void)tracking_index;
     // 竖排边距作用于上下，横排作用于左右；保留所有中间像素档位。
     // Vertical margins affect top/bottom and horizontal margins left/right; retain all intermediate pixel stops.
     if (app_settings_book_vertical()) {
-        return (EpdRect){24, top + margin, UI_LOCK_WIDTH - 48, bottom - top - 2 * margin};
+        return (EpdRect){24, top + margin, reader_w() - 48, bottom - top - 2 * margin};
     }
-    EpdRect outer = {margin, top, UI_LOCK_WIDTH - 2 * margin, bottom - top};
+    EpdRect outer = {margin, top, reader_w() - 2 * margin, bottom - top};
     // 保留每个边距档位的真实像素；两端对齐由排版器分配字间距。
     // Preserve each margin in pixels; justification distributes the remaining line width.
     return outer;
@@ -582,7 +696,7 @@ static EpdRect body_rect(void) {
 }
 static int reader_margin_width(int margin, int px, int tracking_px) {
     (void)px; (void)tracking_px;
-    return UI_LOCK_WIDTH - 2 * margin;
+    return reader_w() - 2 * margin;
 }
 static int reader_margin_levels(int px, int tracking_px,
                                 int widths[BOOK_MARGIN_CHOICES], int values[BOOK_MARGIN_CHOICES]) {
@@ -622,7 +736,8 @@ static int reader_margin_for_level(int level, int current, int px, int tracking_
 static EpdRect progress_rect(void) {
     // 阅读页没有右侧菜单按钮；进度信息应和页眉分隔线一样铺满内容宽度。
     // The reader has no right-hand menu button; the footer spans the full content width.
-    return (EpdRect){36, UI_BAR_TOP, UI_LOCK_WIDTH - 72, UI_BAR_H};
+    return (EpdRect){36, reader_h() - UI_BAR_MARGIN - UI_BAR_H,
+                     reader_w() - 72, UI_BAR_H};
 }
 static int shelf_rows(void) { return s_view == SHELF && app_settings_shelf_style() == 5 ? 4 : BOOK_GRID_ROWS; }
 #define SHELF_BOOK_LIFT_PX 16
@@ -1092,9 +1207,9 @@ static void draw_shelf_furniture(uint8_t* fb) {
     }
 }
 static EpdRect tool_rect(int i) {
-    int x0 = i * UI_LOCK_WIDTH / BOOK_TOOL_COUNT;
-    int x1 = (i + 1) * UI_LOCK_WIDTH / BOOK_TOOL_COUNT;
-    return (EpdRect){x0, 1096, x1 - x0, 120};
+    int x0 = i * reader_w() / BOOK_TOOL_COUNT;
+    int x1 = (i + 1) * reader_w() / BOOK_TOOL_COUNT;
+    return (EpdRect){x0, reader_h() - 120, x1 - x0, 120};
 }
 static int leaves(void) {
     if (s_view == TOC) return book_toc_pages(book_navigation_count());
@@ -1925,6 +2040,7 @@ static void draw_reader_tool_icon(uint8_t* fb, int cx, int cy, int kind, bool se
         UI_ICON_CHART_COLUMN,  // 2 阅读统计
         UI_ICON_BOOK_OPEN,     // 3 阅读设置 / Reading settings
         UI_ICON_TYPE,          // 4 字体设置
+        UI_ICON_ROTATE_CW,     // 5 横屏切换 / Landscape toggle
     };
     if (kind < 0 || kind >= (int)(sizeof(tools) / sizeof(tools[0]))) return;
     const ui_icon_t icon = (kind == 1 && selected) ? UI_ICON_BOOKMARK_CHECK : tools[kind];
@@ -2683,7 +2799,7 @@ static EpdRect reader_chapter_key_rect(int key) {
     if (key == 13) return (EpdRect){352, READER_JUMP_TOP + 582, 278, 72};
     return (EpdRect){0};
 }
-static EpdRect reader_chapter_undo_rect(void) { return (EpdRect){178, 224, 328, 46}; }
+static EpdRect reader_chapter_undo_rect(void) { return (EpdRect){(reader_w() - 328) / 2, 224, 328, 46}; }
 static bool reader_chapter_undo_visible(void) {
     return s_chapter_jump_undo.valid && s_text && s_view == READING &&
         s_chapter_jump_undo.chapter == s_chapter && s_reader_panel == READER_PANEL_NONE;
@@ -2876,15 +2992,26 @@ static void draw_reader_panel(uint8_t* fb) {
     if (s_reader_panel==READER_PANEL_NONE) return;
     ui_text_set_system_scale(true);
     if (s_reader_panel == READER_PANEL_TOOLS) {
-        ui_fill_rect_fast((EpdRect){0, 1096, UI_LOCK_WIDTH, 120}, UI_GRAY_WHITE, fb);
-        ui_hairline(fb, 1096, 0, UI_LOCK_WIDTH, 0x98);
-        const char* labels[] = {"目录", "书签", "阅读统计", "阅读设置", "字体设置"};
+        // 工具条与正文同向：横屏时贴横屏底边，六个键按当前视口宽度均分。
+        // The toolbar shares the body orientation: it hugs the landscape bottom edge and the
+        // six keys split the current viewport width evenly.
+        const int top = reader_h() - 120;
+        ui_fill_rect_fast((EpdRect){0, top, reader_w(), 120}, UI_GRAY_WHITE, fb);
+        ui_hairline(fb, top, 0, reader_w(), 0x98);
+        const char* labels[] = {"目录", "书签", "阅读统计", "阅读设置", "字体设置", ""};
         for (int i = 0; i < BOOK_TOOL_COUNT; ++i) {
             EpdRect rect = tool_rect(i);
             int cx = rect.x + rect.width / 2;
             bool bookmarked = i == 1 && bookmark_is_current();
-            draw_reader_tool_icon(fb, cx, 1138, i, bookmarked);
-            ui_text_box(fb,(EpdRect){rect.x+6,1159,rect.width-12,40},20,bookmarked?"已书签":labels[i],EPD_DRAW_ALIGN_CENTER,false);
+            draw_reader_tool_icon(fb, cx, top + 42, i, bookmarked);
+            char label[24];
+            if (i == BOOK_TOOL_LANDSCAPE) {
+                // 标签写目标档而不是当前档：点一下就到写的方向。
+                // The label names the destination, not the current stop.
+                uint8_t next = (app_settings_reader_landscape() + 1) % 3;
+                snprintf(label, sizeof(label), "%s", next == 0 ? "竖屏" : next == 1 ? "横屏·右" : "横屏·左");
+            } else snprintf(label, sizeof(label), "%s", bookmarked ? "已书签" : labels[i]);
+            ui_text_box(fb,(EpdRect){rect.x+6,top+63,rect.width-12,40},20,label,EPD_DRAW_ALIGN_CENTER,false);
         }
     } else if (s_reader_panel == READER_PANEL_FONT_SETTINGS) draw_font_settings(fb);
     else if (s_reader_panel == READER_PANEL_WEIGHT_SETTINGS) draw_weight_settings(fb);
@@ -2916,13 +3043,13 @@ static void draw_reader_header(uint8_t *fb) {
     char header[128];
     const char *sample = s_book_title[0] ? s_book_title : s_title;
     copy_text(header, sizeof(header), sample);
-    int title_px = ui_text_title_fit(header, 32, 450, sample);
+    int title_px = ui_text_title_fit(header, 32, reader_w() - 234, sample);
     // 返回键、书名与收藏使用同一视觉中心线；字体切换不改变对齐。
     // Back, title and favorite share one visual centerline across font changes.
-    ui_text_title_vc(fb, UI_LOCK_WIDTH / 2, 114, title_px, header, sample, EPD_DRAW_ALIGN_CENTER);
-    ui_draw_icon(fb, 620, 114, 48,
+    ui_text_title_vc(fb, reader_w() / 2, 114, title_px, header, sample, EPD_DRAW_ALIGN_CENTER);
+    ui_draw_icon(fb, reader_w() - 64, 114, 48,
                  s_reader_favorite ? UI_ICON_ANIMATE_BOOKMARK_PLUS : UI_ICON_BOOKMARK, 0x38);
-    ui_hairline(fb, 151, 36, 612, UI_GRAY_LIGHT);
+    ui_hairline(fb, 151, 36, reader_w() - 72, UI_GRAY_LIGHT);
 }
 // 竖排章节题头：右列是编号（第三章），左列是章名，读序依旧自右向左；两列整体留出列宽，
 // 排版用同一个宽度在首页右边缘预留，绘制与预留因此不会错位。
@@ -3430,22 +3557,24 @@ static void draw_reader_outer(uint8_t *fb,size_t page) {
             draw_vertical_heading(fb, body);
         } else {
             char heading[128]; copy_text(heading, sizeof(heading), s_chapter_heading_title);
-            int heading_px = ui_text_title_fit(heading, 48, ui_content_width(), s_chapter_heading_title);
+            int heading_px = ui_text_title_fit(heading, 48, reader_w() - 72, s_chapter_heading_title);
             char label[sizeof(s_chapter_heading_label)]; copy_text(label, sizeof(label), s_chapter_heading_label);
-            int label_px = ui_text_title_fit(label, 24, ui_content_width(), s_chapter_heading_label);
-            ui_text_title_vc(fb, UI_LOCK_WIDTH / 2, body.y + 29, label_px, label,
+            int label_px = ui_text_title_fit(label, 24, reader_w() - 72, s_chapter_heading_label);
+            ui_text_title_vc(fb, reader_w() / 2, body.y + 29, label_px, label,
                               s_chapter_heading_label, EPD_DRAW_ALIGN_CENTER);
-            ui_text_title_vc(fb, UI_LOCK_WIDTH / 2, body.y + 112, heading_px, heading,
+            ui_text_title_vc(fb, reader_w() / 2, body.y + 112, heading_px, heading,
                               s_chapter_heading_title, EPD_DRAW_ALIGN_CENTER);
-            ui_hairline(fb, body.y + 174, 210, 264, UI_GRAY_LIGHT);
+            ui_hairline(fb, body.y + 174, reader_w() / 2 - 132, 264, UI_GRAY_LIGHT);
         }
     }
-    if (s_reader_panel != READER_PANEL_BACKGROUND_PREVIEW)
-        ui_reader_background_paint(fb, (EpdRect){0,0,UI_LOCK_WIDTH,UI_LOCK_HEIGHT}, true);
+    // 横屏不画阅读背景：竖构图的背景在横屏视口里只会被裁切，保持纯白底。
+    // No reading background in landscape: a portrait sheet would only crop, so keep it white.
+    if (s_reader_panel != READER_PANEL_BACKGROUND_PREVIEW && !s_reader_landscape_layout)
+        ui_reader_background_paint(fb, (EpdRect){0,0,reader_w(),reader_h()}, true);
     draw_reader_images(fb, page, body);
     if (s_reader_fullscreen) {
         // Full-book progress uses the last few screen rows and no footer text.
-        EpdRect track = {36, READER_FULLSCREEN_PROGRESS_TOP + 3, UI_LOCK_WIDTH - 72, 3};
+        EpdRect track = {36, READER_FULLSCREEN_PROGRESS_TOP + 3, reader_w() - 72, 3};
         ui_fill_round_rect(fb, track, 1, 0x90);
         track.width = track.width * (int)percent(page) / 100;
         if (track.width) ui_fill_round_rect(fb, track, 1, UI_GRAY_BLACK);
@@ -3473,14 +3602,14 @@ static void draw_reader_outer(uint8_t *fb,size_t page) {
                       progress, EPD_DRAW_ALIGN_RIGHT, false);
     }
     if (s_reader_notice[0]) {
-        EpdRect notice = {218, 160, 248, 48};
+        EpdRect notice = {(reader_w() - 248) / 2, 160, 248, 48};
         ui_fill_round_rect(fb, notice, 24, 0xd0);
-        ui_text_vc(fb, 342, 184, 19, s_reader_notice, EPD_DRAW_ALIGN_CENTER, false);
+        ui_text_vc(fb, reader_w() / 2, 184, 19, s_reader_notice, EPD_DRAW_ALIGN_CENTER, false);
     }
     if (reader_chapter_undo_visible()) {
-        EpdRect notice={104,160,476,126};
+        EpdRect notice={(reader_w() - 476) / 2,160,476,126};
         ui_fill_round_rect(fb,notice,20,UI_GRAY_WHITE);ui_draw_control_frame(fb,notice,20,0x68);
-        ui_text_box(fb,(EpdRect){122,174,440,36},22,"已跳转到本章指定页",EPD_DRAW_ALIGN_CENTER,false);
+        ui_text_box(fb,(EpdRect){notice.x+18,174,440,36},22,"已跳转到本章指定页",EPD_DRAW_ALIGN_CENTER,false);
         EpdRect back=reader_chapter_undo_rect();
         ui_fill_round_rect(fb,back,23,0xe0);
         ui_text_box(fb,back,21,"返回跳转前",EPD_DRAW_ALIGN_CENTER,false);
@@ -3526,7 +3655,8 @@ static void prep_task(void *arg) {
 static bool kick_prep(void) {
     if(s_view!=READING||!s_text||s_toolbar||s_clear_confirm||s_reader_panel!=READER_PANEL_NONE||
        s_page+1>=book_layout_page_count()||book_layout_page_image_count(s_page)||
-       book_layout_page_image_count(s_page+1)||app_settings_book_background_path()[0])return false;
+       book_layout_page_image_count(s_page+1)||
+       (app_settings_book_background_path()[0]&&!s_reader_landscape_layout))return false;
     int target=(int)s_page+1;
     if(s_next_page==target&&s_next_generation==book_layout_generation())return false;
     if(s_prep_page!=target||s_prep_cursor.generation!=book_layout_generation()){
@@ -3562,7 +3692,7 @@ static void reader_prefetch_idle(app_ctx_t *ctx) {
     if(s_view!=READING||!s_text||s_toolbar||s_clear_confirm||s_reader_panel!=READER_PANEL_NONE||
        ctx->consumed||ctx->request_app||ctx->request_menu||ctx->request_return||
        (ctx->touch&&ctx->touch->touched)||s_prep_page!=(int)s_page+1)return;
-    if(app_settings_book_background_path()[0]||book_layout_page_image_count(s_page)||
+    if((app_settings_book_background_path()[0]&&!s_reader_landscape_layout)||book_layout_page_image_count(s_page)||
        book_layout_page_image_count(s_page+1)||s_page+1>=book_layout_page_count())return;
     if(s_next_page==s_prep_page&&s_next_generation==book_layout_generation())return;
     if(!reader_prefetch_buffer())return;
@@ -3669,7 +3799,7 @@ static void render(app_ctx_t* ctx, uint8_t* fb) {
     if (s_category_menu) draw_category_menu(fb);
     unlock_draw();
 }
-static EpdRect reader_status_area(void) { return (EpdRect){0,0,UI_LOCK_WIDTH,80}; }
+static EpdRect reader_status_area(void) { return (EpdRect){0,0,reader_w(),80}; }
 static bool reader_status_visible(void) {
     return s_view==READING && s_text && !(s_reader_fullscreen && app_settings_reader_immersive());
 }
@@ -3677,7 +3807,8 @@ static void reader_status_paint(uint8_t *fb) {
     EpdRect area=reader_status_area();
     ui_fill_rect_fast(area,UI_GRAY_WHITE,fb);
     ui_nav_status(fb);
-    if (s_reader_panel!=READER_PANEL_BACKGROUND_PREVIEW && app_settings_book_background_path()[0])
+    if (s_reader_panel!=READER_PANEL_BACKGROUND_PREVIEW && app_settings_book_background_path()[0] &&
+        !s_reader_landscape_layout)
         ui_reader_background_paint(fb,area,true);
 }
 static app_redraw_t reader_clock_tick(app_ctx_t *ctx) {
@@ -3689,6 +3820,10 @@ static app_redraw_t reader_clock_tick(app_ctx_t *ctx) {
     return APP_REDRAW_AREA;
 }
 static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
+    // 画屏前先对账旋转与排版：进出正文/开关面板都会在这里切换横竖屏并锚定重排。
+    // Reconcile rotation and layout first: entering or leaving the body and panel toggles all
+    // land here, flipping orientation and re-anchoring as needed.
+    reader_sync_rotation();
     if(reader_indent_present(ctx,redraw))return true;
     if(s_shelf_key_paint_pending && redraw==APP_REDRAW_AREA && s_view==SHELF && !ctx->request_app){
         s_shelf_key_paint_pending=false;
@@ -3729,7 +3864,7 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
     }
     if (ctx->request_app) return true;
     if (s_view == READING && s_text) {
-        if (s_reader_panel != READER_PANEL_BACKGROUND_PREVIEW)
+        if (s_reader_panel != READER_PANEL_BACKGROUND_PREVIEW && !s_reader_landscape_layout)
             (void)ui_reader_background_prepare(app_settings_book_background_path());
         prepare_inline_image();
     }
@@ -3750,7 +3885,7 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
     // Clean reader entry and TOC returns in one complete target-page output, including images/backgrounds, without white prepasses or replay.
     if(reader_entry)
         err=update_display_area_full_with(ctx->hl,&E0470_FULL_WAVEFORM,MODE_GC16,
-                                         (EpdRect){0,0,UI_LOCK_WIDTH,UI_LOCK_HEIGHT});
+                                         (EpdRect){0,0,reader_w(),reader_h()});
     else
     if (image_gray_refresh && redraw == APP_REDRAW_AREA && !s_reader_cleanup && s_presented_view == (int)READING) {
         // 灰阶只驱动正文，避免每张插图都把整屏先清白再闪回。
@@ -3829,7 +3964,7 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
         // 面板切换只推最终灰阶目标，不将首次选择水波纹算作周期全刷。
         // Panel transitions present their final grays without counting first ripple selection as periodic cleanup.
         ? update_display_area_diff_with(ctx->hl,display_main_normal_waveform(),MODE_GL16,
-              (EpdRect){0,0,UI_LOCK_WIDTH,UI_LOCK_HEIGHT})
+              (EpdRect){0,0,reader_w(),reader_h()})
         : update_display_fast_page(ctx->hl);
     int64_t displayed = esp_timer_get_time();
     reader_prefetch_end(prep);
@@ -3868,10 +4003,12 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
     return true;
 }
 static app_redraw_t paint_reading(app_ctx_t* ctx, enum EpdDrawMode mode) {
+    reader_sync_rotation();
     s_water_turn_pending = false;
     s_reader_turn_pending = false;
     int64_t started = esp_timer_get_time();
-    (void)ui_reader_background_prepare(app_settings_book_background_path());
+    if (!s_reader_landscape_layout)
+        (void)ui_reader_background_prepare(app_settings_book_background_path());
     prepare_inline_image();
     s_reader_image_refresh_pending = !app_settings_reader_hide_images() &&
         book_layout_page_image_count(s_page) > 0 && s_page_images;
@@ -4121,6 +4258,10 @@ static bool heading_text_matches(const char *text, const char *toc, const char *
 
 static bool load_chapter_at(app_ctx_t* ctx, size_t chapter, size_t offset,
                             bool last_page, const char *anchor, size_t source_offset) {
+    // 章节排版用当前视口：进入正文路径先对账横竖屏，避免先按旧几何排一次再返工。
+    // Chapters lay out for the live viewport: reconcile orientation first instead of
+    // paginating for the old geometry and redoing it right after.
+    reader_sync_rotation();
     bool clear_toc = chapter != s_chapter || (!anchor && source_offset == SIZE_MAX);
     html_text_t loaded = {0};
     size_t anchor_offset = 0;
@@ -5047,7 +5188,8 @@ static app_redraw_t turn_page(app_ctx_t* ctx, int dir) {
         book_layout_page_image_count(s_page) == 0 && !app_settings_book_background_path()[0];
     s_water_turn_pending = !chrome_changed && redraw == APP_REDRAW_AREA && !s_reader_cleanup &&
                            app_settings_reader_turn_effect() == 1 && from_text_frame &&
-                           book_layout_page_image_count(s_page) == 0 && !app_settings_book_background_path()[0];
+                           book_layout_page_image_count(s_page) == 0 && !app_settings_book_background_path()[0] &&
+                           !s_reader_landscape_layout;
     s_water_turn_dir = dir > 0 ? E0470_TURN_RTL : E0470_TURN_LTR;
     return chrome_changed ? APP_REDRAW_PAGE : redraw;
 }
@@ -5639,6 +5781,11 @@ static app_redraw_t reader_panel_action(app_ctx_t* ctx, uint16_t x, uint16_t y) 
                 reader_chapter_jump_begin();
             } else if (i == 3) {
                 s_reader_panel = READER_PANEL_REFRESH_SETTINGS;
+            } else if (i == BOOK_TOOL_LANDSCAPE) {
+                // 三档循环：竖屏→横屏右→横屏左；换档后关工具条直接回到正文。
+                // Cycle portrait→right→left; the new stop applies to the body immediately.
+                app_settings_set_reader_landscape((app_settings_reader_landscape() + 1) % 3);
+                s_reader_panel = READER_PANEL_NONE;
             } else {
                 s_line_spacing = app_settings_book_line_spacing();
                 s_reader_slider = -1;
@@ -6367,11 +6514,11 @@ static app_redraw_t action_at(app_ctx_t* ctx, uint16_t x, uint16_t y) {
         return APP_REDRAW_NONE;
     }
     if (s_view == READING) {
-        if (s_toolbar && !(s_reader_panel == READER_PANEL_TOOLS && y < 1096 && ui_rect_hit(body_rect(), x, y)))
+        if (s_toolbar && !(s_reader_panel == READER_PANEL_TOOLS && y < reader_h() - 120 && ui_rect_hit(body_rect(), x, y)))
             return reader_panel_action(ctx, x, y);
         if (!s_reader_fullscreen && ui_rect_hit((EpdRect){32, 75, 64, 64}, x, y))
             return reader_return(ctx);
-        if (!s_reader_fullscreen && x >= 584 && y >= 76 && y < 145) {
+        if (!s_reader_fullscreen && x >= reader_w() - 100 && y >= 76 && y < 145) {
             bool next = !s_reader_favorite;
             if (!favorite_save(s_path, next)) {
                 copy_text(s_reader_notice, sizeof(s_reader_notice), "收藏保存失败");
@@ -6383,7 +6530,7 @@ static app_redraw_t action_at(app_ctx_t* ctx, uint16_t x, uint16_t y) {
                 if (!strcmp(s_shelf[i].path, s_path)) s_shelf[i].favorite = next;
             sort_shelf(ctx);
             render(ctx, ctx->fb);
-            s_area = (EpdRect){584, 76, 64, 70};
+            s_area = (EpdRect){reader_w() - 100, 76, 64, 70};
             s_mode = MODE_GL16;
             return APP_REDRAW_AREA;
         }
@@ -6556,6 +6703,9 @@ static void on_enter(app_ctx_t* ctx) {
 }
 static void book_on_exit(app_ctx_t* ctx) {
     reader_indent_hold_cancel();
+    // 离开阅读页把旋转交还竖屏；其余页面永远以竖屏绘制。
+    // Leaving Books hands the rotation back; every other page always draws portrait.
+    reader_rotation_leave();
     // 离开阅读页时丢掉未扫完的连续 DU 相位并还原缩放状态。
     // Leaving the reader drops unfinished continuous-DU phases and the zoom state.
     if (s_image_zoom_bw) continuous_du_reset();
@@ -6739,7 +6889,7 @@ static app_redraw_t paint_control(app_ctx_t* ctx, EpdRect rect) {
 static bool reader_tools_swipe(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
     if (s_view != READING || !s_text || s_reader_panel != READER_PANEL_NONE ||
         s_clear_confirm || s_scan_pending || ctx->consumed || ev->type != UI_GESTURE_SWIPE_U ||
-        ev->x0 >= UI_LOCK_WIDTH || ev->y0 < UI_LOCK_HEIGHT - 120 || ev->y0 >= UI_LOCK_HEIGHT) return false;
+        ev->x0 >= reader_w() || ev->y0 < reader_h() - 120 || ev->y0 >= reader_h()) return false;
     s_reader_tap.pending = false;
     s_pressed_control = s_reader_slider = -1;
     s_reader_panel = READER_PANEL_TOOLS;
@@ -6867,8 +7017,19 @@ static bool wants_pinch(app_ctx_t* ctx) {
 // 双指缩放与平移：两指中点是缩放锚点，中点移动连同单指拖动都直接平移图片。
 // Two-finger zoom and pan: the contact midpoint anchors the scale, and moving that midpoint --
 // or dragging with one finger -- pans the image.
-static app_redraw_t on_pinch(app_ctx_t* ctx, const app_pinch_t* pinch) {
+static app_redraw_t on_pinch(app_ctx_t* ctx, const app_pinch_t* pinch_event) {
+    const app_pinch_t* pinch = pinch_event;
     if (s_reader_panel == READER_PANEL_FONT_RECOVERY) return APP_REDRAW_NONE;
+    if (pinch && (epd_get_rotation() == EPD_ROT_LANDSCAPE ||
+                  epd_get_rotation() == EPD_ROT_INVERTED_LANDSCAPE)) {
+        // 缩放的两指报点同样先换到横屏逻辑系；指间距离与旋转无关，不受影响。
+        // Both contacts move to the landscape grid first; the finger distance is rotation-free.
+        static app_pinch_t rotated;
+        rotated = *pinch_event;
+        reader_touch_to_landscape(&rotated.ax, &rotated.ay);
+        reader_touch_to_landscape(&rotated.bx, &rotated.by);
+        pinch = &rotated;
+    }
     if (!pinch || !reader_zoom_mode()) return APP_REDRAW_NONE;
     EpdRect band = book_layout_image_rect();
     if (!pinch->active) return zoom_settle(ctx);
@@ -6985,7 +7146,20 @@ static app_redraw_t reader_font_recovery_gesture(app_ctx_t *ctx, const ui_gestur
     }
     return APP_REDRAW_NONE;
 }
-static app_redraw_t gesture_event(app_ctx_t* ctx, const ui_gesture_event_t* ev) {
+static app_redraw_t gesture_event(app_ctx_t* ctx, const ui_gesture_event_t* event) {
+    const ui_gesture_event_t* ev = event;
+    if (epd_get_rotation() == EPD_ROT_LANDSCAPE || epd_get_rotation() == EPD_ROT_INVERTED_LANDSCAPE) {
+        // 横屏只在正文/工具条期间生效，所以整个分发可以安全换到横屏逻辑系：报点平移到
+        // 横屏网格、滑动方向随旋转重映射；竖屏路径不会走进这里。
+        // Landscape only lives during the body and toolbar, so the whole dispatch safely moves
+        // to the landscape grid: points remap and swipe directions rotate with it; portrait
+        // paths never reach this branch.
+        ui_gesture_event_t rotated = *event;
+        reader_touch_to_landscape(&rotated.x0, &rotated.y0);
+        reader_touch_to_landscape(&rotated.x, &rotated.y);
+        rotated.type = reader_gesture_to_landscape(rotated.type);
+        ev = &rotated;
+    }
     if (s_view == READING && s_reader_panel == READER_PANEL_FONT_RECOVERY)
         return reader_font_recovery_gesture(ctx, ev);
     bool zoom_handled = false;
@@ -7156,7 +7330,7 @@ static app_redraw_t gesture_event(app_ctx_t* ctx, const ui_gesture_event_t* ev) 
             return action_at(ctx, ev->x0, ev->y0);
     }
     if (!s_clear_confirm && !s_scan_pending) {
-        if (s_view == READING && (!s_toolbar || (s_reader_panel == READER_PANEL_TOOLS && ev->y0 < 1096)) &&
+        if (s_view == READING && (!s_toolbar || (s_reader_panel == READER_PANEL_TOOLS && ev->y0 < reader_h() - 120)) &&
             ui_rect_hit(body_rect(), ev->x0, ev->y0)) {
             int direction = reader_swipe_direction(ev->type, app_settings_reader_vertical_turn());
             if (direction) { ctx->user_activity = true; return turn_page(ctx, direction); }
@@ -7481,6 +7655,10 @@ static app_redraw_t on_tick(app_ctx_t* ctx) {
 }
 static void before_lock(app_ctx_t* ctx) {
     reader_indent_hold_cancel();
+    // 锁屏票根按竖屏绘制：先把旋转交还竖屏，排版几何留给唤醒后的 sync 重建。
+    // The lock ticket draws portrait: hand the rotation back first; the layout is rebuilt by
+    // sync after waking.
+    reader_rotation_leave();
     s_shelf_key_mode=s_shelf_key_paint_pending=false;s_shelf_key_delta=s_shelf_key_pressed=0;
     shelf_category_remember(ctx);
     s_category_menu=false;

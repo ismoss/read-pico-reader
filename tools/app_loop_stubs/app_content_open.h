@@ -6,6 +6,9 @@ static inline bool app_image_request_open(const char *path) { (void)path; return
 static inline void app_files_request_folder(int folder) { (void)folder; }
 static inline void app_book_request_manage(void) {}
 static inline bool app_book_reader_body_visible(void) { return false; }
+// 宿主侧永远竖屏：横屏对账在设备侧才有意义。
+// The host stays portrait: landscape reconciliation only exists on the device.
+static inline void app_book_rotation_leave(void) {}
 
 #include <stddef.h>
 bool app_book_resume_context(char *path, size_t capacity, bool *fullscreen);

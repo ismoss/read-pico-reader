@@ -357,6 +357,13 @@ static char test_wrapped[512];
 #define READER_FULLSCREEN_PROGRESS_TOP (UI_LOCK_HEIGHT - 12)
 #define UI_BAR_TOP 1096
 #define UI_BAR_H 96
+#define UI_BAR_MARGIN 24
+// 横屏视口替身：宿主侧保持竖屏，正文几何断言全部落在竖屏网格。
+// Landscape stand-ins: the host stays portrait so body-geometry asserts stay on the portrait grid.
+static bool s_reader_landscape_layout;
+static int reader_w(void){return UI_LOCK_WIDTH;}
+static int reader_h(void){return UI_LOCK_HEIGHT;}
+static int reader_progress_top(void){return UI_LOCK_HEIGHT - 12;}
 #define BOOK_MARGIN_MIN 0
 #define BOOK_MARGIN_MAX 48
 #define BOOK_MARGIN_CHOICES 9

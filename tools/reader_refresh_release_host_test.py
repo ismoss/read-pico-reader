@@ -27,8 +27,15 @@ enum {MODE_DU,MODE_GL16,MODE_GC16,APP_PAGE_REFRESH_MODE=MODE_GL16};
 #define UI_LOCK_WIDTH 684
 #define UI_LOCK_HEIGHT 1216
 #define UI_BAR_H 96
+#define UI_BAR_MARGIN 24
 #define UI_BAR_TOP (UI_LOCK_HEIGHT-24-UI_BAR_H)
 #define READER_FULLSCREEN_PROGRESS_TOP (UI_LOCK_HEIGHT-12)
+// 横屏视口替身：宿主侧保持竖屏几何，只验证 present 的推屏选择。
+// Landscape stand-ins: the host stays portrait; only present's output choices are asserted.
+static bool s_reader_landscape_layout;
+static int reader_w(void){return UI_LOCK_WIDTH;}
+static int reader_h(void){return UI_LOCK_HEIGHT;}
+static void reader_sync_rotation(void){}
 static int E0470_WAVEFORM,E0470_FULL_WAVEFORM,E0470_FOLLOW_WAVEFORM;
 static int reader_waveform;
 static const int *display_main_gray_waveform(void){return &reader_waveform;}
