@@ -77,12 +77,16 @@ static void ui_nav_status(uint8_t *fb){epd_fill_rect((EpdRect){36,29,52,16},0,fb
 static bool app_settings_main_fast_refresh(void){return fast;}
 static void *heap_caps_malloc(size_t n,unsigned caps){
  assert(caps==3&&n<=114228);++allocs;if((int)n>max_bytes)max_bytes=(int)n;
- if(oom||fail_after==0)return NULL;if(fail_after>0)--fail_after;
+ if(oom||fail_after==0)return NULL;
+ if(fail_after>0)--fail_after;
  void *p=malloc(n);assert(p);++live;current_bytes+=n;if(current_bytes>peak_bytes)peak_bytes=current_bytes;
- for(int i=0;i<16;++i)if(!memory[i].ptr){memory[i].ptr=p;memory[i].bytes=n;return p;}abort();
+ for(int i=0;i<16;++i)if(!memory[i].ptr){memory[i].ptr=p;memory[i].bytes=n;return p;}
+ abort();
 }
 static void heap_caps_free(void *p){
- if(!p)return;for(int i=0;i<16;++i)if(memory[i].ptr==p){--live;current_bytes-=memory[i].bytes;memory[i].ptr=NULL;free(p);assert(live>=0);return;}abort();
+ if(!p)return;
+ for(int i=0;i<16;++i)if(memory[i].ptr==p){--live;current_bytes-=memory[i].bytes;memory[i].ptr=NULL;free(p);assert(live>=0);return;}
+ abort();
 }
 '''
 code+='static void ui_fill_rect_fast(EpdRect r,uint8_t gray,uint8_t *fb){epd_fill_rect(r,gray,fb);}\n'
@@ -112,7 +116,7 @@ int main(int argc,char **argv){
   for(int y=0;y<epd_rotated_display_height();++y)for(int x=0;x<epd_rotated_display_width();++x)
    if(x<584||x>=648||y<76||y>=146)assert(ui_read_pixel(frame,x,y)==ui_read_pixel(saved,x,y));
   for(int policy=0;policy<3;++policy){
-   patterned();int before=allocs;ui_quick_menu_draw(frame,true,false);
+   patterned();int before=allocs;ui_quick_menu_draw(frame,true,false,false);
    assert(allocs==before+7&&live==1&&current_bytes==23328&&peak_bytes<=170856);int grays=0;
    for(int y=0;y<epd_rotated_display_height();++y)for(int x=0;x<epd_rotated_display_width();++x){
     bool mask=y<76||(x>=18&&x<666&&y>=88&&y<256);
@@ -122,7 +126,7 @@ int main(int argc,char **argv){
    }
    assert(grays>1000);
    assert(pixel(frame,18,88)==pixel(saved,18,88)&&pixel(frame,665,88)==pixel(saved,665,88));
-   memcpy(again,frame,BYTES);memcpy(frame,saved,BYTES);ui_quick_menu_draw(frame,true,false);assert(!memcmp(frame,again,BYTES));
+   memcpy(again,frame,BYTES);memcpy(frame,saved,BYTES);ui_quick_menu_draw(frame,true,false,false);assert(!memcmp(frame,again,BYTES));
    // 每次触控只恢复圆键，底图/其他圆键不变；连按不分配、不重算玻璃。
    // Each contact restores only its key; rapid presses allocate nothing or regenerate glass.
    int input_allocs=allocs;
@@ -150,7 +154,7 @@ int main(int argc,char **argv){
 
   }
   for(int failure=0;failure<7;++failure){
-   patterned();fail_after=failure;ui_quick_menu_draw(frame,true,false);fail_after=-1;
+   patterned();fail_after=failure;ui_quick_menu_draw(frame,true,false,false);fail_after=-1;
    int before=allocs;EpdRect dirty;
    assert(ui_quick_menu_draw_button(frame,2,false,true,&dirty));
    assert(ui_quick_menu_draw_button(frame,2,false,false,&dirty)&&allocs==before);
@@ -290,11 +294,13 @@ int main(int argc,char **argv){
  for(int arg=1;arg+1<argc;arg+=2){
   rotation=3;oom=false;fail_after=-1;
   FILE *in=fopen(argv[arg],"rb");assert(in);
-  for(int y=0;y<1216;++y)for(int x=0;x<684;++x){int v=fgetc(in);assert(v>=0);epd_draw_pixel(x,y,v,frame);}fclose(in);
-  memcpy(again,frame,BYTES);ui_quick_menu_draw(frame,true,false);
+  for(int y=0;y<1216;++y)for(int x=0;x<684;++x){int v=fgetc(in);assert(v>=0);epd_draw_pixel(x,y,v,frame);}
+  fclose(in);
+  memcpy(again,frame,BYTES);ui_quick_menu_draw(frame,true,false,false);
   for(int y=0;y<76;++y)for(int x=0;x<684;++x)epd_draw_pixel(x,y,pixel(again,x,y),frame);
   FILE *out=fopen(argv[arg+1],"wb");assert(out);fprintf(out,"P5\n684 1216\n255\n");
-  for(int y=0;y<1216;++y)for(int x=0;x<684;++x)fputc(pixel(frame,x,y),out);fclose(out);
+  for(int y=0;y<1216;++y)for(int x=0;x<684;++x)fputc(pixel(frame,x,y),out);
+  fclose(out);
   ui_quick_menu_end();assert(!live&&!current_bytes);
  }
  ui_quick_menu_end();assert(!live&&!current_bytes);

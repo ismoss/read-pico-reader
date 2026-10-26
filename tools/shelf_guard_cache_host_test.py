@@ -17,6 +17,10 @@ code=quick[a:b].split('static uint8_t ui_contrast_gray')[0]
 code=code.replace('assert(x==xx);for(;y<=yy;++y)epd_draw_pixel(x,y,gray,fb);','if(x==xx){for(;y<=yy;++y)epd_draw_pixel(x,y,gray,fb);}else{assert(y==yy);for(;x<=xx;++x)epd_draw_pixel(x,y,gray,fb);}')
 code+=r"""
 static void ui_fill_rect_fast(EpdRect r,uint8_t gray,uint8_t *fb){epd_fill_rect(r,gray,fb);}
+// 书架护罩只画竖线；用逐点替身，参考帧与被测帧走同一条路径，比较仍然成立。
+// The shelf guard only draws vertical edges; this per-pixel stub keeps reference and tested frames on one path.
+static void epd_draw_line(int x0,int y0,int x1,int y1,uint8_t gray,uint8_t *fb){assert(x0==x1||y0==y1);
+ if(x0==x1){for(int y=y0;y<=y1;++y)epd_draw_pixel(x0,y,gray,fb);}else{for(int x=x0;x<=x1;++x)epd_draw_pixel(x,y0,gray,fb);}}
 static int contrast=100,guard_draws;
 static size_t free_psram=5u*1024u*1024u;
 static int s_view;

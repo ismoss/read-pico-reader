@@ -45,6 +45,8 @@ static int mock_stat(const char *p,struct stat *st){assert(worker_context);++rea
 static book_cover_job_t request(const char *p){book_cover_job_t q={.width=164,.height=214,.stride=21,.contrast=100};strcpy(q.path,p);strcpy(q.title,"title");return q;}
 static bool book_auto_cover_render(const char*,const char*,const char*,unsigned,unsigned,uint8_t*);
 static bool book_title_from_path(const char *p,char *out,size_t cap){(void)p;(void)out;(void)cap;return false;}
+static bool sd_io_ready = true;
+bool read_pico_sd_io_ready(void){return sd_io_ready;}
 '''
 unit+='\n'.join(x for x in (root/'main/book/book_cover_jobs.c').read_text().splitlines() if not x.startswith('#include'))
 unit+=r'''
@@ -66,6 +68,9 @@ int main(void){
  assert(!decodes&&!reads&&book_cover_jobs_take(generation,0,&result)==0);run();
  assert(book_cover_jobs_take(generation,0,&result)==1&&result.pixels[0]=='A'&&!result.fast);free(result.pixels);
  assert(book_cover_jobs_take(generation,0,&result)==-1);
+ // 挂载交接期间旧卡路径直接拒收，重新挂载恢复后才排队。/ Old-card paths are refused while the card hands over, queued again after remount.
+ sd_io_ready=false;{book_cover_job_t guarded=request("/sdcard/old.epub");assert(!book_cover_jobs_submit(generation,0,&guarded));}
+ sd_io_ready=true;
  q=request("B");assert(!book_cover_jobs_submit(generation,0,&q));
  generation=book_cover_jobs_begin();q=request("P");q.list=q.natural=q.fast=true;largest=0;int before=decodes;
  assert(book_cover_jobs_submit(generation,0,&q));run();assert(decodes==before&&largest<42240);
