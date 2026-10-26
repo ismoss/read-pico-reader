@@ -22,6 +22,10 @@
 User-visible changes by release; see [README](../README.md) for usage.
 
 ## 待发布 / Unreleased
+
+已作为 **0.3.3-rc100-mod27** 发布上线（2026-10-26，CI 全绿，OTA feed `https://ismoss.github.io/read-pico-reader/update.json` 已核对 size 3,193,232B / SHA256 `af2ec162…483897`）；**真机验收仍待执行**，本轮没有刷机。
+Shipped as **0.3.3-rc100-mod27** (2026-10-26, CI green, live OTA feed checked at 3,193,232 B / SHA256 `af2ec162…483897`); on-device acceptance is still pending — this round flashed nothing.
+
 - DNS 默认改为“跟随路由器”，不再默认覆盖公共解析器。切回跟随路由器会立即恢复本次 DHCP 下发的主备 DNS；公共 DNS 选择改为按名称和主备地址持久化，在线列表换序、删项或固件更新都不会把已选项悄悄改成另一组地址。在线更新要求 WiFi 已连接，下载放到后台任务，不再卡住设置页；列表先完整解析再原子替换，下载、解析或保存失败时保留原列表。
   DNS now defaults to router-provided resolvers instead of overriding them. Switching back restores the current DHCP main/backup pair immediately; public choices persist label plus both addresses, so online-list reordering/removal and firmware updates cannot silently move the selection to another pair. Online refresh requires an existing WiFi connection and downloads in a background task instead of freezing Settings; lists are fully parsed before an atomic replacement, and download/parse/save failures keep the previous list.
 - 远程监看改为一次性会话授权：每次开机强制关闭，不再从 NVS 自动恢复；每次手动开启生成只存在 RAM 的 128 位随机密钥，画面和触摸接口校验后才响应。密钥放在 URL 的 `#fragment`（浏览器不会发给服务器，因此不进入请求行日志），再由页面放入请求头；关闭、重启或十分钟无人访问即失效，不写 NVS。设置页把服务地址与本次密钥分开显示，二维码仍携带完整地址。画面请求增加互斥锁，避免多客户端同时生成同一 BMP；响应补上禁止缓存、禁止嵌入和 no-referrer 等头。
