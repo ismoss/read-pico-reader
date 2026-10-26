@@ -1,20 +1,22 @@
 # kiikoread
 
+> **Independent downstream mod:** This repository is maintained by `ismoss` as a modified downstream of [`wegooo-cell/read-pico-reader`](https://github.com/wegooo-cell/read-pico-reader). It is **not** an official MindReset or upstream release and is not affiliated with or endorsed by either project. Upstream release notes, stores, support channels and issue trackers do not describe or support this mod. This branch's OTA feed is `https://ismoss.github.io/read-pico-reader/`; use its `update.json`, not an upstream Release asset, when updating a device running this mod.
+
 > **Licensing:** New original material explicitly marked with the [Personal Study License](licenses/kiikoread-Personal-Study-1.0.txt) permits personal study and prohibits commercial use without separate written permission. **This policy does not relicense rc93 or earlier code/binaries, remove existing Apache-2.0 rights, or override third-party licenses.** See [LICENSE](LICENSE) for the exact scope.
 
 The public project name is **kiikoread**. The website calls the device an ink-screen reader; the GitHub URL and legacy update/backup filenames remain compatible. Firmware UI branding also uses kiikoread. The bright-white website includes screen previews, features, version selection, web USB flashing, Bin downloads and an [online user manual](flash/manual.html). Stage it with `python3 tools/stage_public_flash.py _site`; both GitHub Pages and Cloudflare Pages can serve `_site`. The PDF can be regenerated from `docs/user-manual.zh-CN.json` with `tools/build_user_manual.py --font /path/to/a/static-CJK.ttf` (Python ReportLab required).
-Official firmware binaries are stored in [GitHub Releases](https://github.com/wegooo-cell/read-pico-reader/releases). The verified site staging step retrieves the matching assets; do not publish the raw flash directory. Device OTA checks `https://kiikoread.com/update.json` first, with the existing GitHub Pages feed as a fallback. Stage the primary site with `python3 tools/stage_public_flash.py _site --ota-origin https://kiikoread.com`; keep the default origin for GitHub Pages.
+The upstream project stores its official firmware binaries in [its GitHub Releases](https://github.com/wegooo-cell/read-pico-reader/releases). Those assets are not automatically interchangeable with this mod. Mod builds are produced by the `mod-build` workflow and published through the feed above. Stage the upstream site with `python3 tools/stage_public_flash.py _site --ota-origin https://kiikoread.com`; keep the default origin for GitHub Pages.
 
 
-[简体中文](README.zh-CN.md) · [日本語](README.ja-JP.md) · [Third-party notices](THIRD_PARTY_NOTICES.md)
+[简体中文](README.zh-CN.md) · [日本語](README.ja-JP.md) · [Third-party notices](THIRD_PARTY_NOTICES.md) · [Privacy](PRIVACY.md)
 
 An independent reading firmware with publicly available source for the **MindReset RDP-G01-W** ESP32-S3 e-paper board. It is based on [MindReset's official demo firmware](https://github.com/MindReset/read_pico_firmware), but is **not an official MindReset release**. Licenses apply by scope as described above.
 
-The current interface has Home, Bookshelf, Files, and Settings. It reads EPUB and TXT books from a TF card, remembers reading progress, and supports Wi-Fi, hotspot, or USB file transfer. The online flasher installs the same firmware image as the local `flash/` bundle.
+The current interface has Home, Bookshelf, Files, and Settings. It reads EPUB and TXT books from a TF card, remembers reading progress, and supports Wi-Fi, hotspot, or USB file transfer. The upstream online flasher installs upstream builds and must not be assumed to install this mod.
 
-## Current release: rc99
+## Upstream baseline: rc100
 
-Restore system text antialiasing, improve charging display, add one/two-press wake and icon-set lock/cancel artwork, trim reading guides to text spans and clean reader entry. Based on 51e7d8d; keep the original rc98 for rollback. See the [changelog](docs/CHANGELOG.md).
+This branch starts from upstream rc100. The inherited notes below summarize earlier upstream releases; they are not the current version of this mod. See this repository's [changelog](docs/CHANGELOG.md) for mod releases.
 
 ### Settings, storage and lock fixes
 
@@ -52,7 +54,7 @@ Rename, profile name, status signature, shelf search and WiFi password fields sh
 
 Select the latest release or the original **rc86 / rc85** build above the connection button. The publication time and TF-image download follow the selection. Ordinary installation keeps the preserve-data default for all versions.
 
-Visit the [HTTPS web flasher](https://wegooo-cell.github.io/read-pico-reader/). Use a desktop Chrome or Edge browser with a USB data cable. Select the ink-screen reader’s serial device and follow the prompts. **Check the board model before flashing.** Ordinary installation preserves the device's settings and reading records, as well as TF-card contents. It does not include books or sample reading history.
+The [HTTPS web flasher](https://wegooo-cell.github.io/read-pico-reader/) belongs to the upstream project and installs upstream builds, not this mod. Use it only when intentionally returning to an upstream build. Use a desktop Chrome or Edge browser with a USB data cable. Select the ink-screen reader’s serial device and follow the prompts. **Check the board model before flashing.** Ordinary installation preserves the device's settings and reading records, as well as TF-card contents. It does not include books or sample reading history.
 
 If automatic entry to download mode fails on a device already running this firmware, open **Settings → Upgrade & restore → BOOT flashing** on the device, wait for the computer to detect its serial port again, then retry the web flasher.
 
@@ -75,11 +77,16 @@ kiikoread checks the image project, version, size, and headers before writing th
 Use ESP-IDF **v6.1** for ESP32-S3:
 
 ```sh
+python3 tools/prepare_tls_bundle.py "$IDF_PATH"
 idf.py set-target esp32s3
 idf.py build
 ```
 
-The board-specific flash and PSRAM timing is in `sdkconfig.defaults`. `sdkconfig.ci` is for compile checks only. Follow the [MindReset hardware documentation](https://dot.mindreset.tech/docs/read_0) for the board. A prebuilt firmware image is provided for the RDP-G01-W only.
+The TLS preparation step applies the repository's narrowly scoped ESP-IDF 6.1 cross-signing compatibility patch without disabling certificate validity, hostname or signature checks. It is required for builds that enable cross-signed certificate-bundle verification. The board-specific flash and PSRAM timing is in `sdkconfig.defaults`. `sdkconfig.ci` is for compile checks only. Follow the [MindReset hardware documentation](https://dot.mindreset.tech/docs/read_0) for the board. A prebuilt firmware image is provided for the RDP-G01-W only.
+
+## Privacy
+
+The firmware has no telemetry or account service and does not upload books, reading history or settings to this project. Network access is limited to user-visible features such as update checks, time sync, optional DNS, user-initiated transfers and the manually enabled LAN remote monitor. WiFi credentials and configuration backups are sensitive; redact them before sharing logs or backups. See [Privacy](PRIVACY.md) for details.
 
 ## Books and fonts
 

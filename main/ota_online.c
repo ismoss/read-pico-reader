@@ -219,7 +219,7 @@ static bool check_feed(void) {
     if (!json || !release) { state(PICO_UPDATE_FAILED, "内存不足，请退出传书后重试"); goto failed; }
     // GitHub Pages清单优先，官网清单备用；同一缓冲区顺序请求，无并发TLS连接。
     // Prefer GitHub Pages metadata, falling back to the website with one shared buffer and no concurrent TLS clients.
-    static const char *const feeds[] = {PICO_OTA_FEED_URL, PICO_OTA_FEED_FALLBACK_URL};
+    static const char *const feeds[] = {PICO_OTA_FEED_URL};
     bool valid = false;
     // 阶段线索：让失败提示区分「设备没网」「连不上服务器」「服务器异常」「清单无效」。
     // Stage clues so the failure notice can tell an offline device from an unreachable server,

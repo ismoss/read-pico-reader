@@ -14,12 +14,17 @@
 #include <string.h>
 #define W 100
 #define H 100
+#define FB_BYTES (W * H / 2)
 static enum EpdRotation rotation = EPD_ROT_LANDSCAPE;
-static bool painted_ttf;
+static bool painted_ttf, antialias = true;
 static bool active_ready = true, active_builtin;
 static int active_face = 1, painted_face;
+int epd_rotated_display_width(void) { return W; }
+int epd_rotated_display_height(void) { return H; }
 bool ttf_font_ready(void) { return active_ready; }
 bool ttf_font_is_builtin(void) { return active_builtin; }
+void ttf_set_antialias(bool enabled) { antialias = enabled; }
+bool ttf_get_antialias(void) { return antialias; }
 bool ttf_font_has_text(const char *text) { return active_ready && text && !strchr(text, 'Z'); }
 static int painted_baseline;
 static int painted_px;
@@ -44,12 +49,12 @@ void ttf_measure_line_px(int px, const char *text, int *above, int *below) {
 void ui_font_draw_text_px(uint8_t *fb, int x, int baseline, int px, const char *text,
                           enum EpdFontFlags align, uint8_t fg, uint8_t bg, bool bw) {
     (void)fb; (void)x; (void)px; (void)text; (void)align; (void)fg; (void)bg; (void)bw;
-    painted_ttf = false; painted_baseline = baseline;
+    painted_ttf = false; painted_baseline = baseline; painted_px = px;
 }
 void ttf_draw_text_px(uint8_t *fb, int x, int baseline, int px, const char *text,
                       enum EpdFontFlags align, uint8_t fg, uint8_t bg) {
     (void)fb; (void)x; (void)px; (void)text; (void)align; (void)fg; (void)bg;
-    painted_ttf = true; painted_baseline = baseline;
+    painted_ttf = true; painted_baseline = baseline; painted_px = px;
     painted_face = active_face;
 }
 void ui_font_draw_title_px(uint8_t *fb, int x, int baseline, int px,
@@ -126,14 +131,23 @@ static void physical(int *x, int *y) {
     else if (rotation == EPD_ROT_INVERTED_LANDSCAPE) { *x = W - ox - 1; *y = H - oy - 1; }
     else if (rotation == EPD_ROT_INVERTED_PORTRAIT) { *x = oy; *y = H - ox - 1; }
 }
+static uint8_t packed_pixel(const uint8_t *fb, int x, int y) {
+    uint8_t byte = fb[y * W / 2 + x / 2];
+    return (x & 1 ? byte >> 4 : byte & 15) << 4;
+}
+static void fill_packed(uint8_t *fb, uint8_t gray) {
+    memset(fb, (uint8_t)((gray >> 4) * 0x11), FB_BYTES);
+}
 uint8_t epd_get_pixel(int x, int y, int width, int height, const uint8_t *fb) {
     assert(width == W && height == H && x >= 0 && x < W && y >= 0 && y < H);
-    return fb[y * W + x];
+    return packed_pixel(fb, x, y);
 }
 uint8_t app_settings_system_contrast(void) { return 100; }
 void epd_draw_pixel(int x, int y, uint8_t color, uint8_t *fb) {
     physical(&x, &y);
-    assert(x >= 0 && x < W && y >= 0 && y < H); fb[y * W + x] = color;
+    assert(x >= 0 && x < W && y >= 0 && y < H);
+    uint8_t *byte = &fb[y * W / 2 + x / 2];
+    *byte = x & 1 ? (*byte & 0x0f) | (color & 0xf0) : (*byte & 0xf0) | (color >> 4);
 }
 void epd_fill_rect(EpdRect r, uint8_t color, uint8_t *fb) {
     for (int y = r.y; y < r.y + r.height; ++y)
@@ -147,39 +161,40 @@ static void rect_eq(EpdRect r, int x, int y, int w, int h) {
 }
 // 检查实际尺寸、底色合成与四种旋转下的像素一致性。/ Check draw sizes, blending and all rotations.
 static void test_icons(void) {
-    uint8_t fb[W * H], reference[W * H];
+    uint8_t fb[FB_BYTES], reference[FB_BYTES];
     const int sizes[] = {26, 30, 32, 34, 38, 40, 44, 46, 48, 72};
     for (int icon = 0; icon < UI_ICON_COUNT; ++icon) {
         for (unsigned s = 0; s < sizeof(sizes) / sizeof(sizes[0]); ++s) {
             int size = sizes[s], left = 50 - size / 2;
             for (int light = 0; light < 2; ++light) {
                 uint8_t background = light ? 0x60 : 0xe0;
+                uint8_t quantized = background & 0xf0;
                 rotation = EPD_ROT_LANDSCAPE;
-                memset(reference, background, sizeof(reference));
+                fill_packed(reference, background);
                 ui_draw_icon(reference, 50, 50, size, (ui_icon_t)icon, light ? 255 : 0);
                 unsigned changes = 0;
                 for (int y = 0; y < H; ++y) for (int x = 0; x < W; ++x) {
-                    uint8_t value = reference[y * W + x];
-                    changes += value != background;
-                    assert(light ? value >= background : value <= background);
+                    uint8_t value = packed_pixel(reference, x, y);
+                    changes += value != quantized;
+                    assert(light ? value >= quantized : value <= quantized);
                     if (x < left || y < left || x >= left + size || y >= left + size)
-                        assert(value == background);
+                        assert(value == quantized);
                 }
                 assert(changes > 0);
                 for (int r = EPD_ROT_PORTRAIT; r <= EPD_ROT_INVERTED_PORTRAIT; ++r) {
                     rotation = (enum EpdRotation)r;
-                    memset(fb, background, sizeof(fb));
+                    fill_packed(fb, background);
                     ui_draw_icon(fb, 50, 50, size, (ui_icon_t)icon, light ? 255 : 0);
                     for (int y = 0; y < H; ++y) for (int x = 0; x < W; ++x) {
                         int px = x, py = y; physical(&px, &py);
-                        assert(fb[py * W + px] == reference[y * W + x]);
+                        assert(packed_pixel(fb, px, py) == packed_pixel(reference, x, y));
                     }
                 }
             }
         }
     }
     rotation = EPD_ROT_LANDSCAPE;
-    memset(fb, 0xe0, sizeof(fb)); memcpy(reference, fb, sizeof(fb));
+    fill_packed(fb, 0xe0); memcpy(reference, fb, sizeof(fb));
     ui_draw_icon(fb, 50, 50, 40, UI_ICON_COUNT, 0);
     ui_draw_icon(fb, 50, 50, 0, UI_ICON_WIFI, 0);
     ui_draw_icon(NULL, 50, 50, 40, UI_ICON_WIFI, 0);
@@ -194,18 +209,18 @@ int main(void) {
     rect_eq(ui_rect_union((EpdRect){-10,-20,30,40}, (EpdRect){0}), 0,0,20,20);
     rect_eq(ui_rect_union((EpdRect){680,1210,INT_MAX,INT_MAX}, (EpdRect){0}), 680,1210,4,6);
     rect_eq(ui_rect_union((EpdRect){INT_MIN,INT_MIN,10,10}, (EpdRect){0}), 0,0,0,0);
-    uint8_t fb[W * H]; memset(fb, UI_GRAY_WHITE, sizeof(fb));
+    uint8_t fb[FB_BYTES]; fill_packed(fb, UI_GRAY_WHITE);
     ui_draw_control_frame(fb,(EpdRect){10,10,60,40},0,0xa0);
-    assert(fb[10*W+30]<128&&fb[11*W+30]<128&&fb[12*W+30]==255);
-    ui_draw_separator(fb,70,10,60,0xa0);assert(fb[70*W+30]<128&&fb[71*W+30]<128&&fb[72*W+30]==255);
-    ui_draw_round_rect(fb,(EpdRect){80,10,10,40},0,0xa0);assert(fb[10*W+85]>=128);
-    memset(fb,UI_GRAY_WHITE,sizeof(fb));
+    assert(packed_pixel(fb,30,10)<128&&packed_pixel(fb,30,11)<128&&packed_pixel(fb,30,12)==(UI_GRAY_WHITE&0xf0));
+    ui_draw_separator(fb,70,10,60,0xa0);assert(packed_pixel(fb,30,70)<128&&packed_pixel(fb,30,71)<128&&packed_pixel(fb,30,72)==(UI_GRAY_WHITE&0xf0));
+    ui_draw_round_rect(fb,(EpdRect){80,10,10,40},0,0xa0);assert(packed_pixel(fb,85,10)>=128);
+    fill_packed(fb,UI_GRAY_WHITE);
     ui_draw_pressed_round_rect(fb, (EpdRect){10,10,60,40}, 0);
-    assert(fb[30 * W + 40] == UI_GRAY_LIGHT);
-    assert(fb[30 * W + 14] == UI_GRAY_BLACK && fb[30 * W + 16] == UI_GRAY_BLACK);
-    assert(fb[30 * W + 9] == UI_GRAY_WHITE);
+    assert(packed_pixel(fb,40,30) == (UI_GRAY_LIGHT & 0xf0));
+    assert(packed_pixel(fb,14,30) == UI_GRAY_BLACK && packed_pixel(fb,16,30) == UI_GRAY_BLACK);
+    assert(packed_pixel(fb,9,30) == (UI_GRAY_WHITE & 0xf0));
     // 按压底图之后绘制黑字像素，文字不反色。/ Draw black text pixels after the pressed background, without inversion.
-    epd_draw_pixel(40,30,UI_GRAY_BLACK,fb); assert(fb[30 * W + 40] == UI_GRAY_BLACK);
+    epd_draw_pixel(40,30,UI_GRAY_BLACK,fb); assert(packed_pixel(fb,40,30) == UI_GRAY_BLACK);
     test_icons();
     test_font_context();
     test_native_titles();

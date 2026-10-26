@@ -1,15 +1,15 @@
 /* SPDX-License-Identifier: Apache-2.0
- * 中文：二改「远程监看」：局域网网页看屏 + 触摸注入。默认关闭；开关持久化在 NVS，
- * 联网就绪后自动起停独立 httpd（8123 端口，不与传书的 80 冲突）。无鉴权——仅建议
- * 家庭等可信局域网使用；画面按触摸芯片坐标系出图，浏览器点哪儿注入哪儿，任何
- * 旋转下都落在正确的控件上。画面直接读渲染帧缓冲，极端时机可能读到撕裂帧，
- * 下一次轮询自然纠正。
+ * 中文：二改「远程监看」：局域网网页看屏 + 触摸注入。默认关闭且每次开机都关闭；
+ * 手动开启会生成只存 RAM 的 128 位密钥，画面和触摸接口校验该密钥；静态网页壳不含隐私。
+ * 联网就绪后起停独立 httpd（8123 端口，不与传书的 80 冲突）。画面按触摸芯片
+ * 坐标系出图，浏览器点哪儿注入哪儿；帧缓冲读取只在两路数据接口之外由主循环换指针，
+ * 多个画面请求共用同一 BMP 时用互斥锁串行生成与发送。密钥不写 NVS、不写日志。
  * English: Mod "remote monitor": a LAN web page mirroring the screen and injecting touch.
- * Off by default; the switch persists in NVS and an independent httpd (port 8123, no clash
- * with transfer's 80) starts once the network is ready. No authentication — trusted LANs
- * only. The image uses the touch chip's coordinate space, so a browser tap lands on the
- * right control at any rotation. The frame is read straight from the render buffer; a torn
- * frame at the worst moment self-corrects on the next poll.
+ * Off by default and after every boot. Manual enable creates a RAM-only 128-bit token; the
+ * frame and touch endpoints verify it, while the static page shell contains no private data. An independent httpd (port 8123, no clash
+ * with transfer's 80) follows network readiness. The image uses the touch chip's coordinate
+ * space. A mutex serializes BMP generation and sending between frame clients. The token is
+ * never stored in NVS or written to logs.
  */
 #include "mod_monitor.h"
 
@@ -20,10 +20,10 @@
 #include "esp_heap_caps.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
+#include "esp_random.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
-#include "nvs.h"
 
 #include "cst836u.h"
 #include "epdiy.h"
@@ -31,7 +31,6 @@
 #include "read_pico_transfer.h"
 
 #define MOD_MONITOR_PORT 8123
-#define MOD_MONITOR_NVS_NS "rp_monitor"
 // 物理 1216x684；逻辑/触摸 684x1216。画面按半分辨率出图（342x608）：点按由网页按比例
 // 换算，不受影响；载荷缩到 1/4，省电模式下也能在下一轮轮询前送完。
 // Physical 1216x684; logical/touch 684x1216. The frame serves at half resolution (342x608):
@@ -45,6 +44,8 @@
 #define MON_BMP_HEADER 1078
 #define MON_BMP_SIZE (MON_BMP_HEADER + (size_t)MON_STRIDE * MON_H)
 #define MOD_MONITOR_IDLE_MS 600000ll
+#define MON_TOKEN_BYTES 16
+#define MON_TOKEN_HEX (MON_TOKEN_BYTES * 2)
 
 static const char *TAG = "monitor";
 
@@ -53,9 +54,14 @@ static bool s_enabled;
 static bool s_frame_ready;
 static uint8_t *s_bmp;              // BMP 头 + 按文件行序的 8bit 影像 / header + file-order 8-bit frame
 static const uint8_t *s_fb;         // UI 渲染帧缓冲（app_loop 每轮记录）/ render framebuffer from app_loop
-static char s_url[48];              // "http://ip:8123"（联网就绪时）/ visit URL while online
+static char s_base_url[48];         // "http://ip:8123"（联网就绪时）/ service URL while online
+static char s_url[96];              // 服务地址 + 一次性密钥 / service URL plus session token
+static char s_token[MON_TOKEN_HEX + 1];
+static portMUX_TYPE s_token_mux = portMUX_INITIALIZER_UNLOCKED;
+static SemaphoreHandle_t s_bmp_lock;
 static int64_t s_next_check_ms;
 static int64_t s_last_seen_ms;      // 最近一次 HTTP 请求（空闲自动关用）/ last HTTP request
+static portMUX_TYPE s_seen_mux = portMUX_INITIALIZER_UNLOCKED;
 
 // 注入会话：down → move… → up；up 消费一轮后结束。/ Injection session: down, moves, then one
 // consumed up sample ends it.
@@ -67,22 +73,67 @@ static struct {
 
 bool mod_monitor_enabled(void) { return s_enabled; }
 
+static void note_seen(void) {
+    const int64_t now = esp_timer_get_time() / 1000;
+    portENTER_CRITICAL(&s_seen_mux);
+    s_last_seen_ms = now;
+    portEXIT_CRITICAL(&s_seen_mux);
+}
+
+static int64_t last_seen(void) {
+    portENTER_CRITICAL(&s_seen_mux);
+    const int64_t value = s_last_seen_ms;
+    portEXIT_CRITICAL(&s_seen_mux);
+    return value;
+}
+
+static void make_token(void) {
+    static const char hex[] = "0123456789abcdef";
+    uint8_t bytes[MON_TOKEN_BYTES];
+    esp_fill_random(bytes, sizeof(bytes));
+    portENTER_CRITICAL(&s_token_mux);
+    for (size_t i = 0; i < sizeof(bytes); ++i) {
+        s_token[i * 2] = hex[bytes[i] >> 4];
+        s_token[i * 2 + 1] = hex[bytes[i] & 0x0f];
+    }
+    s_token[MON_TOKEN_HEX] = 0;
+    portEXIT_CRITICAL(&s_token_mux);
+    memset(bytes, 0, sizeof(bytes));
+}
+
 bool mod_monitor_set_enabled(bool on) {
     if (s_enabled == on) return false;
     s_enabled = on;
-    nvs_handle_t h;
-    if (nvs_open(MOD_MONITOR_NVS_NS, NVS_READWRITE, &h) == ESP_OK) {
-        nvs_set_u8(h, "on", s_enabled ? 1 : 0);
-        nvs_commit(h);
-        nvs_close(h);
+    if (on) make_token();
+    else {
+        portENTER_CRITICAL(&s_token_mux);
+        memset(s_token, 0, sizeof(s_token));
+        portEXIT_CRITICAL(&s_token_mux);
     }
+    s_url[0] = 0;
+    s_base_url[0] = 0;
     s_next_check_ms = 0;  // 下一轮 tick 立即按开关起停 / the next tick applies the switch at once
-    s_last_seen_ms = esp_timer_get_time() / 1000;
+    note_seen();
     return true;
 }
 
 void mod_monitor_url(char *buf, size_t cap) {
+    if (!cap) return;
     snprintf(buf, cap, "%s", (s_enabled && s_url[0]) ? s_url : "");
+}
+
+void mod_monitor_base_url(char *buf, size_t cap) {
+    if (!cap) return;
+    snprintf(buf, cap, "%s", (s_enabled && s_base_url[0]) ? s_base_url : "");
+}
+
+void mod_monitor_token(char *buf, size_t cap) {
+    if (!cap) return;
+    char token[sizeof(s_token)];
+    portENTER_CRITICAL(&s_token_mux);
+    memcpy(token, s_token, sizeof(token));
+    portEXIT_CRITICAL(&s_token_mux);
+    snprintf(buf, cap, "%s", (s_enabled && token[0]) ? token : "");
 }
 
 static void stop_server(void) {
@@ -94,6 +145,7 @@ static void stop_server(void) {
     esp_wifi_set_ps(WIFI_PS_MIN_MODEM);
     if (s_bmp) { heap_caps_free(s_bmp); s_bmp = NULL; }
     s_frame_ready = false;
+    s_base_url[0] = 0;
     s_url[0] = 0;
     if (s_inject.lock) {
         xSemaphoreTake(s_inject.lock, portMAX_DELAY);
@@ -101,6 +153,44 @@ static void stop_server(void) {
         xSemaphoreGive(s_inject.lock);
     }
     ESP_LOGI(TAG, "stopped");
+}
+
+static bool token_matches(const char *candidate) {
+    if (!candidate || strlen(candidate) != MON_TOKEN_HEX) return false;
+    char expected[MON_TOKEN_HEX + 1];
+    portENTER_CRITICAL(&s_token_mux);
+    memcpy(expected, s_token, sizeof(expected));
+    portEXIT_CRITICAL(&s_token_mux);
+    if (!expected[0]) return false;
+    uint8_t diff = 0;
+    for (size_t i = 0; i < MON_TOKEN_HEX; ++i)
+        diff |= (uint8_t)candidate[i] ^ (uint8_t)expected[i];
+    return diff == 0;
+}
+
+static bool request_authorized(httpd_req_t *req) {
+    char key[40];
+    if (httpd_req_get_hdr_value_str(req, "X-Pico-Key", key, sizeof(key)) != ESP_OK) return false;
+    return token_matches(key);
+}
+
+static void private_headers(httpd_req_t *req, bool page) {
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    httpd_resp_set_hdr(req, "Referrer-Policy", "no-referrer");
+    httpd_resp_set_hdr(req, "X-Content-Type-Options", "nosniff");
+    httpd_resp_set_hdr(req, "X-Frame-Options", "DENY");
+    if (page)
+        httpd_resp_set_hdr(
+            req, "Content-Security-Policy",
+            "default-src 'none'; img-src 'self' blob:; connect-src 'self'; "
+            "style-src 'unsafe-inline'; script-src 'unsafe-inline'; "
+            "base-uri 'none'; frame-ancestors 'none'");
+}
+
+static esp_err_t deny_request(httpd_req_t *req) {
+    private_headers(req, false);
+    httpd_resp_set_status(req, "403 Forbidden");
+    return httpd_resp_sendstr(req, "forbidden");
 }
 
 static esp_err_t page_handler(httpd_req_t *req) {
@@ -121,14 +211,30 @@ static esp_err_t page_handler(httpd_req_t *req) {
         // the window and its box equals the rendered image (tap mapping depends on that). The old
         // width:100% blew a 342x608 frame up to the window width, so a desktop browser showed only
         // the top fraction and zooming out could not help because the width followed the viewport.
-        "let d=false,busy=false,mv=0,wd=0;"
-        "function g(){if(busy)return;busy=true;i.src='/screen?n='+Date.now();"
+        // 密钥放 URL #fragment，浏览器不会把它发给服务器，也不会进请求行日志；页面脚本再通过
+        // 请求头交给 /screen 与 /touch。页面本身不含隐私数据，可以公开拿到静态壳。
+        // The token lives in the URL fragment, which browsers never send to the server or request
+        // logs. The page passes it to /screen and /touch in a request header. The public static
+        // shell contains no private data.
+        "const k=new URLSearchParams(location.hash.slice(1)).get('k')||'';"
+        "let d=false,busy=false,mv=0,wd=0,obu=0;"
+        "function h(){return {'X-Pico-Key':k}}"
+        "function g(){if(busy)return;if(!/^[0-9a-f]{32}$/.test(k))"
+        "{t.textContent='key missing';return;}"
+        "busy=true;const c=new AbortController();"
+        "clearTimeout(wd);wd=setTimeout(()=>c.abort(),8000);"
+        "fetch('/screen?n='+Date.now(),{cache:'no-store',headers:h(),signal:c.signal})"
+        ".then(r=>{if(!r.ok)throw Error();return r.blob()})"
+        ".then(b=>{clearTimeout(wd);if(obu)URL.revokeObjectURL(obu);"
+        "obu=URL.createObjectURL(b);i.src=obu;})"
+        ".catch(()=>{clearTimeout(wd);busy=false;t.textContent='waiting';"
+        "setTimeout(g,1500);});"
+        "}"
         // 看门狗：请求被浏览器丢弃时既不会 onload 也不会 onerror，busy 会永久卡住不再刷新
         // （手机切后台再回来就是这样）。八秒没有结果就当作失败重来。
         // Watchdog: a discarded request fires neither onload nor onerror and leaves busy stuck, so
         // nothing refreshes any more (that is what a phone does after being backgrounded). Give up
         // after eight seconds and retry.
-        "clearTimeout(wd);wd=setTimeout(()=>{if(busy){busy=false;g();}},8000);}"
         "i.onload=()=>{clearTimeout(wd);busy=false;t.textContent='live';setTimeout(g,600);};"
         "i.onerror=()=>{clearTimeout(wd);busy=false;t.textContent='waiting';setTimeout(g,1500);};"
         "document.addEventListener('visibilitychange',"
@@ -136,7 +242,8 @@ static esp_err_t page_handler(httpd_req_t *req) {
         "function p(e){const b=i.getBoundingClientRect();return{x:Math.max(0,Math.min(683,"
         "Math.round((e.clientX-b.left)/b.width*684))),y:Math.max(0,Math.min(1215,"
         "Math.round((e.clientY-b.top)/b.height*1216)))};}"
-        "function s(a,x,y){fetch('/touch?t='+a+'&x='+x+'&y='+y).catch(()=>{});}"
+        "function s(a,x,y){fetch('/touch?t='+a+'&x='+x+'&y='+y,"
+        "{cache:'no-store',headers:h()}).catch(()=>{});}"
         "i.addEventListener('pointerdown',e=>{d=true;i.setPointerCapture(e.pointerId);"
         "const q=p(e);s(1,q.x,q.y);e.preventDefault();});"
         "i.addEventListener('pointermove',e=>{if(!d)return;const n=Date.now();"
@@ -146,9 +253,8 @@ static esp_err_t page_handler(httpd_req_t *req) {
         "i.addEventListener('contextmenu',e=>e.preventDefault());"
         "g();"
         "</script></body></html>";
-    s_last_seen_ms = esp_timer_get_time() / 1000;
     httpd_resp_set_type(req, "text/html; charset=utf-8");
-    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    private_headers(req, true);
     return httpd_resp_send(req, page, sizeof(page) - 1);
 }
 
@@ -207,23 +313,29 @@ static void build_frame(void) {
 }
 
 static esp_err_t screen_handler(httpd_req_t *req) {
+    if (!request_authorized(req)) return deny_request(req);
     // 空闲计时放在最前面：取帧失败（503）也算"有人在看"，否则一直失败 10 分钟后
     // 会被自己的空闲自动关撤掉开关。
     // Refresh the idle timer before any early return: a failing frame is still a viewer, or the
     // ten-minute idle auto-off would clear the switch on a client that is actively polling.
-    s_last_seen_ms = esp_timer_get_time() / 1000;
-    if (!s_bmp || !s_fb || !s_frame_ready) {
+    note_seen();
+    if (!s_bmp || !s_fb || !s_frame_ready || !s_bmp_lock) {
+        private_headers(req, false);
         httpd_resp_set_status(req, "503 Service Unavailable");
         return httpd_resp_sendstr(req, "frame not ready");
     }
+    xSemaphoreTake(s_bmp_lock, portMAX_DELAY);
     build_frame();
     httpd_resp_set_type(req, "image/bmp");
-    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
-    return httpd_resp_send(req, (const char *)s_bmp, (size_t)MON_BMP_SIZE);
+    private_headers(req, false);
+    const esp_err_t err = httpd_resp_send(req, (const char *)s_bmp, (size_t)MON_BMP_SIZE);
+    xSemaphoreGive(s_bmp_lock);
+    return err;
 }
 
 static esp_err_t touch_handler(httpd_req_t *req) {
-    char query[64] = "", value[16] = "";
+    if (!request_authorized(req)) return deny_request(req);
+    char query[128] = "", value[16] = "";
     if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK) goto bad;
     int type = 0, x = -1, y = -1;
     if (httpd_query_key_value(query, "t", value, sizeof(value)) == ESP_OK) type = atoi(value);
@@ -233,7 +345,7 @@ static esp_err_t touch_handler(httpd_req_t *req) {
     // 684x1216 logical space regardless of the frame resolution.
     if (x < 0 || x >= MON_LOGICAL_W || y < 0 || y >= MON_LOGICAL_H || type < 0 || type > 2) goto bad;
     if (!s_inject.lock) goto bad;
-    s_last_seen_ms = esp_timer_get_time() / 1000;
+    note_seen();
     xSemaphoreTake(s_inject.lock, portMAX_DELAY);
     if (type == 1) {
         s_inject.active = true;
@@ -246,19 +358,42 @@ static esp_err_t touch_handler(httpd_req_t *req) {
         else s_inject.up_pending = true;
     }
     xSemaphoreGive(s_inject.lock);
-    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    private_headers(req, false);
     return httpd_resp_sendstr(req, "ok");
 bad:
+    private_headers(req, false);
     httpd_resp_set_status(req, "400 Bad Request");
     return httpd_resp_sendstr(req, "bad request");
 }
 
+static void update_urls(const read_pico_transfer_status_t *st) {
+    char base[sizeof(s_base_url)] = "";
+    char token[sizeof(s_token)];
+    portENTER_CRITICAL(&s_token_mux);
+    memcpy(token, s_token, sizeof(token));
+    portEXIT_CRITICAL(&s_token_mux);
+    if (st->network_ready && !strncmp(st->url, "http://", 7) && token[0])
+        snprintf(base, sizeof(base), "%.40s:%d", st->url, MOD_MONITOR_PORT);
+    if (strcmp(base, s_base_url) != 0 || (base[0] && !s_url[0])) {
+        snprintf(s_base_url, sizeof(s_base_url), "%s", base);
+        if (base[0])
+            snprintf(s_url, sizeof(s_url), "%s/#k=%s", base, token);
+        else
+            s_url[0] = 0;
+    }
+}
+
 static void start_server(void) {
     if (s_http || s_bmp) stop_server();
+    if (!s_bmp_lock) s_bmp_lock = xSemaphoreCreateMutex();
+    if (!s_inject.lock) s_inject.lock = xSemaphoreCreateMutex();
+    if (!s_bmp_lock || !s_inject.lock) {
+        ESP_LOGW(TAG, "lock alloc failed");
+        return;
+    }
     s_bmp = heap_caps_malloc(MON_BMP_SIZE, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!s_bmp) { ESP_LOGW(TAG, "frame buffer alloc failed"); return; }
     write_bmp_header();
-    if (!s_inject.lock) s_inject.lock = xSemaphoreCreateMutex();
     httpd_config_t http = HTTPD_DEFAULT_CONFIG();
     http.server_port = MOD_MONITOR_PORT;
     http.max_uri_handlers = 4;
@@ -290,13 +425,12 @@ static void start_server(void) {
             return;
         }
     s_frame_ready = true;
-    s_last_seen_ms = esp_timer_get_time() / 1000;
+    note_seen();
     esp_wifi_set_ps(WIFI_PS_NONE);
     read_pico_transfer_status_t st;
     read_pico_transfer_get_status(&st);
-    if (st.network_ready && !strncmp(st.url, "http://", 7))
-        snprintf(s_url, sizeof(s_url), "%.40s:%d", st.url, MOD_MONITOR_PORT);
-    ESP_LOGI(TAG, "serving at %s", s_url);
+    update_urls(&st);
+    ESP_LOGI(TAG, "serving on port %d", MOD_MONITOR_PORT);
 }
 
 void mod_monitor_tick(const uint8_t *framebuffer) {
@@ -308,23 +442,23 @@ void mod_monitor_tick(const uint8_t *framebuffer) {
     read_pico_transfer_get_status(&st);
     // 空闲自动关：10 分钟没有任何网页请求就停服并撤销开关（用户要求“不用就关掉”）。
     // Idle auto-off: ten minutes without any web request stops serving and clears the switch.
-    if (s_enabled && s_http && now - s_last_seen_ms >= MOD_MONITOR_IDLE_MS) {
+    if (s_enabled && s_http && now - last_seen() >= MOD_MONITOR_IDLE_MS) {
         ESP_LOGI(TAG, "idle timeout, auto disable");
         mod_monitor_set_enabled(false);
     }
     const bool want = s_enabled && st.network_ready;
     if (want && !s_http) start_server();
     else if (!want && s_http) stop_server();
-    if (s_http && !s_url[0]) {
-        read_pico_transfer_get_status(&st);
-        if (st.network_ready && !strncmp(st.url, "http://", 7))
-            snprintf(s_url, sizeof(s_url), "%.40s:%d", st.url, MOD_MONITOR_PORT);
-    }
+    if (s_http) update_urls(&st);
 }
 
 bool mod_monitor_inject(cst836u_touch_t *touch) {
-    if (!s_inject.lock || !s_inject.active) return false;
+    if (!s_inject.lock) return false;
     xSemaphoreTake(s_inject.lock, portMAX_DELAY);
+    if (!s_inject.active) {
+        xSemaphoreGive(s_inject.lock);
+        return false;
+    }
     const bool up = s_inject.up_pending, down = s_inject.down_pending;
     const uint16_t x = s_inject.x, y = s_inject.y;
     if (down) s_inject.down_pending = false;
@@ -340,11 +474,10 @@ bool mod_monitor_inject(cst836u_touch_t *touch) {
 }
 
 void mod_monitor_init(void) {
-    nvs_handle_t h;
-    if (nvs_open(MOD_MONITOR_NVS_NS, NVS_READONLY, &h) == ESP_OK) {
-        uint8_t on = 0;
-        nvs_get_u8(h, "on", &on);
-        nvs_close(h);
-        s_enabled = on != 0;
-    }
+    s_enabled = false;
+    portENTER_CRITICAL(&s_token_mux);
+    memset(s_token, 0, sizeof(s_token));
+    portEXIT_CRITICAL(&s_token_mux);
+    s_base_url[0] = 0;
+    s_url[0] = 0;
 }

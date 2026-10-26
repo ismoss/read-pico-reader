@@ -159,7 +159,7 @@ void app_main(void) {
     const esp_reset_reason_t reset = esp_reset_reason();
     ESP_LOGI(TAG, "startup reset=%d stack=%u", (int)reset, (unsigned)uxTaskGetStackHighWaterMark(NULL));
     app_settings_init();
-    // 应用「特殊功能」里保存的 DNS 选择，赶在任何联网之前。/ Apply the saved special-features DNS pick before any networking.
+    // 应用「DNS 设置」里保存的选择，赶在任何联网之前。/ Apply the saved DNS choice before any networking.
     mod_dns_init();
     // 远程监看开关在 NVS；服务本体由主循环按联网状态起停。
     // The remote-monitor switch lives in NVS; the main loop starts/stops the server.

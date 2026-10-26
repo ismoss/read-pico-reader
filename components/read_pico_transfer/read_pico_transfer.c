@@ -526,6 +526,10 @@ static void time_wifi_event(void *arg, esp_event_base_t base, int32_t id, void *
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) xEventGroupSetBits(s_time_events, TIME_DISCONNECTED);
 }
 static transfer_connection_t s_connection;
+// A known-network switch is tentative until DHCP succeeds. Keeping it out of
+// NVS avoids making an unreachable AP the active credential after a failed join.
+static transfer_credentials_t s_pending_active;
+static bool s_pending_active_valid;
 extern const char upload_start[] asm("_binary_upload_html_start");
 extern const char upload_end[] asm("_binary_upload_html_end");
 
@@ -998,8 +1002,39 @@ static void wifi_event(void *arg, esp_event_base_t base, int32_t id, void *data)
 // Replace the DHCP-provided resolvers with public DNS so OTA and NTP keep resolving
 // when the router's DNS is unreliable or poisoned; re-applying on every got-IP self-heals renewals.
 // The main app may swap the addresses or disable the override entirely via set_dns_servers.
-static bool s_dns_override = true;
+static bool s_dns_override;
 static esp_netif_dns_info_t s_dns_main, s_dns_backup;
+static esp_netif_dns_info_t s_dhcp_dns_main, s_dhcp_dns_backup;
+static bool s_dhcp_dns_main_valid, s_dhcp_dns_backup_valid;
+
+static bool dns_v4_valid(const esp_netif_dns_info_t *dns) {
+    return dns && dns->ip.type == IPADDR_TYPE_V4 && dns->ip.u_addr.ip4.addr != 0;
+}
+
+static void capture_dhcp_dns(esp_netif_t *netif) {
+    if (!netif) return;
+    esp_netif_dns_info_t main_dns = {0}, backup_dns = {0};
+    s_dhcp_dns_main_valid =
+        esp_netif_get_dns_info(netif, ESP_NETIF_DNS_MAIN, &main_dns) == ESP_OK &&
+        dns_v4_valid(&main_dns);
+    if (s_dhcp_dns_main_valid) s_dhcp_dns_main = main_dns;
+    s_dhcp_dns_backup_valid =
+        esp_netif_get_dns_info(netif, ESP_NETIF_DNS_BACKUP, &backup_dns) == ESP_OK &&
+        dns_v4_valid(&backup_dns);
+    if (s_dhcp_dns_backup_valid) s_dhcp_dns_backup = backup_dns;
+}
+
+static void restore_dhcp_dns(esp_netif_t *netif) {
+    if (!netif) return;
+    if (s_dhcp_dns_main_valid) {
+        (void)esp_netif_set_dns_info(netif, ESP_NETIF_DNS_MAIN, &s_dhcp_dns_main);
+        // 路由器只下发主 DNS 时，用同一个地址覆盖之前留下的公共备用项。
+        // When DHCP supplies only a main resolver, replace the previous public backup with it.
+        (void)esp_netif_set_dns_info(netif, ESP_NETIF_DNS_BACKUP,
+                                     s_dhcp_dns_backup_valid ? &s_dhcp_dns_backup : &s_dhcp_dns_main);
+    }
+}
+
 static void apply_public_dns(esp_netif_t *netif) {
     if (!s_dns_override) return;
     // 未被上层改过时用默认公共对：223.5.5.5 / 119.29.29.29。
@@ -1019,7 +1054,11 @@ static void apply_public_dns(esp_netif_t *netif) {
 void read_pico_transfer_set_dns_servers(bool enable, const char *main_ip, const char *backup_ip) {
     if (enable) {
         ip4_addr_t main_addr, backup_addr;
-        if (main_ip && backup_ip && ip4addr_aton(main_ip, &main_addr) && ip4addr_aton(backup_ip, &backup_addr)) {
+        if (main_ip && backup_ip && ip4addr_aton(main_ip, &main_addr) &&
+            ip4addr_aton(backup_ip, &backup_addr) && main_addr.addr && backup_addr.addr) {
+            // 首次覆盖前留一份 DHCP 下发值，切回“跟随路由器”时立即恢复。
+            // Snapshot DHCP resolvers before the first override so router-follow can restore them at once.
+            if (s_netif && !s_dns_override) capture_dhcp_dns(s_netif);
             // esp_ip4_addr_t 与 lwip ip4_addr_t 是不同名结构，只能按字段搬运。
             // esp_ip4_addr_t and lwip's ip4_addr_t are distinct structs; move the raw field only.
             s_dns_main.ip.type = IPADDR_TYPE_V4;
@@ -1028,10 +1067,13 @@ void read_pico_transfer_set_dns_servers(bool enable, const char *main_ip, const 
             s_dns_backup.ip.u_addr.ip4.addr = backup_addr.addr;
             s_dns_override = true;
         } else {
-            // 无效地址视作关闭，保留 DHCP 结果。/ Invalid addresses mean off; keep DHCP results.
+            // 无效地址视作关闭，并恢复已经缓存的 DHCP 结果。
+            // Invalid addresses mean off and restore the cached DHCP resolvers.
+            if (s_dns_override) restore_dhcp_dns(s_netif);
             s_dns_override = false;
         }
     } else {
+        if (s_dns_override) restore_dhcp_dns(s_netif);
         s_dns_override = false;
     }
     // 网络已在时立即改写当前接口，不必等下次拿 IP。/ Rewrite the live interface now when online.
@@ -1060,6 +1102,7 @@ static void ip_event(void *arg, esp_event_base_t base, int32_t id, void *data) {
     if (id != IP_EVENT_STA_GOT_IP) return;
     ip_event_got_ip_t *event = data;
     if (event->esp_netif != s_netif) return;
+    capture_dhcp_dns(event->esp_netif);
     apply_public_dns(event->esp_netif);
     char url[64]; snprintf(url, sizeof(url), "http://" IPSTR, IP2STR(&event->ip_info.ip));
     // 记录真实关联的 SSID（不是保存的活动网络）：换环境后活动网络可能已不在场，界面要显示实际连的是哪一个。
@@ -1083,6 +1126,17 @@ static void ip_event(void *arg, esp_event_base_t base, int32_t id, void *data) {
     }
     portEXIT_CRITICAL(&s_lock);
     if (accepted) ESP_LOGI("transfer", "sta ready url=%s ssid=%s", url, live_ssid);
+    if (accepted && s_pending_active_valid && live_ssid[0] &&
+        !strcmp(live_ssid, s_pending_active.ssid)) {
+        if (store_credentials(&s_pending_active) == ESP_OK) {
+            publish_credentials(&s_pending_active);
+            ESP_LOGI("transfer", "wifi active credential committed after GOT_IP");
+        } else {
+            ESP_LOGW("transfer", "wifi active credential commit failed; retaining previous");
+        }
+        clear_secret(&s_pending_active, sizeof(s_pending_active));
+        s_pending_active_valid = false;
+    }
 }
 
 void read_pico_transfer_service_poll(void) {
@@ -2009,6 +2063,8 @@ void read_pico_transfer_stop(void) {
     memset(s_status.connected_ssid, 0, sizeof(s_status.connected_ssid));
     s_upload_active = false;
     memset(&s_connection, 0, sizeof(s_connection));
+    clear_secret(&s_pending_active, sizeof(s_pending_active));
+    s_pending_active_valid = false;
     portEXIT_CRITICAL(&s_lock);
 }
 
@@ -2244,8 +2300,8 @@ esp_err_t read_pico_transfer_start(const read_pico_transfer_cfg_t *cfg) {
             (void)esp_wifi_disconnect();
             if (pick_best_known_wifi(&wifi, &saved, &absent)) {
                 if (esp_wifi_set_config(WIFI_IF_STA, &wifi) == ESP_OK) {
-                    (void)store_credentials(&saved);
-                    publish_credentials(&saved);
+                    s_pending_active = saved;
+                    s_pending_active_valid = true;
                 }
             }
             clear_secret(&wifi, sizeof(wifi));

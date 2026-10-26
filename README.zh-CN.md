@@ -1,20 +1,22 @@
 # kiikoread
 
+> **独立下游二改：** 本仓库由 `ismoss` 维护，是 [`wegooo-cell/read-pico-reader`](https://github.com/wegooo-cell/read-pico-reader) 的下游修改版，**不是** MindReset 或上游项目的官方版本，也不代表获得其隶属、认可或支持。上游的更新日志、商店、支持渠道和 issue 区不负责本二改；运行本二改的设备请读取本分支的 `https://ismoss.github.io/read-pico-reader/update.json`，不要把上游 Release 附件当作本二改更新包。
+
 > **使用与授权：** 今后明确标注适用[个人学习许可](licenses/kiikoread-Personal-Study-1.0.txt)的新增原创内容，允许个人学习，未经单独书面授权不得商用。**此政策不重新许可 rc93 及以前的代码或固件，不撤销既有 Apache-2.0 授权，也不覆盖第三方许可。** 完整范围见 [LICENSE](LICENSE)。
 
 项目对外名称统一为 **kiikoread**，网页对设备使用「墨水屏」。保留原 GitHub 仓库网址、升级地址与备份文件名；固件界面也统一使用 kiikoread。纯白官网包含界面预览、功能介绍、版本选择、网页刷机、Bin 下载和[在线使用说明](flash/manual.html)。运行 `python3 tools/stage_public_flash.py _site` 生成公开网站，GitHub Pages 或 Cloudflare Pages 均可使用 `_site` 作为发布目录。说明书从 `docs/user-manual.zh-CN.json` 同源生成，运行 `tools/build_user_manual.py --font /path/to/a/static-CJK.ttf` 可更新 HTML 与 PDF（需要 Python ReportLab）。
-正式固件 Bin 统一保存到 [GitHub Releases](https://github.com/wegooo-cell/read-pico-reader/releases)，网站构建按清单下载并校验，不直接发布原始 flash 目录。设备优先读取 `https://kiikoread.com/update.json`，失败后回退原 GitHub 更新源。主站使用 `python3 tools/stage_public_flash.py _site --ota-origin https://kiikoread.com`；GitHub Pages 使用默认参数，保留旧固件可识别的升级地址。
+上游正式固件 Bin 保存在[上游 GitHub Releases](https://github.com/wegooo-cell/read-pico-reader/releases)，网站构建按清单下载并校验，不直接发布原始 flash 目录；这些附件不保证能直接替换本二改。本二改由 `mod-build` 工作流编译，并通过上面的自建 feed 发布。主站使用 `python3 tools/stage_public_flash.py _site --ota-origin https://kiikoread.com`；GitHub Pages 使用默认参数，保留旧固件可识别的升级地址。
 
 
-[English](README.md) · [日本語](README.ja-JP.md) · [第三方许可](THIRD_PARTY_NOTICES.md)
+[English](README.md) · [日本語](README.ja-JP.md) · [第三方许可](THIRD_PARTY_NOTICES.md) · [隐私说明](PRIVACY.md)
 
 这是为 **MindReset RDP-G01-W** 墨水屏开发板制作的独立阅读固件，源码公开，许可按上述范围分别适用。项目基于 [MindReset 官方示例固件](https://github.com/MindReset/read_pico_firmware) 开发，**并非 MindReset 官方发布**。
 
 界面包括首页、书架、文件管理和设置；可阅读 TF 卡中的 EPUB、TXT，保存阅读进度，并通过 WiFi、设备热点或 USB 传输文件。
 
-## 当前正式版：rc99
+## 上游基线：rc99
 
-基于51e7d8d：恢复系统文字抗锯齿，修复充电显示，新增单击/双击唤醒选项，统一锁屏/取消图标，阅读辅助线随文字范围裁剪，进入阅读完整清理。官网保留原rc98供回退。详见[更新日志](docs/CHANGELOG.md)。
+上游 rc99 基于 51e7d8d：恢复系统文字抗锯齿，修复充电显示，新增单击/双击唤醒选项，统一锁屏/取消图标，阅读辅助线随文字范围裁剪，进入阅读完整清理。上游官网保留原 rc98 供回退。这些是继承的上游说明，并非本二改的当前版本；更新见[更新日志](docs/CHANGELOG.md)。
 
 
 ### 阅读与低功耗更新
@@ -76,7 +78,7 @@ WiFi 和热点传书网页都有「状态栏签名」，保存或清空后写入
 
 连接按钮上方可选择最新正式版或原发布的 **rc86 / rc85**，发布时间与 TF 升级 Bin 下载跟随选择。所有版本默认保留设备数据。
 
-打开 [HTTPS 在线刷机页](https://wegooo-cell.github.io/read-pico-reader/)。在电脑端 Chrome 或 Edge 中，用支持数据传输的 USB 线连接 **RDP-G01-W 墨水屏**，选择设备串口并按提示刷入。**刷机前确认型号。**普通刷机保留设备设置、阅读记录和 TF 卡内容；固件不附带书籍或预设的阅读记录。
+[HTTPS 在线刷机页](https://wegooo-cell.github.io/read-pico-reader/)属于上游项目，安装的是上游固件，不是本二改；只有明确想回到上游版本时才使用。在电脑端 Chrome 或 Edge 中，用支持数据传输的 USB 线连接 **RDP-G01-W 墨水屏**，选择设备串口并按提示刷入。**刷机前确认型号。**普通刷机保留设备设置、阅读记录和 TF 卡内容；固件不附带书籍或预设的阅读记录。
 
 如果运行本固件的设备无法自动进入下载模式，可在设备上点击**设置 → 升级和恢复 → BOOT 刷机**，等电脑重新识别串口后再用网页刷机。
 
@@ -105,11 +107,16 @@ WiFi 和热点传书网页都有「状态栏签名」，保存或清空后写入
 需要 ESP-IDF **v6.1**，目标芯片为 ESP32-S3：
 
 ```sh
+python3 tools/prepare_tls_bundle.py "$IDF_PATH"
 idf.py set-target esp32s3
 idf.py build
 ```
 
-`sdkconfig.defaults` 使用本开发板对应的 Flash/PSRAM 时序；`sdkconfig.ci` 仅用于编译检查。硬件资料请看 [MindReset 官方文档](https://dot.mindreset.tech/docs/read_0)。预编译固件仅面向 RDP-G01-W。
+TLS 预处理只修 ESP-IDF 6.1 对“证书包生成的合成根”的有效期处理，不关闭真实证书有效期、主机名或签名校验；启用交叉签名证书包验证的构建必须先执行。`sdkconfig.defaults` 使用本开发板对应的 Flash/PSRAM 时序；`sdkconfig.ci` 仅用于编译检查。硬件资料请看 [MindReset 官方文档](https://dot.mindreset.tech/docs/read_0)。预编译固件仅面向 RDP-G01-W。
+
+## 隐私
+
+固件不包含遥测或账号服务，不会把书籍、阅读记录或设置上传到本项目。联网只用于更新检查、联网对时、可选 DNS、用户主动发起的传输和手动开启的局域网远程监看。WiFi 凭据与配置备份属于敏感数据，公开日志或备份前请先脱敏。详见[隐私说明](PRIVACY.md)。
 
 ## 书籍与字体
 

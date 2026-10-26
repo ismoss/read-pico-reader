@@ -1,10 +1,10 @@
 name: mod-build
 
 # 个人二改构建与发布：push 跑上游同款宿主回归测试并用真机时序 sdkconfig.defaults 编译；
-# 手动 dispatch 指定版本号（X.Y.Z-rcNNN，占用 rc2xx 段）时，测试+编译通过后把最小 OTA feed
+# 手动 dispatch 指定版本号（X.Y.Z-rcNNN-modM）时，测试+编译通过后把最小 OTA feed
 # （update.json + 固件 bin）部署到自己的 GitHub Pages，并做发布后线上自检。
 # Personal mod build and release: pushes run the upstream host regression suite and build with
-# the real-board sdkconfig.defaults; a manual dispatch with a version (X.Y.Z-rcNNN, rc2xx band)
+# the real-board sdkconfig.defaults; a manual dispatch with a version (X.Y.Z-rcNNN-modM)
 # additionally deploys the minimal OTA feed (update.json + app image) to our GitHub Pages after
 # tests and build pass, then verifies the live endpoints.
 # 不用 GitHub Releases 直链当下载地址：OTA 客户端禁用跟随重定向，Releases 会 302。
@@ -14,13 +14,13 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release version (X.Y.Z-rcNNN, rc2xx band, e.g. 0.3.3-rc201)'
+        description: 'Release version (X.Y.Z-rcNNN-modM, e.g. 0.3.3-rc100-mod27)'
         required: true
-        default: '0.3.3-rc201'
+        default: '0.3.3-rc100-mod27'
       notes:
         description: 'Release notes shown on the device (short)'
         required: false
-        default: '二改版：锁屏可关闭、悬浮玻璃底栏、公共DNS、自建更新源'
+        default: '二改 mod27：自动连接默认关闭、DNS 跟随路由器、监看密钥授权及稳定性修复'
   push:
     branches: [mod/glass-dock-lockoff]
 
@@ -30,6 +30,7 @@ permissions:
 jobs:
   display-host-tests:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - name: Water-turn, display recovery, navigation and waveform regressions
@@ -59,6 +60,7 @@ jobs:
           node tools/flasher_integrity_host_test.cjs
           python3 tools/vertical_punctuation_host_test.py
           python3 tools/vertical_number_host_test.py
+          python3 tools/tls_bundle_host_test.py
           cc -std=c11 -D_DEFAULT_SOURCE -Wall -Wextra -Werror -g -fsanitize=address,undefined -fno-omit-frame-pointer -Imain/book -Imain -Itools/book_layout_stubs -Itools/book_source_host_stubs tools/book_layout_host_test.c main/book/book_layout.c main/book/html_text.c -o build/book-tests/layout
           build/book-tests/layout
       - name: OTA TLS chain regression
@@ -69,18 +71,77 @@ jobs:
           python3 -m pip install --quiet --user "cryptography>=42"
           PYTHONPATH="$(python3 -m site --user-site)" python3 tools/ota_tls_host_test.py
 
+  host-management-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    container: espressif/idf:v6.1
+    steps:
+      - uses: actions/checkout@v4
+
+      # This suite compiles the transfer/OTA tests against IDF-managed components,
+      # including cJSON. Resolve the same pinned dependencies before running it.
+      - name: Resolve component dependencies
+        shell: bash
+        run: |
+          . $IDF_PATH/export.sh
+          idf.py -DSDKCONFIG_DEFAULTS=sdkconfig.ci set-target esp32s3
+
+      # The monolithic upstream management script still contains host tests for
+      # retired UI internals. Gate releases on the maintained core tests here;
+      # display, reader, lock and power regressions run in display-host-tests.
+      - name: Book, EPUB, settings and input regressions
+        shell: bash
+        run: |
+          bash tools/run_book_host_tests.sh
+          python3 tools/test_book_epub.py
+          mkdir -p build/book-tests/settings-card
+          cc -std=gnu11 -Wall -Wextra -Werror -Itools/settings_backup_stubs \
+            -Icomponents/read_pico_transfer/include \
+            tools/settings_backup_host_test.c -o build/book-tests/settings-backup
+          build/book-tests/settings-backup
+          cc -std=c11 -Wall -Wextra -Werror -Imain \
+            tools/auto_lock_host_test.c -o build/book-tests/auto-lock
+          build/book-tests/auto-lock
+          cc -std=gnu11 -Wall -Wextra -Werror -Itools/settings_backup_stubs \
+            tools/book_history_backup_host_test.c \
+            -o build/book-tests/book-history-backup
+          build/book-tests/book-history-backup
+          bash tools/run_text_input_host_tests.sh
+
+      - name: Mod-specific cache, index and monitor regressions
+        shell: bash
+        run: |
+          python3 tools/reader_landscape_host_test.py
+          python3 tools/reader_panel_landscape_host_test.py
+          python3 tools/shelf_categories_host_test.py
+          python3 tools/shelf_cover_batch_host_test.py
+          python3 tools/shelf_guard_cache_host_test.py
+          python3 tools/cover_disk_cache_host_test.py
+          python3 tools/cover_jobs_host_test.py
+          python3 tools/book_cover_resample_host_test.py
+          python3 tools/book_lock_bookmark_host_test.py
+          python3 tools/quick_layer_raster_host_test.py
+          cc -std=gnu11 -Wall -Wextra -Werror -Itools/mod_dns_stubs \
+            -Itools/ota_stubs -Imain -Imanaged_components/espressif__cjson/cJSON \
+            tools/mod_dns_host_test.c managed_components/espressif__cjson/cJSON/cJSON.c \
+            -o build/book-tests/mod-dns
+          build/book-tests/mod-dns
+          python3 tools/monitor_bmp_host_test.py
+
   mod-bin:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     container: espressif/idf:v6.1
     steps:
       - uses: actions/checkout@v4
       - name: Build with board sdkconfig.defaults
         shell: bash
         env:
-          MOD_VERSION: ${{ github.event.inputs.version || '0.3.3-rc99-mod1' }}
+          MOD_VERSION: ${{ github.event.inputs.version || '0.3.3-rc100-mod27' }}
         run: |
           . $IDF_PATH/export.sh
           export PICO_PROJECT_VER="$MOD_VERSION"
+          python3 tools/prepare_tls_bundle.py "$IDF_PATH"
           idf.py set-target esp32s3
           idf.py build
       - name: Size report
@@ -97,7 +158,7 @@ jobs:
 
   publish-ota:
     if: github.event_name == 'workflow_dispatch'
-    needs: [display-host-tests, mod-bin]
+    needs: [display-host-tests, host-management-tests, mod-bin]
     runs-on: ubuntu-latest
     permissions:
       contents: read

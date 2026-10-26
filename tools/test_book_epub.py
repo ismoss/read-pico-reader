@@ -64,6 +64,13 @@ def main():
     with tempfile.TemporaryDirectory(prefix='book-epub-') as temp:
         work = Path(temp)
         exe = work / 'test'
+        # The host-only miniz shim owns zlib's inflate state inside a value that mirrors
+        # ROM miniz. Prefix probes intentionally stop before STREAM_END, so the zlib
+        # allocation cannot be released through the production miniz API. Suppress only
+        # leaks rooted in libz while keeping leak detection for firmware-owned allocations.
+        lsan = work / 'lsan.supp'
+        lsan.write_text('leak:libz.so\n', encoding='ascii')
+        test_env = dict(os.environ, LSAN_OPTIONS=f'suppressions={lsan}')
         subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror', '-g', '-fsanitize=address,undefined',
                         '-I' + str(ROOT / 'tools/book_epub_stubs'), '-I' + str(ROOT / 'tools/zip_host_stubs'),
                         '-I' + str(ROOT / 'main/book'), str(ROOT / 'tools/book_epub_host_test.c'),
@@ -262,7 +269,7 @@ def main():
         case('bad_multiroot', replace_opf('</package>', '</package><extra/>'))
         case('bad_spine_limit', replace_opf('<itemref idref="c1"/>', '<itemref idref="c1"/>' * 8193))
         case('bad_container', lambda f: f.__setitem__('META-INF/container.xml', '<container><rootfile full-path="../../escape.opf"/></container>'))
-        subprocess.run([str(exe)] + [str(p) for p in sorted((ROOT / 'build/book-fixtures/books').glob('*.epub'))] + [str(p) for p in cases], check=True)
+        subprocess.run([str(exe)] + [str(p) for p in sorted((ROOT / 'build/book-fixtures/books').glob('*.epub'))] + [str(p) for p in cases], check=True, env=test_env)
 
         large = work / 'long_5000.epub'
         make_large_book(large)
@@ -274,7 +281,7 @@ def main():
                         str(ROOT / 'main/book/html_text.c'), str(ROOT / 'main/book/book_index_cache.c'),
                         str(ROOT / 'main/book/book_image_header.c'),
                         '-lz', '-o', str(large_exe)], check=True)
-        subprocess.run([str(large_exe), str(large)], check=True)
+        subprocess.run([str(large_exe), str(large)], check=True, env=test_env)
 
 
 if __name__ == '__main__':

@@ -94,7 +94,6 @@ typedef enum { SETTINGS_MAIN, SETTINGS_WIFI, SETTINGS_TIME,
                SETTINGS_LOCK_PIN, SETTINGS_PIN_ENTRY, SETTINGS_TEXT_EDIT, SETTINGS_SPECIAL,
                SETTINGS_MONITOR } settings_page_t;
 static settings_page_t s_page;
-static bool s_dns_fetch_pending;  // 特殊功能页的在线 DNS 列表请求 / online DNS list request on the special page
 static bool s_monitor_url_shown;  // 监看地址是否已绘上屏（出现/消失触发重绘）/ whether the monitor address has been painted
 static int settings_content_end(void) {
     return UI_NAV_REFRESH_END;
@@ -971,7 +970,7 @@ static bool monitor_qr_draw(uint8_t *fb, int cx, int cy, const char *url) {
 }
 // 地址是否已可用（开关开着且服务器已在网）。/ Whether the address is live (switch on, server online).
 static bool monitor_url_ready(void) {
-    char url[64];
+    char url[96];
     mod_monitor_url(url, sizeof(url));
     return mod_monitor_enabled() && url[0];
 }
@@ -1291,25 +1290,28 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
         back_header(fb, "远程监看");
         section(fb, 248, "局域网看屏与触摸");
         row(fb, 292, "远程监看", mod_monitor_enabled() ? "已开启" : "已关闭");
-        char url[64]; mod_monitor_url(url, sizeof(url));
+        char url[96], base[48], token[40];
+        mod_monitor_url(url, sizeof(url));
+        mod_monitor_base_url(base, sizeof(base));
+        mod_monitor_token(token, sizeof(token));
         if (mod_monitor_enabled() && url[0]) {
-            // 二维码 + 大字地址：扫码或输入均可进入；地址首次出现时 on_tick 会自动重绘本页。
-            // QR plus a large address: scan or type to enter; on_tick repaints this page once
-            // the address first appears.
-            if (monitor_qr_draw(fb, 342, 480, url)) {
-                ui_text_fixed_vc(fb, 342, 620, 30, url, EPD_DRAW_ALIGN_CENTER, false);
-            } else {
-                ui_text_fixed_vc(fb, 342, 480, 30, url, EPD_DRAW_ALIGN_CENTER, false);
-            }
-            ui_text_fixed_vc(fb, 342, 678, 22, "浏览器打开或扫码：看实时画面并点按操作，每秒刷新。",
+            // 二维码内含完整一次性地址；屏上把服务地址与密钥分开，避免长 URL 溢出。
+            // The QR carries the complete session URL; the screen separates service URL and
+            // token so the long authenticated URL does not overflow.
+            monitor_qr_draw(fb, 342, 480, url);
+            ui_text_fixed_vc(fb, 342, 620, 28, base, EPD_DRAW_ALIGN_CENTER, false);
+            char key_line[64];
+            snprintf(key_line, sizeof(key_line), "本次密钥  %s", token);
+            ui_text_fixed_vc(fb, 342, 662, 23, key_line, EPD_DRAW_ALIGN_CENTER, false);
+            ui_text_fixed_vc(fb, 342, 702, 20, "扫码打开，或在地址后加 #k=密钥；每秒刷新。",
                              EPD_DRAW_ALIGN_CENTER, false);
         } else if (mod_monitor_enabled()) {
             ui_text_fixed_vc(fb, 342, 440, 22, "已开启；设备联网后，地址和二维码显示在这里。",
                              EPD_DRAW_ALIGN_CENTER, false);
         }
-        ui_text_fixed_vc(fb, 342, 720, 21, "仅建议可信局域网使用；无密码保护，不用时请关闭开关。",
+        ui_text_fixed_vc(fb, 342, 746, 21, "密钥仅本次开机有效；重启即关闭，十分钟无人访问也会关闭。",
                          EPD_DRAW_ALIGN_CENTER, false);
-        if (s_notice[0]) ui_text_fixed_vc(fb, 342, 762, 22, s_notice, EPD_DRAW_ALIGN_CENTER, false);
+        if (s_notice[0]) ui_text_fixed_vc(fb, 342, 788, 22, s_notice, EPD_DRAW_ALIGN_CENTER, false);
         settings_navigation(fb);
         return;
     }
@@ -1634,7 +1636,7 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
                   display_icons,display_labels,display_values,SETTINGS_DISPLAY_ROWS);
     snprintf(signature,sizeof(signature),"%s",app_settings_status_signature()[0]?app_settings_status_signature():"未设置");
     const char *personal_labels[]={"书架样式","锁屏样式","锁屏密码","状态栏签名","DNS 设置"};
-    char dns_value[32]; snprintf(dns_value,sizeof(dns_value),"%s",mod_dns_entry(mod_dns_saved_index())->name);
+    char dns_value[32]; snprintf(dns_value,sizeof(dns_value),"%s",mod_dns_saved_name());
     const char *personal_values[]={app_settings_shelf_style()==5?"列表书架":app_settings_shelf_style()==1?"深色书轨":"亚克力书架",
         app_settings_lock_style()==3?"透明书封":app_settings_lock_style()==2?"书架拼贴":app_settings_lock_style()==1?"壁纸":"阅读票根",
         lock_pin_enabled()?"已开启":"已关闭",signature,dns_value};
@@ -1788,14 +1790,13 @@ static app_redraw_t on_tick(app_ctx_t *ctx) {
         s_monitor_url_shown = monitor_url_ready();
         return APP_REDRAW_PAGE;
     }
-    if (s_dns_fetch_pending && s_page == SETTINGS_SPECIAL) {
-        // 页面已把“正在获取”提示推上屏，这里阻塞完成联网与解析后一次性回报结果。
-        // The hint page is already presented; this blocking pass finishes networking and parsing, then reports once.
-        s_dns_fetch_pending = false;
+    {
         char notice[80];
-        mod_dns_fetch_online(notice, sizeof(notice));
-        snprintf(s_notice, sizeof(s_notice), "%s", notice);
-        return APP_REDRAW_PAGE;
+        mod_dns_fetch_state_t fetch = mod_dns_fetch_online_poll(notice, sizeof(notice));
+        if (fetch == MOD_DNS_FETCH_DONE || fetch == MOD_DNS_FETCH_FAILED) {
+            snprintf(s_notice, sizeof(s_notice), "%s", notice);
+            return s_page == SETTINGS_SPECIAL ? APP_REDRAW_PAGE : APP_REDRAW_NONE;
+        }
     }
     if (s_page == SETTINGS_PIN_ENTRY) return pin_setup_tick(ctx);
     if (s_collage_prepare_pending && s_page == SETTINGS_LOCK_STYLE) {
@@ -2328,18 +2329,20 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         return APP_REDRAW_NONE;
     }
     if (s_page == SETTINGS_SPECIAL) {
-        // 卡片带与渲染的 84px 间距一致；刷新行走 on_tick 阻塞联网，先画提示再取列表。
-        // Card bands mirror the 84 px render pitch; the refresh row defers to a blocking on_tick fetch after painting the hint.
+        // 卡片带与渲染的 84px 间距一致；刷新行只启动后台下载，结果由 on_tick 取回并换表。
+        // Card bands mirror the 84 px render pitch; the refresh row starts a background download that on_tick applies later.
         const int pitch = 84;
         int count = mod_dns_count();
         if (count > 8) count = 8;
         if (y >= 292 && y < 292 + count * pitch) {
-            if (mod_dns_select((y - 292) / pitch)) return APP_REDRAW_PAGE;
-            return APP_REDRAW_NONE;
+            if (mod_dns_select((y - 292) / pitch)) s_notice[0] = 0;
+            else snprintf(s_notice, sizeof(s_notice), "保存失败，请重试");
+            return APP_REDRAW_PAGE;
         }
         if (y >= 292 + count * pitch + 8 && y < 292 + count * pitch + 84) {
-            s_dns_fetch_pending = true;
-            snprintf(s_notice, sizeof(s_notice), "正在联网获取 DNS 列表…");
+            char notice[80];
+            mod_dns_fetch_online_start(notice, sizeof(notice));
+            snprintf(s_notice, sizeof(s_notice), "%s", notice);
             return APP_REDRAW_PAGE;
         }
         return APP_REDRAW_NONE;

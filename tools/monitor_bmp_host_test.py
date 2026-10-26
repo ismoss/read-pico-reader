@@ -8,10 +8,19 @@ import re
 import subprocess
 import tempfile
 ROOT = Path(__file__).resolve().parents[1]
-monitor = (ROOT / 'main/mod_monitor.c').read_text()
+monitor = (ROOT / 'main/mod_monitor.c').read_text(encoding='utf-8')
+# 每个受保护接口都必须先过同一个会话密钥；页面脚本也要把密钥带到取图和触摸请求。
+# Every protected endpoint must pass the same session token first, and the page script must
+# carry it into frame and touch requests.
+assert monitor.count('if (!request_authorized(req)) return deny_request(req);') == 2
+assert "location.hash.slice(1)" in monitor
+assert "fetch('/screen?n='" in monitor
+assert "fetch('/touch?t='" in monitor
+assert '"X-Pico-Key", key' in monitor
+assert '"Referrer-Policy", "no-referrer"' in monitor
 
 def function(name, text):
-    m = re.search(r'^static [^\n(]*\b' + re.escape(name) + r'\s*\([^\n]*', text, re.M)
+    m = re.search(r'^(?:static )?[^\n(]*\b' + re.escape(name) + r'\s*\([^\n]*', text, re.M)
     assert m, name
     start = m.start()
     depth = 0
@@ -38,15 +47,42 @@ unit = r'''
 #define MON_STRIDE ((MON_W + 3) & ~3)
 #define MON_BMP_HEADER 1078
 #define MON_BMP_SIZE (MON_BMP_HEADER + (size_t)MON_STRIDE * MON_H)
+#define MON_TOKEN_HEX 32
+typedef int portMUX_TYPE;
+#define portMUX_INITIALIZER_UNLOCKED 0
+#define portENTER_CRITICAL(lock) ((void)(lock))
+#define portEXIT_CRITICAL(lock) ((void)(lock))
 static uint8_t *s_bmp;
 static const uint8_t *s_fb;
+static char s_token[MON_TOKEN_HEX + 1];
+static portMUX_TYPE s_token_mux __attribute__((unused)) = portMUX_INITIALIZER_UNLOCKED;
+static bool s_enabled;
+static char s_base_url[48];
+static char s_url[96];
 '''
 unit += function('write_bmp_header', monitor) + '\n'
 unit += function('build_frame', monitor) + '\n'
+unit += function('token_matches', monitor) + '\n'
+unit += function('mod_monitor_init', monitor) + '\n'
 unit += r'''
 static uint32_t le32(const uint8_t *p) { return p[0] | p[1] << 8 | p[2] << 16 | (uint32_t)p[3] << 24; }
 
 int main(void){
+    s_enabled = true;
+    strcpy(s_token, "0123456789abcdef0123456789abcdef");
+    strcpy(s_base_url, "http://192.168.1.2:8123");
+    strcpy(s_url, "http://192.168.1.2:8123/#k=secret");
+    mod_monitor_init();
+    assert(!s_enabled && !s_token[0] && !s_base_url[0] && !s_url[0]);
+
+    strcpy(s_token, "0123456789abcdef0123456789abcdef");
+    assert(token_matches("0123456789abcdef0123456789abcdef"));
+    assert(!token_matches("0123456789abcdef0123456789abcdee"));
+    assert(!token_matches("0123456789abcdef0123456789abcdef0"));
+    assert(!token_matches(""));
+    s_token[0] = 0;
+    assert(!token_matches("0123456789abcdef0123456789abcdef"));
+
     // 合成帧缓冲：每个字节可预测，像素断言才能对照期望值。
     // A synthetic framebuffer with predictable bytes so pixel assertions have expectations.
     static uint8_t fb[684 * 608];
@@ -105,7 +141,7 @@ int main(void){
         assert(bmp[1078 + (size_t)(607 - iy) * 344 + ix] == gray);
     }
     free(bmp);
-    puts("PASS: monitor BMP header fields, gray palette and half-res pixel transform");
+    puts("PASS: authenticated monitor routes, constant-time token match, BMP header fields, gray palette and half-res pixel transform");
     return 0;
 }
 '''

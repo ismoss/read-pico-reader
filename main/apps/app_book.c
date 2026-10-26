@@ -5342,12 +5342,19 @@ static bool shelf_backfill_read_books(bool* truncated) {
 }
 
 static void shelf_scan_abort(void) {
-    if (!s_scan.active) return;
-    s_scan.active = false;
-    scan_dir_end();
-    if (s_scan.favorites) { nvs_close(s_scan.favorites); s_scan.favorites = 0; }
-    if (s_scan.hidden) { nvs_close(s_scan.hidden); s_scan.hidden = 0; }
-    s_scan.root_count = s_scan.root_index = 0;
+    if (s_scan.active) {
+        s_scan.active = false;
+        scan_dir_end();
+        if (s_scan.favorites) { nvs_close(s_scan.favorites); s_scan.favorites = 0; }
+        if (s_scan.hidden) { nvs_close(s_scan.hidden); s_scan.hidden = 0; }
+        s_scan.root_count = s_scan.root_index = 0;
+    }
+    // A cancelled shadow pass owns a complete second list; release it instead of
+    // retaining the old card-sized allocation until the next scan.
+    if (s_shelf_next) free(s_shelf_next);
+    s_shelf_next = NULL;
+    s_shelf_next_capacity = 0;
+    s_count_next = 0;
 }
 
 static void shelf_scan_begin(app_ctx_t *ctx, bool shadow) {
@@ -5444,6 +5451,9 @@ static void shelf_scan_finalize(app_ctx_t *ctx) {
         s_shelf_next_capacity = 0;
         s_count = s_count_next;
         s_count_next = 0;
+        // Backfill below must target the newly committed visible list, not the
+        // old shadow array that has just been detached.
+        s_scan.shadow = false;
     }
     // 补齐书根目录之外读过的书；显式移出书架的除外。
     // Backfill books read outside the roots, minus the ones removed from the shelf.

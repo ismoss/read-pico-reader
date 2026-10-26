@@ -41,6 +41,9 @@
 #define NVS_KEY_SHUTDOWN_MODE "shutdown"
 #define NVS_KEY_WAKE_PRESSES "wake_press"
 #define NVS_KEY_DNS_INDEX "dns_idx"
+#define NVS_KEY_DNS_NAME "dns_name"
+#define NVS_KEY_DNS_MAIN "dns_main"
+#define NVS_KEY_DNS_BACKUP "dns_bkup"
 #define NVS_KEY_PIN_GRACE "pin_grace"
 #define NVS_KEY_PIN_LOCK_AT "pin_lck_at"
 #define NVS_KEY_HOME_FULL "home_full"
@@ -100,7 +103,11 @@
 static app_sleep_mode_t s_sleep = APP_SLEEP_DEEP;
 static bool s_staged_shutdown;
 static uint8_t s_wake_presses = 1;
-static uint8_t s_dns_index = 1;  // 二改特殊功能：DNS 选择序号 / mod special-features DNS pick
+static uint8_t s_dns_index;  // 二改 DNS 设置：默认跟随路由器 / mod DNS settings: router passthrough by default
+static bool s_dns_choice_saved;
+static char s_dns_name[32];
+static char s_dns_main[16];
+static char s_dns_backup[16];
 static uint8_t s_pin_grace_minutes;  // 密码宽限期分钟数，0 关闭 / PIN grace minutes, 0=off
 static uint32_t s_pin_locked_at;     // 最近一次带密码锁屏的 unix 秒 / last PIN-enabled lock, unix seconds
 static bool s_home_full_refresh;
@@ -140,7 +147,9 @@ static bool s_reader_vertical_turn;
 // In-book landscape: 0 portrait, 1/2 the two holding directions; body only, shelf and panels stay portrait.
 static uint8_t s_reader_landscape;
 static bool s_ble_turner;
-static bool s_wifi_auto = true;
+// Automatic Wi-Fi reconnect is opt-in on new devices. Existing users retain the
+// persisted value loaded below, so an upgrade never silently changes their choice.
+static bool s_wifi_auto;
 static bool s_shelf_recent_sort;
 // 书内自带字体默认开启：多数带字体的书排版就是靠它才对得上版。
 // Embedded book faces are on by default: most books that ship a face only typeset correctly
@@ -219,8 +228,25 @@ void app_settings_init(void) {
     // the PIN page or the previous page; the switch itself stays available.
     if (raw == 2) { raw = 1; nvs_put_u8(NVS_KEY_WAKE_PRESSES, 1); }
     s_wake_presses = raw;
-    raw = 1;
+    s_dns_index = 0;
+    s_dns_choice_saved = false;
+    s_dns_name[0] = 0;
+    s_dns_main[0] = 0;
+    s_dns_backup[0] = 0;
+    raw = 0;
     if (nvs_get_u8(h, NVS_KEY_DNS_INDEX, &raw) == ESP_OK && raw < MOD_DNS_MAX) s_dns_index = raw;
+    char saved_dns[32];
+    size_t saved_dns_len = sizeof(saved_dns);
+    if (nvs_get_str(h, NVS_KEY_DNS_NAME, saved_dns, &saved_dns_len) == ESP_OK) {
+        strlcpy(s_dns_name, saved_dns, sizeof(s_dns_name));
+        saved_dns_len = sizeof(s_dns_main);
+        if (nvs_get_str(h, NVS_KEY_DNS_MAIN, s_dns_main, &saved_dns_len) == ESP_OK) {
+            saved_dns_len = sizeof(s_dns_backup);
+            if (nvs_get_str(h, NVS_KEY_DNS_BACKUP, s_dns_backup, &saved_dns_len) != ESP_OK)
+                s_dns_backup[0] = 0;
+            s_dns_choice_saved = true;
+        }
+    }
     raw = 0;
     if (nvs_get_u8(h, NVS_KEY_PIN_GRACE, &raw) == ESP_OK && raw <= 4) s_pin_grace_minutes = raw;
     s_pin_locked_at = 0;
@@ -333,7 +359,7 @@ void app_settings_init(void) {
         s_reader_keys[2] == APP_READER_KEY_NEXT;
     uint8_t vertical_turn = 0;
     if (nvs_get_u8(h, NVS_KEY_VERTICAL_TURN, &vertical_turn) == ESP_OK) s_reader_vertical_turn = vertical_turn == 1;
-    uint8_t hide_images = 0, recent_sort = 0, ble_turner = 0, book_fonts = 1, book_vertical = 0, wifi_auto = 1;
+    uint8_t hide_images = 0, recent_sort = 0, ble_turner = 0, book_fonts = 1, book_vertical = 0, wifi_auto = 0;
     if (nvs_get_u8(h, NVS_KEY_HIDE_IMAGES, &hide_images) == ESP_OK) s_reader_hide_images = hide_images == 1;
     if (nvs_get_u8(h, NVS_KEY_BLE_TURNER, &ble_turner) == ESP_OK) s_ble_turner = ble_turner == 1;
     if (nvs_get_u8(h, NVS_KEY_WIFI_AUTO, &wifi_auto) == ESP_OK) s_wifi_auto = wifi_auto == 1;
@@ -435,14 +461,37 @@ void app_settings_set_wake_presses(uint8_t presses) {
     s_wake_presses = presses;
     nvs_put_u8(NVS_KEY_WAKE_PRESSES, presses);
 }
-// 二改「特殊功能」的 DNS 选择：0 跟随路由器，1 默认公共对，2 起列表序号；越界按 1 处理。
-// Mod special-features DNS choice: 0 router passthrough, 1 default public pair, 2+ list index; out-of-range reads as 1.
-uint8_t app_settings_dns_index(void) { return s_dns_index < MOD_DNS_MAX ? s_dns_index : 1; }
-void app_settings_set_dns_index(uint8_t index) {
-    if (index >= MOD_DNS_MAX) index = 1;
-    if (index == s_dns_index) return;
+// 二改「DNS 设置」的兼容序号：默认 0 跟随路由器，越界也回到路由器。
+// Mod DNS settings compatibility index: default and out-of-range value mean router passthrough.
+uint8_t app_settings_dns_index(void) { return s_dns_index < MOD_DNS_MAX ? s_dns_index : 0; }
+bool app_settings_dns_pair_known(void) { return s_dns_choice_saved; }
+void app_settings_dns_choice(char *name, size_t name_cap, char *main_ip, size_t main_cap,
+                             char *backup_ip, size_t backup_cap) {
+    if (name && name_cap) strlcpy(name, s_dns_name, name_cap);
+    if (main_ip && main_cap) strlcpy(main_ip, s_dns_main, main_cap);
+    if (backup_ip && backup_cap) strlcpy(backup_ip, s_dns_backup, backup_cap);
+}
+esp_err_t app_settings_set_dns_choice(uint8_t index, const char *name, const char *main_ip,
+                                      const char *backup_ip) {
+    if (index >= MOD_DNS_MAX || !name || !main_ip || !backup_ip ||
+        strlen(name) >= sizeof(s_dns_name) || strlen(main_ip) >= sizeof(s_dns_main) ||
+        strlen(backup_ip) >= sizeof(s_dns_backup)) return ESP_ERR_INVALID_ARG;
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(NVS_NS, NVS_READWRITE, &h);
+    if (err != ESP_OK) return err;
+    err = nvs_set_u8(h, NVS_KEY_DNS_INDEX, index);
+    if (err == ESP_OK) err = nvs_set_str(h, NVS_KEY_DNS_NAME, name);
+    if (err == ESP_OK) err = nvs_set_str(h, NVS_KEY_DNS_MAIN, main_ip);
+    if (err == ESP_OK) err = nvs_set_str(h, NVS_KEY_DNS_BACKUP, backup_ip);
+    if (err == ESP_OK) err = nvs_commit(h);
+    nvs_close(h);
+    if (err != ESP_OK) return err;
     s_dns_index = index;
-    nvs_put_u8(NVS_KEY_DNS_INDEX, index);
+    strlcpy(s_dns_name, name, sizeof(s_dns_name));
+    strlcpy(s_dns_main, main_ip, sizeof(s_dns_main));
+    strlcpy(s_dns_backup, backup_ip, sizeof(s_dns_backup));
+    s_dns_choice_saved = true;
+    return ESP_OK;
 }
 // 密码宽限期：只在合法档位间切换；修改密码相关设置不重置计时，下一次锁屏自然刷新。
 // PIN grace toggles only between valid steps; changing settings does not reset the timer,
