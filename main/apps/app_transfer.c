@@ -586,6 +586,8 @@ static app_redraw_t network_ui_tick(app_ctx_t* ctx) {
             }
             snprintf(s_network_message, sizeof(s_network_message), "连接成功");
         }
+        else if (s_status.state == READ_PICO_TRANSFER_STARTING)
+            snprintf(s_network_message, sizeof(s_network_message), "正在连接…");
         else if (s_status.state == READ_PICO_TRANSFER_ERROR)
             snprintf(s_network_message, sizeof(s_network_message), "连不上 %s；换一个网络连一次，之后会自动切换",
                      s_saved_ssid);
