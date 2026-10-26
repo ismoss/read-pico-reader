@@ -117,7 +117,11 @@ int main(int argc,char **argv){
    if(x<584||x>=648||y<76||y>=146)assert(ui_read_pixel(frame,x,y)==ui_read_pixel(saved,x,y));
   for(int policy=0;policy<3;++policy){
    patterned();int before=allocs;ui_quick_menu_draw(frame,true,false,false);
-   assert(allocs==before+7&&live==1&&current_bytes==23328&&peak_bytes<=170856);int grays=0;
+   // 基线来自 rc98 的玻璃/控件缓存（此前是 rc96 的 23328B 单层）；超了就在这里报实际值再断言。
+   // Baseline follows the rc98 glass/control cache (rc96 kept a single 23328B layer); print the actuals before failing.
+   if(!(allocs==before+7&&live==2&&current_bytes==113616&&peak_bytes<=203688))
+    fprintf(stderr,"quick layer memory: allocs=%d live=%d current=%zu peak=%zu\n",allocs-before,live,(size_t)current_bytes,(size_t)peak_bytes);
+   assert(allocs==before+7&&live==2&&current_bytes==113616&&peak_bytes<=203688);int grays=0;
    for(int y=0;y<epd_rotated_display_height();++y)for(int x=0;x<epd_rotated_display_width();++x){
     bool mask=y<76||(x>=18&&x<666&&y>=88&&y<256);
     uint8_t p=pixel(frame,x,y);
@@ -149,7 +153,7 @@ int main(int argc,char **argv){
      assert(!memcmp(frame,again,BYTES));
     }
    }
-   assert(allocs==input_allocs&&current_bytes==23328);
+   assert(allocs==input_allocs&&current_bytes==113616);
    ui_quick_menu_end();ui_quick_menu_end();assert(!live&&!current_bytes);
 
   }
@@ -304,7 +308,7 @@ int main(int argc,char **argv){
   ui_quick_menu_end();assert(!live&&!current_bytes);
  }
  ui_quick_menu_end();assert(!live&&!current_bytes);
- puts("PASS: actual liquid-glass quick layer bounds temporary PSRAM to 170856 bytes; 23328-byte control cache frees on close, 80 local press/release and status changes allocate nothing and exactly restore artwork; grayscale in all modes, four rotations, deterministic rendering and every allocation failure; 12 navigation presses preserve gray backgrounds/labels/marker/neighbors in all modes; click cache <=4096 bytes restores exact pixels, ignores prefetch and tolerates OOM; Han scaling retains native bits and smooths enlarged edges");
+ puts("PASS: actual liquid-glass quick layer bounds temporary PSRAM to 203688 bytes; the 113616-byte rc98 glass/control cache frees on close, 80 local press/release and status changes allocate nothing and exactly restore artwork; grayscale in all modes, four rotations, deterministic rendering and every allocation failure; 12 navigation presses preserve gray backgrounds/labels/marker/neighbors in all modes; click cache <=4096 bytes restores exact pixels, ignores prefetch and tolerates OOM; Han scaling retains native bits and smooths enlarged edges");
  return 0;
 }
 '''
