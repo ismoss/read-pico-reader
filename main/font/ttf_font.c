@@ -669,10 +669,14 @@ int ttf_font_scan(void) {
             if (name[0] == '\0' || catalog_has_name(s_catalog, s_catalog_n, name)) {
                 continue;
             }
-            snprintf(
+            // 超过目录项容量的路径写不完整，直接跳过——半截路径既读不到文件也会覆盖下一条。
+            // A path longer than the catalog slot cannot be stored; skip it instead of keeping a
+            // truncated name (it would read nothing and could collide with the following entry).
+            int stored = snprintf(
                 s_catalog[s_catalog_n].path, sizeof(s_catalog[s_catalog_n].path),
                 "%s/%s", font_dir, ent->d_name
             );
+            if (stored < 0 || (size_t)stored >= sizeof(s_catalog[0].path)) continue;
             strlcpy(s_catalog[s_catalog_n].name, name, sizeof(s_catalog[0].name));
             s_catalog_n++;
         }
