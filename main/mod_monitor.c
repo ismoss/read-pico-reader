@@ -110,22 +110,24 @@ static esp_err_t page_handler(httpd_req_t *req) {
         "<title>Pico</title><style>body{margin:0;background:#1c1c1c;color:#ddd;"
         "font-family:sans-serif;text-align:center}#s{width:100%;touch-action:none;"
         "image-rendering:pixelated}#t{font-size:13px;padding:6px}</style></head><body>"
-        "<div id=t>...</div><img id=s src=\"/screen\">"
+        "<div id=t>...</div><img id=s alt=\"\">"
         "<script>const i=document.getElementById('s'),t=document.getElementById('t');"
-        "let d=false,l=0;function r(){const n=Date.now();if(n-l<350)return;l=n;"
-        "i.onload=()=>t.textContent='live';i.onerror=()=>t.textContent='waiting';"
-        "i.src='/screen?n='+n;}setInterval(r,900);r();"
+        "let d=false,busy=false,mv=0;"
+        "function g(){if(busy)return;busy=true;i.src='/screen?n='+Date.now();}"
+        "i.onload=()=>{busy=false;t.textContent='live';setTimeout(g,600);};"
+        "i.onerror=()=>{busy=false;t.textContent='waiting';setTimeout(g,1500);};"
         "function p(e){const b=i.getBoundingClientRect();return{x:Math.max(0,Math.min(683,"
         "Math.round((e.clientX-b.left)/b.width*684))),y:Math.max(0,Math.min(1215,"
         "Math.round((e.clientY-b.top)/b.height*1216)))};}"
-        "function s(a,x,y){fetch('/touch?t='+a+'&x='+x+'&y='+y).then(r);}"
+        "function s(a,x,y){fetch('/touch?t='+a+'&x='+x+'&y='+y).catch(()=>{});}"
         "i.addEventListener('pointerdown',e=>{d=true;i.setPointerCapture(e.pointerId);"
         "const q=p(e);s(1,q.x,q.y);e.preventDefault();});"
-        "i.addEventListener('pointermove',e=>{if(!d)return;const q=p(e);s(2,q.x,q.y);"
-        "e.preventDefault();});"
+        "i.addEventListener('pointermove',e=>{if(!d)return;const n=Date.now();"
+        "if(n-mv<80)return;mv=n;const q=p(e);s(2,q.x,q.y);e.preventDefault();});"
         "i.addEventListener('pointerup',e=>{if(!d)return;d=false;const q=p(e);"
         "s(0,q.x,q.y);e.preventDefault();});"
         "i.addEventListener('contextmenu',e=>e.preventDefault());"
+        "g();"
         "</script></body></html>";
     s_last_seen_ms = esp_timer_get_time() / 1000;
     httpd_resp_set_type(req, "text/html; charset=utf-8");
@@ -144,6 +146,13 @@ static esp_err_t page_handler(httpd_req_t *req) {
 static void write_bmp_header(void) {
     uint8_t *h = s_bmp;
     const uint32_t body = (uint32_t)MON_STRIDE * MON_H, file = MON_BMP_HEADER + body;
+    // 先把 54 字节头整块清零：biPlanes(26-27) 与 biBitCount(28-29) 是 16 位字段，
+    // 下面只写低字节，高字节若留着 malloc 的脏数据（实测 0xFF），头就变成
+    // biPlanes=0xFF01 / biBitCount=0xFF08，任何解码器都判非法——浏览器只表现为破图。
+    // Zero the whole 54-byte header first: biPlanes (26-27) and biBitCount (28-29) are 16-bit
+    // fields written low byte only below, so leftover malloc garbage (0xFF measured on device)
+    // turned them into 0xFF01 / 0xFF08 and every decoder rejected the file as a broken image.
+    memset(h, 0, 54);
     h[0] = 'B'; h[1] = 'M';
     for (int i = 0; i < 4; ++i) h[2 + i] = (uint8_t)(file >> (8 * i));   // 文件大小 / file size
     for (int i = 6; i < 10; ++i) h[i] = 0;                               // 保留位 / reserved
@@ -181,11 +190,15 @@ static void build_frame(void) {
 }
 
 static esp_err_t screen_handler(httpd_req_t *req) {
+    // 空闲计时放在最前面：取帧失败（503）也算"有人在看"，否则一直失败 10 分钟后
+    // 会被自己的空闲自动关撤掉开关。
+    // Refresh the idle timer before any early return: a failing frame is still a viewer, or the
+    // ten-minute idle auto-off would clear the switch on a client that is actively polling.
+    s_last_seen_ms = esp_timer_get_time() / 1000;
     if (!s_bmp || !s_fb || !s_frame_ready) {
         httpd_resp_set_status(req, "503 Service Unavailable");
         return httpd_resp_sendstr(req, "frame not ready");
     }
-    s_last_seen_ms = esp_timer_get_time() / 1000;
     build_frame();
     httpd_resp_set_type(req, "image/bmp");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
@@ -232,7 +245,12 @@ static void start_server(void) {
     httpd_config_t http = HTTPD_DEFAULT_CONFIG();
     http.server_port = MOD_MONITOR_PORT;
     http.max_uri_handlers = 4;
-    http.max_open_sockets = 2;
+    // 浏览器对一个 host 最多开 6 条连接：2 条时页面、图片、触摸三路会互相把在途响应
+    // 挤掉（LRU 关闭），表现为图片半截/闪烁。4 条留余量，仍远低于 LWIP_MAX_SOCKETS(10) - 3。
+    // A browser opens up to six connections per host: with two, the page, the image and the
+    // touch calls evict each other's in-flight responses (LRU close) as half-sent frames.
+    // Four leaves headroom and stays well under LWIP_MAX_SOCKETS(10) - 3.
+    http.max_open_sockets = 4;
     http.stack_size = 8192;
     http.recv_wait_timeout = 10;
     http.send_wait_timeout = 20;

@@ -53,7 +53,10 @@ int main(void){
     for (int i = 0; i < (int)sizeof fb; ++i) fb[i] = (uint8_t)(i * 7 + 3);
     uint8_t *bmp = malloc(MON_BMP_SIZE);
     assert(bmp);
-    memset(bmp, 0xAA, MON_BMP_SIZE);
+    // 用 0xFF 预填充模拟最坏情况：设备上 heap_caps_malloc 的 PSRAM 脏数据正是全 0xFF。
+    // Prefill with 0xFF to mimic the worst case: the PSRAM garbage behind heap_caps_malloc on
+    // the device is exactly all-ones.
+    memset(bmp, 0xFF, MON_BMP_SIZE);
     s_fb = fb;
     s_bmp = bmp;
     write_bmp_header();
@@ -65,7 +68,28 @@ int main(void){
     assert(le32(bmp + 14) == 40);                                // biSize
     assert(le32(bmp + 18) == 342 && le32(bmp + 22) == 608);      // 宽高 / dims
     assert(bmp[26] == 1 && bmp[28] == 8);                        // planes / bpp
+    // 16 位字段必须整字段写：只写低字节会把脏数据留在高字节（设备实测 biPlanes=0xFF01、
+    // biBitCount=0xFF08），浏览器把整张图判为非法而只显示破图。
+    // The 16-bit fields must be written whole: a low-byte-only write keeps garbage in the high
+    // byte (measured on device as biPlanes=0xFF01, biBitCount=0xFF08) and browsers reject the
+    // image outright.
+    assert(bmp[27] == 0 && bmp[29] == 0);
+    assert((bmp[26] | bmp[27] << 8) == 1 && (bmp[28] | bmp[29] << 8) == 8);
     for (int i = 30; i < 54; ++i) assert(bmp[i] == 0);           // 压缩等 / compression etc.
+    // 整块 54 字节头做金标准比对：任何遗漏字段都会在这里现形，不再靠逐条挑选断言。
+    // Golden compare of the whole 54-byte header: any unwritten field shows up here instead of
+    // depending on hand-picked assertions.
+    uint8_t want[54] = {0};
+    want[0] = 'B'; want[1] = 'M';
+    for (int i = 0; i < 4; ++i) {
+        want[2 + i]  = (uint8_t)((uint32_t)MON_BMP_SIZE >> (8 * i));
+        want[10 + i] = (uint8_t)(1078 >> (8 * i));
+        want[14 + i] = (uint8_t)(40 >> (8 * i));
+        want[18 + i] = (uint8_t)(342 >> (8 * i));
+        want[22 + i] = (uint8_t)(608 >> (8 * i));
+    }
+    want[26] = 1; want[28] = 8;
+    for (int i = 0; i < 54; ++i) assert(bmp[i] == want[i]);
     for (int i = 0; i < 256; ++i) {                              // 灰阶调色板 / gray palette
         assert(bmp[54 + i * 4] == i && bmp[55 + i * 4] == i && bmp[56 + i * 4] == i && bmp[57 + i * 4] == 0);
     }
