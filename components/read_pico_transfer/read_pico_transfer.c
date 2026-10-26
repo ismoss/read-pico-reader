@@ -772,12 +772,79 @@ bool read_pico_transfer_take_time_sync(uint32_t *utc_seconds) {
     return *utc_seconds != 0;
 }
 
+// 在当前已启动的驱动上扫描并转成 UI 记录；不 init/deinit 驱动，调用方保证 radio 已 start。
+// 换环境重连时的选网扫描与"已联网进配网页"的列表扫描都走这里。
+// Scan on an already-started driver and translate the records for the UI. It never inits or
+// deinits the driver; callers guarantee the radio is up. Both the reconnection pick and the
+// nearby-network list shown while online go through here.
+static esp_err_t scan_records_collect(read_pico_transfer_network_t out[READ_PICO_TRANSFER_SCAN_MAX],
+                                      size_t *count, const char **stage) {
+    esp_err_t err = esp_wifi_scan_start(NULL, true);
+    if (err != ESP_OK) {
+        // Recover once from a transient hosted-radio state instead of making the
+        // user leave the page and re-enter it.
+        ESP_LOGW("transfer", "wifi scan first attempt: %s", esp_err_to_name(err));
+        (void)esp_wifi_scan_stop();
+        (void)esp_wifi_clear_ap_list();
+        vTaskDelay(pdMS_TO_TICKS(180));
+        err = esp_wifi_scan_start(NULL, true);
+    }
+    if (err != ESP_OK) return err;
+    uint16_t found = 0;
+    *stage = "scan-count";
+    err = esp_wifi_scan_get_ap_num(&found); if (err != ESP_OK) return err;
+    if (!found) return ESP_OK;
+    // Fetch the result list exactly once. Repeated get_ap_record calls are
+    // unreliable with remote WiFi and keep driver-side scan memory alive.
+    // The driver returns scan records in signal-strength order. The UI only
+    // exposes READ_PICO_TRANSFER_SCAN_MAX entries, so never reserve a larger
+    // temporary list. Keep it in PSRAM to leave scarce internal RAM available
+    // to the hosted WiFi control path.
+    uint16_t capacity = found > READ_PICO_TRANSFER_SCAN_MAX ? READ_PICO_TRANSFER_SCAN_MAX : found;
+    wifi_ap_record_t *records = heap_caps_calloc(
+        capacity, sizeof(*records), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!records) records = heap_caps_calloc(capacity, sizeof(*records), MALLOC_CAP_8BIT);
+    if (!records) return ESP_ERR_NO_MEM;
+    *stage = "scan-results";
+    err = esp_wifi_scan_get_ap_records(&capacity, records);
+    if (err != ESP_OK) { heap_caps_free(records); return err; }
+    for (uint16_t i = 0; i < capacity; ++i) {
+        const wifi_ap_record_t *ap = &records[i];
+        read_pico_transfer_network_t item = {.rssi = ap->rssi, .authmode = (uint8_t)ap->authmode,
+            .requires_password = ap->authmode != WIFI_AUTH_OPEN && ap->authmode != WIFI_AUTH_OWE};
+        memcpy(item.ssid, ap->ssid, sizeof(item.ssid) - 1);
+        item.supported = ap->authmode == WIFI_AUTH_OPEN || ap->authmode == WIFI_AUTH_WPA2_PSK ||
+            ap->authmode == WIFI_AUTH_WPA_WPA2_PSK || ap->authmode == WIFI_AUTH_WPA3_PSK ||
+            ap->authmode == WIFI_AUTH_WPA2_WPA3_PSK;
+        scan_offer(out, count, &item);
+    }
+    heap_caps_free(records);
+    return ESP_OK;
+}
+
 esp_err_t read_pico_transfer_scan_wifi(read_pico_transfer_network_t out[READ_PICO_TRANSFER_SCAN_MAX], size_t *count) {
     if (!cancel_time_sync(true)) return ESP_ERR_INVALID_STATE;
     if (!out || !count) return ESP_ERR_INVALID_ARG;
     memset(out, 0, sizeof(*out) * READ_PICO_TRANSFER_SCAN_MAX); *count = 0;
     read_pico_transfer_status_t status;
     read_pico_transfer_get_status(&status);
+    // 二改：已有运行中的会话（已联网时进配网页）就直接在现网 radio 上扫，不重复 init 驱动、不停会话。
+    // mod19 及以前这里一律拒绝，页面上只能看到"扫描失败"，列表永远是空的。
+    // Mod: when a session is already running (opening provisioning while online), scan on the live
+    // radio instead of re-initialising the driver or stopping the session. Until now this was
+    // rejected outright, so the page could only show "scan failed" and the list stayed empty.
+    if (s_wifi && s_started) {
+        if (!claim_config()) return ESP_ERR_INVALID_STATE;
+        const char *live_stage = "scan";
+        esp_err_t live_err = scan_records_collect(out, count, &live_stage);
+        release_config();
+        if (live_err != ESP_OK) {
+            ESP_LOGW("transfer", "wifi live scan failed stage=%s result=%s", live_stage, esp_err_to_name(live_err));
+            memset(out, 0, sizeof(*out) * READ_PICO_TRANSFER_SCAN_MAX); *count = 0;
+        }
+        ESP_LOGI("transfer", "wifi live scan result=%s count=%u", esp_err_to_name(live_err), (unsigned)*count);
+        return live_err;
+    }
     if (s_wifi || s_http || s_netif || status.state != READ_PICO_TRANSFER_STOPPED) return ESP_ERR_INVALID_STATE;
     if (!claim_config()) return ESP_ERR_INVALID_STATE;
     esp_err_t err = ble_pt_network_acquire();
@@ -822,47 +889,8 @@ esp_err_t read_pico_transfer_scan_wifi(read_pico_transfer_network_t out[READ_PIC
     // Hosted WiFi may need one scheduler turn after start before accepting scan RPCs.
     vTaskDelay(pdMS_TO_TICKS(120));
     stage = "scan";
-    err = esp_wifi_scan_start(NULL, true);
-    if (err != ESP_OK) {
-        // Recover once from a transient hosted-radio state instead of making the
-        // user leave the page and re-enter it.
-        ESP_LOGW("transfer", "wifi scan first attempt: %s", esp_err_to_name(err));
-        (void)esp_wifi_scan_stop();
-        (void)esp_wifi_clear_ap_list();
-        vTaskDelay(pdMS_TO_TICKS(180));
-        err = esp_wifi_scan_start(NULL, true);
-    }
+    err = scan_records_collect(out, count, &stage);
     if (err != ESP_OK) goto cleanup;
-    uint16_t found = 0;
-    stage = "scan-count";
-    err = esp_wifi_scan_get_ap_num(&found); if (err != ESP_OK) goto cleanup;
-    if (found) {
-        // Fetch the result list exactly once. Repeated get_ap_record calls are
-        // unreliable with remote WiFi and keep driver-side scan memory alive.
-        // The driver returns scan records in signal-strength order. The UI only
-        // exposes READ_PICO_TRANSFER_SCAN_MAX entries, so never reserve a larger
-        // temporary list. Keep it in PSRAM to leave scarce internal RAM available
-        // to the hosted WiFi control path.
-        uint16_t capacity = found > READ_PICO_TRANSFER_SCAN_MAX ? READ_PICO_TRANSFER_SCAN_MAX : found;
-        wifi_ap_record_t *records = heap_caps_calloc(
-            capacity, sizeof(*records), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-        if (!records) records = heap_caps_calloc(capacity, sizeof(*records), MALLOC_CAP_8BIT);
-        if (!records) { err = ESP_ERR_NO_MEM; goto cleanup; }
-        stage = "scan-results";
-        err = esp_wifi_scan_get_ap_records(&capacity, records);
-        if (err != ESP_OK) { heap_caps_free(records); goto cleanup; }
-        for (uint16_t i = 0; i < capacity; ++i) {
-            const wifi_ap_record_t *ap = &records[i];
-            read_pico_transfer_network_t item = {.rssi = ap->rssi, .authmode = (uint8_t)ap->authmode,
-                .requires_password = ap->authmode != WIFI_AUTH_OPEN && ap->authmode != WIFI_AUTH_OWE};
-            memcpy(item.ssid, ap->ssid, sizeof(item.ssid) - 1);
-            item.supported = ap->authmode == WIFI_AUTH_OPEN || ap->authmode == WIFI_AUTH_WPA2_PSK ||
-                ap->authmode == WIFI_AUTH_WPA_WPA2_PSK || ap->authmode == WIFI_AUTH_WPA3_PSK ||
-                ap->authmode == WIFI_AUTH_WPA2_WPA3_PSK;
-            scan_offer(out, count, &item);
-        }
-        heap_caps_free(records);
-    }
 cleanup:
     if (err != ESP_OK) {
         ESP_LOGE("transfer", "wifi scan failed stage=%s result=%s internal free=%u largest=%u",
@@ -942,6 +970,7 @@ static void wifi_event(void *arg, esp_event_base_t base, int32_t id, void *data)
             disconnected = true;
             connection_lost(&s_connection, now);
             s_status.network_ready = false; s_status.url[0] = 0;
+            memset(s_status.connected_ssid, 0, sizeof(s_status.connected_ssid));
             if (s_status.state != READ_PICO_TRANSFER_UPLOADING && !s_connection.failed)
                 s_status.state = READ_PICO_TRANSFER_STARTING;
         }
@@ -1018,6 +1047,7 @@ static void ip_event(void *arg, esp_event_base_t base, int32_t id, void *data) {
         if (reconnect) {
             connection_lost(&s_connection, now);
             s_status.network_ready = false; s_status.url[0] = 0;
+            memset(s_status.connected_ssid, 0, sizeof(s_status.connected_ssid));
             if (s_status.state != READ_PICO_TRANSFER_UPLOADING) s_status.state = READ_PICO_TRANSFER_STARTING;
         }
         portEXIT_CRITICAL(&s_lock);
@@ -1032,16 +1062,27 @@ static void ip_event(void *arg, esp_event_base_t base, int32_t id, void *data) {
     if (event->esp_netif != s_netif) return;
     apply_public_dns(event->esp_netif);
     char url[64]; snprintf(url, sizeof(url), "http://" IPSTR, IP2STR(&event->ip_info.ip));
+    // 记录真实关联的 SSID（不是保存的活动网络）：换环境后活动网络可能已不在场，界面要显示实际连的是哪一个。
+    // Record the really associated SSID (not the saved active one): after moving between places the
+    // active network can be absent, and the UI must show which one is actually live.
+    char live_ssid[33] = {0};
+    wifi_ap_record_t ap = {0};
+    if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
+        memcpy(live_ssid, ap.ssid, sizeof(ap.ssid));
+        live_ssid[sizeof(live_ssid) - 1] = 0;
+    }
     portENTER_CRITICAL(&s_lock);
     bool accepted = !s_stopping && !s_connection.failed;
     if (accepted) {
         s_connection.online = true; s_connection.pending = false;
         s_status.network_ready = true; strcpy(s_status.url, url);
+        memset(s_status.connected_ssid, 0, sizeof(s_status.connected_ssid));
+        if (live_ssid[0]) memcpy(s_status.connected_ssid, live_ssid, sizeof(s_status.connected_ssid) - 1);
         s_status.last_error = ESP_OK;
         if (s_status.state != READ_PICO_TRANSFER_UPLOADING) s_status.state = READ_PICO_TRANSFER_READY;
     }
     portEXIT_CRITICAL(&s_lock);
-    if (accepted) ESP_LOGI("transfer", "sta ready url=%s", url);
+    if (accepted) ESP_LOGI("transfer", "sta ready url=%s ssid=%s", url, live_ssid);
 }
 
 void read_pico_transfer_service_poll(void) {
@@ -1065,6 +1106,23 @@ void read_pico_transfer_service_poll(void) {
         if (err != ESP_OK) {
             portENTER_CRITICAL(&s_lock);
             connection_lost(&s_connection, now); s_status.last_error = err;
+            portEXIT_CRITICAL(&s_lock);
+        }
+    }
+    // 兜底：个别 hosted 后端在 got-IP 事件里拿不到关联信息，联网后在这里补一次，
+    // 以便界面始终能显示真实连上的网络（而不是保存的那个）。
+    // Fallback: some hosted backends cannot report the association inside the got-IP event, so
+    // fill it from the poll while online and keep the UI's "current network" truthful.
+    read_pico_transfer_status_t snap;
+    portENTER_CRITICAL(&s_lock); snap = s_status; portEXIT_CRITICAL(&s_lock);
+    if (snap.network_ready && !snap.connected_ssid[0]) {
+        wifi_ap_record_t ap = {0};
+        if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK && ap.ssid[0]) {
+            portENTER_CRITICAL(&s_lock);
+            if (s_status.network_ready && !s_status.connected_ssid[0]) {
+                memcpy(s_status.connected_ssid, ap.ssid, sizeof(s_status.connected_ssid) - 1);
+                s_status.connected_ssid[sizeof(s_status.connected_ssid) - 1] = 0;
+            }
             portEXIT_CRITICAL(&s_lock);
         }
     }
@@ -1948,6 +2006,7 @@ void read_pico_transfer_stop(void) {
     portENTER_CRITICAL(&s_lock);
     s_status.state = READ_PICO_TRANSFER_STOPPED; s_status.sta_count = 0;
     s_status.network_ready = false; s_status.url[0] = 0;
+    memset(s_status.connected_ssid, 0, sizeof(s_status.connected_ssid));
     s_upload_active = false;
     memset(&s_connection, 0, sizeof(s_connection));
     portEXIT_CRITICAL(&s_lock);
@@ -1973,10 +2032,10 @@ static bool pick_best_known_wifi(wifi_config_t *wifi, transfer_credentials_t *ac
     wifi_scan_config_t scan = {0};
     if (esp_wifi_scan_start(&scan, true) != ESP_OK) return false;
     uint16_t count = 0;
-    if (esp_wifi_scan_get_ap_num(&count) != ESP_OK || !count) return false;
+    if (esp_wifi_scan_get_ap_num(&count) != ESP_OK || !count) { (void)esp_wifi_clear_ap_list(); return false; }
     wifi_ap_record_t *records = malloc((size_t)count * sizeof(*records));
     if (!records) { esp_wifi_clear_ap_list(); return false; }
-    if (esp_wifi_scan_get_ap_records(&count, records) != ESP_OK) { free(records); return false; }
+    if (esp_wifi_scan_get_ap_records(&count, records) != ESP_OK) { free(records); esp_wifi_clear_ap_list(); return false; }
     bool active_seen = false;
     transfer_credentials_t best = {0};
     int best_rssi = -128;
@@ -1992,6 +2051,7 @@ static bool pick_best_known_wifi(wifi_config_t *wifi, transfer_credentials_t *ac
         } else clear_secret(&net, sizeof(net));
     }
     free(records);
+    esp_wifi_clear_ap_list();
     bool change = !active_seen && best.version == 1 && strcmp(best.ssid, active->ssid);
     if (change) {
         clear_secret(active, sizeof(*active));
@@ -2084,7 +2144,13 @@ esp_err_t read_pico_transfer_start(const read_pico_transfer_cfg_t *cfg) {
     err = esp_wifi_set_storage(WIFI_STORAGE_RAM); if (err != ESP_OK) goto fail;
     err = esp_wifi_set_mode(cfg->mode == READ_PICO_TRANSFER_MODE_AP ? WIFI_MODE_AP : WIFI_MODE_STA); if (err != ESP_OK) goto fail;
     err = esp_wifi_set_config(cfg->mode == READ_PICO_TRANSFER_MODE_AP ? WIFI_IF_AP : WIFI_IF_STA, &wifi); if (err != ESP_OK) goto fail;
-    clear_secret(&wifi, sizeof(wifi)); clear_secret(&saved, sizeof(saved));
+    // wifi 里的明文已交给驱动，可立即清零；saved 必须活到选网之后——它既是"活动网络"也是选网输入。
+    // 在选网之前清 saved 会让 pick_best_known_wifi 直接返回 false，这正是 mod4~mod19 里
+    // "多网自动切换"从未生效的根因（代码在，功能是死的）。
+    // The plaintext in wifi already lives in the driver; saved must outlive the known-network pick:
+    // wiping it earlier makes pick_best_known_wifi return false immediately, which is exactly why
+    // auto-switching never worked from mod4 through mod19 — the code was there, the path was dead.
+    clear_secret(&wifi, sizeof(wifi));
     if (!cfg->network_only) {
         s_buffer = heap_caps_malloc(16384, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         if (!s_buffer) { err = ESP_ERR_NO_MEM; goto fail; }
@@ -2147,12 +2213,21 @@ esp_err_t read_pico_transfer_start(const read_pico_transfer_cfg_t *cfg) {
         set_error(ESP_OK);
         ESP_LOGI("transfer", "ap ready url=%s", READ_PICO_TRANSFER_URL);
     } else {
-        if (pick_best_known_wifi(&wifi, &saved)) {
-            if (esp_wifi_set_config(WIFI_IF_STA, &wifi) == ESP_OK) {
-                (void)store_credentials(&saved);
-                publish_credentials(&saved);
+        // 二改：只有"换环境重连"的路径才做选网扫描（阻塞数秒，普通启动不付这个代价）。
+        // 活动网络不在场就切到在场信号最强的已知网络，并把活动凭据改成它（下次开机直接连）。
+        // Mod: only reconnection paths scan the known library (a blocking scan that a plain start
+        // must not pay). When the active network is absent, switch to the strongest known one in
+        // range and make it the active credential so the next boot connects straight to it.
+        if (cfg->prefer_known) {
+            (void)esp_wifi_disconnect();
+            if (pick_best_known_wifi(&wifi, &saved)) {
+                if (esp_wifi_set_config(WIFI_IF_STA, &wifi) == ESP_OK) {
+                    (void)store_credentials(&saved);
+                    publish_credentials(&saved);
+                }
             }
         }
+        clear_secret(&saved, sizeof(saved));
         int64_t now = esp_timer_get_time() / 1000;
         portENTER_CRITICAL(&s_lock); connection_begin(&s_connection, now); portEXIT_CRITICAL(&s_lock);
         read_pico_transfer_service_poll();

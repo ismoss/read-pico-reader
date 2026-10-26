@@ -35,6 +35,11 @@ typedef enum {
 typedef struct {
     read_pico_transfer_mode_t mode; ///< 网络模式，默认热点 / Network mode, default AP
     bool network_only; ///< 仅连接已有 WiFi，不启动上传服务或访问存储 / Connect saved WiFi without upload server or storage
+    /// 二改：启动前按已知网络库扫描选优（活动网络不在场就换在场最强的已知网络）。
+    /// 只在重连/换环境的路径开启：扫描会阻塞数秒，普通启动不应付出这个代价。
+    /// Mod: scan the known-network library before connecting and switch when the active network
+    /// is absent. Only reconnection paths enable it; a plain start must not pay the scan cost.
+    bool prefer_known;
     const char *root_dir; ///< 已挂载根目录，start 内复制 / Mounted root, copied by start
     bool is_flash; ///< 内置存储标志 / Internal storage flag
     size_t file_limit; ///< 单文件上限，零表示不限 / Per-file limit, zero means unlimited
@@ -61,6 +66,12 @@ typedef struct {
     bool network_ready; ///< 已取得可用网络地址 / Usable network address acquired
     unsigned sta_count; ///< 连接数 / Station count
     char ssid[33]; ///< 热点名称 / AP name
+    /// 二改：真实关联上的网络名（STA 拿到地址时填入，断开即清空）。
+    /// 与 wifi_ssid（保存的活动网络）区分：换环境后二者会不同，界面必须显示这一个。
+    /// Mod: the SSID actually associated (filled on got-IP, cleared on disconnect). Distinct
+    /// from wifi_ssid (the saved active network); after moving between places they differ and
+    /// the UI must show this one.
+    char connected_ssid[33];
     char cur_name[241]; ///< 完整 UTF-8 文件名 / Complete UTF-8 filename
     size_t cur_bytes; ///< 已接收字节 / Received bytes
     size_t cur_total; ///< 本次总字节 / Request total bytes

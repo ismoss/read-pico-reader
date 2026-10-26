@@ -37,6 +37,7 @@
 
 #include "app.h"
 #include "app_font_context.h"
+#include "app_transfer_mode.h"
 #include "book_cover.h"
 #include "book_lock_collage.h"
 #include "book_lock_bookmark.h"
@@ -700,27 +701,50 @@ static void auto_connect_after_unlock(void) {
     if (status.state != READ_PICO_TRANSFER_STOPPED && !stuck) return;
     if (stuck) read_pico_transfer_stop();
     if (read_pico_transfer_get_saved_wifi(ssid, &configured) != ESP_OK || !configured) return;
-    read_pico_transfer_cfg_t cfg = {.mode = READ_PICO_TRANSFER_MODE_STA, .network_only = true};
+    // prefer_known：换环境重连时先扫描已知网络库，活动网络不在场就换在场最强的那个。
+    // 这是"到公司自动连上公司 WiFi"的关键——普通启动不扫（省时间与电）。
+    // prefer_known: reconnections scan the known library first and switch when the active network
+    // is absent. This is what makes arriving somewhere else join that place's WiFi by itself.
+    read_pico_transfer_cfg_t cfg = {.mode = READ_PICO_TRANSFER_MODE_STA, .network_only = true,
+                                    .prefer_known = true};
     if (read_pico_transfer_start(&cfg) == ESP_OK) ESP_LOGI(TAG, "auto-connect after unlock");
 }
 
-// 主循环低速兜底：解锁触发的自动连网之外，未连接且栈空闲时每 3 分钟再试一次，
-// 体验对齐手机（换环境后不用解锁也会慢慢回到已保存网络）。
-// A slow loop-side fallback beyond the unlock trigger: while disconnected and idle, retry
-// every three minutes so a changed place rejoins a saved network without needing an unlock.
+// 主循环低速兜底：未连接时自动重连，体验对齐手机（换环境后不用解锁也会回到已保存网络）。
+// 二改要点：
+//   ①连接彻底失败（ERROR）当轮立刻重试一次——只有这一轮会带着扫描换到在场的其他已知网络，
+//     这是"到公司自动连上公司 WiFi"的触发点；
+//   ②之后按 45s→90s→180s 退避，别把射频起停做成死循环耗电，也别每 3 分钟才动一次；
+//   ③用户主动断开或正停在配网页时不打扰。
+// A loop-side fallback that mirrors a phone: retry immediately when a round fails (that is the
+// round that can scan and switch to another known network, which is how arriving at the office
+// joins the office WiFi), then back off 45s→90s→180s instead of spinning the radio, and stay
+// away while the user disconnected on purpose or sits on the provisioning page.
 void app_wifi_auto_connect_idle_check(void) {
     static int64_t s_next_try_ms;
+    static unsigned s_backoff_ms;
     const int64_t now = esp_timer_get_time() / 1000;
-    if (now < s_next_try_ms) return;
-    s_next_try_ms = now + 180000;
     read_pico_transfer_status_t status;
     read_pico_transfer_get_status(&status);
-    // 在线、启动中、接收中、USB 读卡会话里都不打扰；只兜底 ERROR 卡死态。
-    // Leave online, starting, receiving and USB sessions alone; only the stuck ERROR state
-    // gets the restart.
-    if (status.state == READ_PICO_TRANSFER_READY && status.network_ready) return;
+    if (status.state == READ_PICO_TRANSFER_READY && status.network_ready) {
+        s_backoff_ms = 0;                    // 在线：清退避，只做三分钟一次的慢速巡检
+        s_next_try_ms = now + 180000;
+        return;
+    }
+    // 正在连接或正在接收：让当前这一轮跑完，不改排期。
     if (status.state == READ_PICO_TRANSFER_STARTING || status.state == READ_PICO_TRANSFER_UPLOADING) return;
-    if (usb_storage_active()) return;
+    if (usb_storage_active() || app_transfer_wifi_auto_connect_blocked()) {
+        s_next_try_ms = now + 5000;
+        return;
+    }
+    if (now < s_next_try_ms) return;
+    if (status.state == READ_PICO_TRANSFER_ERROR) {
+        // 本轮第一次失败立刻换网，并把下一次排到 45 秒后；再失败就逐级退避。
+        s_next_try_ms = now + (s_backoff_ms ? s_backoff_ms : 45000);
+        s_backoff_ms = s_backoff_ms >= 180000 ? 180000 : s_backoff_ms ? s_backoff_ms * 2 : 45000;
+    } else {
+        s_next_try_ms = now + 180000;
+    }
     auto_connect_after_unlock();
 }
 

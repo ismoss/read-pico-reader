@@ -75,6 +75,12 @@ static bool s_qr_url, s_qr_ready;
 static char s_usb_message[96];
 static bool s_usb_requested, s_wifi_setup_requested, s_wifi_settings_only;
 static bool s_wifi_upload_requested, s_hotspot_requested, s_direct_entry, s_usb_entry;
+// 二改：用户在网络上点"断开"后，后台兜底不再自动把它连回来（等同手机的"关掉 WiFi"）；
+// 手动连接/保存会解除。RAM 标志，重启或深睡冷启动即恢复自动连接。
+// Mod: after the user taps "disconnect", the loop-side fallback stops reconnecting it (the
+// phone-like "turn WiFi off"); a manual connect/save releases it. RAM only — a reboot or a
+// cold deep-sleep start restores auto-connect.
+static bool s_user_disconnect_hold;
 static bool s_usb_start_pending;
 static int64_t s_usb_retry_ms;
 static bool s_usb_host_connected;
@@ -175,6 +181,16 @@ typedef enum { TRANSFER_METHODS, TRANSFER_HOME, TRANSFER_NETWORKS, TRANSFER_PASS
 #define NETWORK_ROWS 4
 #define PASSWORD_MAX 64
 static transfer_view_t s_view;
+
+// 二改：主循环的自动回连先问这里——用户主动断开、或正停在配网/密码页时不要抢无线，
+// 否则会出现"刚断开又被连回来""输密码时后台占着栈导致保存失败"。
+// Mod: the loop-side auto-reconnect asks here first. Never grab the radio while the user
+// disconnected on purpose or is on the provisioning / password page; otherwise the link bounces
+// back right after a manual disconnect and a background session breaks the credential save.
+bool app_transfer_wifi_auto_connect_blocked(void) {
+    if (s_user_disconnect_hold) return true;
+    return s_wifi_settings_only && (s_view == TRANSFER_NETWORKS || s_view == TRANSFER_PASSWORD);
+}
 static read_pico_transfer_network_t s_networks[READ_PICO_TRANSFER_SCAN_MAX], s_selected;
 static size_t s_network_count, s_network_page;
 static bool s_scan_pending, s_network_connect_pending, s_saved_configured, s_password_visible, s_forget_confirm;
@@ -316,19 +332,34 @@ static void draw_networks(uint8_t* fb) {
     EpdRect current = {36, 224, 612, 154};
     ui_fill_round_rect(fb, current, 22, UI_GRAY_WHITE);
     network_border(fb, current, 22);
-    if (s_saved_configured) {
-        char saved[40]; snprintf(saved, sizeof(saved), "%s", s_saved_ssid); fit_label(saved, 29, 375);
+    // 卡片只显示"实际关联上的网络"。活动凭据（保存的那一个）在换环境后可能根本不在场，
+    // 继续把它当"当前网络"显示，正是此前"到了公司仍显示家里 WiFi"的来源。
+    // The card shows the network actually associated. The saved active credential can be absent
+    // after moving places; showing it as "current" is what made the old page claim the home
+    // network was still connected at the office.
+    const char *live = s_status.network_ready && s_status.connected_ssid[0] ? s_status.connected_ssid : NULL;
+    if (live || s_saved_configured) {
+        char title[40];
+        snprintf(title, sizeof(title), "%s", live ? live : "尚未连接");
+        fit_label(title, 29, 375);
         ui_nav_wifi_icon(fb, 74, 265, 28, UI_GRAY_BLACK);
-        ui_text(fb, 104, 243, 29, saved, EPD_DRAW_ALIGN_LEFT, false);
-        const char *state = s_status.network_ready ? "已连接" :
-            s_network_connect_pending || s_status.state == READ_PICO_TRANSFER_STARTING ? "正在连接…" : "已保存 · 尚未连接";
+        ui_text(fb, 104, 243, 29, title, EPD_DRAW_ALIGN_LEFT, false);
+        char state[96];
+        if (live) snprintf(state, sizeof(state), "已连接");
+        else if (s_network_connect_pending || s_status.state == READ_PICO_TRANSFER_STARTING)
+            snprintf(state, sizeof(state), "正在连接 %s…", s_saved_ssid);
+        else if (s_status.state == READ_PICO_TRANSFER_ERROR)
+            snprintf(state, sizeof(state), "连不上 %s", s_saved_ssid);
+        else snprintf(state, sizeof(state), "上次使用 %s", s_saved_ssid);
+        fit_label(state, 23, 400);
         ui_text(fb, 64, 297, 23, state, EPD_DRAW_ALIGN_LEFT, false);
         char address[80];
         const char *url = !strncmp(s_status.url, "http://", 7) ? s_status.url + 7 : s_status.url;
-        snprintf(address, sizeof(address), "%.79s", s_status.network_ready ? url[0] ? url : "已连接，可传书和对时" : "连接后可传书和对时");
+        snprintf(address, sizeof(address), "%.79s", live ? url[0] ? url : "已连接，可传书和对时"
+                                                             : "在下方列表里选一个网络连接");
         fit_label(address, 21, 419);
         ui_text(fb, 64, 336, 21, address, EPD_DRAW_ALIGN_LEFT, false);
-        network_button(fb, 6, s_status.network_ready ? "断开" : "连接", !s_status.network_ready);
+        network_button(fb, 6, live ? "断开" : "连接", !live);
         if (s_pressed == 11) ui_draw_pressed_round_rect(fb, network_control_rect(11), 14);
         ui_text_vc(fb, 563, 341, 21, "遗忘网络", EPD_DRAW_ALIGN_CENTER, false);
     } else {
@@ -409,6 +440,7 @@ static void draw_password(uint8_t* fb) {
 
 static void queue_network_start(read_pico_transfer_mode_t mode) {
     s_mode = mode;
+    s_user_disconnect_hold = false;
     s_qr_url = mode == READ_PICO_TRANSFER_MODE_STA;
     clear_qr();
     s_view = s_wifi_settings_only ? TRANSFER_NETWORKS : TRANSFER_HOME;
@@ -423,7 +455,9 @@ static void queue_network_start(read_pico_transfer_mode_t mode) {
     snprintf(s_saved_ssid, sizeof(s_saved_ssid), "%s", s_status.wifi_ssid);
     if (s_wifi_settings_only) {
         s_network_connect_pending = true;
-        snprintf(s_network_message, sizeof(s_network_message), "正在连接 %s…", s_status.wifi_ssid);
+        // 活动网络可能不在场，实际连上的可能是附近另一个已保存网络，所以不点名。
+        // The active network may be absent; the pick can join another saved one, so don't name it.
+        snprintf(s_network_message, sizeof(s_network_message), "正在连接…");
     } else s_start_pending = true;
 }
 
@@ -463,12 +497,43 @@ static bool start_hotspot_service(void) {
 static app_redraw_t network_ui_tick(app_ctx_t* ctx) {
     if (s_view != TRANSFER_NETWORKS || s_forget_confirm || ctx->consumed) return APP_REDRAW_NONE;
     if (s_network_connect_pending) {
+        // 启动可能含一次选网扫描（阻塞数秒）；"正在连接…"已由上一轮 present 上屏。
+        // The start may include a blocking known-network scan; the notice was already presented.
         s_network_connect_pending = false;
-        read_pico_transfer_cfg_t cfg = {.mode = READ_PICO_TRANSFER_MODE_STA, .network_only = true};
+        // 二改：手动连接也走"在场最优已知网络"——活动网络可能已经不在场（换环境后按"连接"），
+        // 选网只在这种情况下扫描，其余零额外开销。
+        // Mod: manual connect also goes through the best-known pick, because the active network may
+        // be gone after a change of place. The pick scans only when that is the case.
+        read_pico_transfer_cfg_t cfg = {.mode = READ_PICO_TRANSFER_MODE_STA, .network_only = true,
+                                        .prefer_known = true};
         esp_err_t err = read_pico_transfer_start(&cfg);
         s_session_started = err == ESP_OK;
         read_pico_transfer_get_status(&s_status);
         if (err != ESP_OK) snprintf(s_network_message, sizeof(s_network_message), "连接启动失败，请重试");
+        return APP_REDRAW_PAGE;
+    }
+    // 扫描先于状态轮询：进页面就该看到附近网络；已联网（READY）也允许扫，只有正在连接
+    // （STARTING）时先等出结果，避免扫描打断握手。
+    // Scan before polling, and allow it while READY; only a connecting session (STARTING) waits.
+    if (s_scan_pending && (!s_session_started || s_status.state == READ_PICO_TRANSFER_READY ||
+                           s_status.state == READ_PICO_TRANSFER_ERROR ||
+                           s_status.state == READ_PICO_TRANSFER_STOPPED)) {
+        s_scan_pending = false;
+        s_network_count = s_network_page = 0;
+        // The scan notice is already in the framebuffer. Drop rebuildable glyph
+        // bitmaps before starting WiFi, then recreate them while drawing the result.
+        // This prevents the hosted radio from competing with the UI cache at init.
+        ttf_font_cache_clear();
+        esp_err_t err = read_pico_transfer_scan_wifi(s_networks, &s_network_count);
+        s_scan_error = err;
+        if (err != ESP_OK) {
+            s_network_count = 0;
+            snprintf(s_network_message, sizeof(s_network_message), "%s",
+                     err == ESP_ERR_NO_MEM ? "内存已清理，请点下方按钮重试" : "扫描失败，请点下方按钮重试");
+        }
+        else if (!s_network_count) snprintf(s_network_message, sizeof(s_network_message), "未发现网络，请靠近路由器后重扫");
+        else if (s_status.network_ready) s_network_message[0] = 0;
+        s_pressed = -1;
         return APP_REDRAW_PAGE;
     }
     if (s_session_started) {
@@ -476,30 +541,35 @@ static app_redraw_t network_ui_tick(app_ctx_t* ctx) {
         read_pico_transfer_status_t next = {0};
         read_pico_transfer_get_status(&next);
         bool changed = next.state != s_status.state || next.network_ready != s_status.network_ready ||
-                       next.last_error != s_status.last_error;
+                       next.last_error != s_status.last_error ||
+                       strcmp(next.connected_ssid, s_status.connected_ssid) ||
+                       strcmp(next.wifi_ssid, s_status.wifi_ssid);
         s_status = next;
-        if (s_status.network_ready) snprintf(s_network_message, sizeof(s_network_message), "连接成功");
+        if (s_status.network_ready) {
+            if (!s_saved_configured || strcmp(s_saved_ssid, s_status.wifi_ssid)) {
+                // 自动换网后活动凭据会变成新网络，卡片与列表的"已保存"标记要跟着更新。
+                // Auto-switching rewrites the active credential; keep the page in step with it.
+                s_saved_configured = s_status.wifi_configured;
+                snprintf(s_saved_ssid, sizeof(s_saved_ssid), "%s", s_status.wifi_ssid);
+            }
+            snprintf(s_network_message, sizeof(s_network_message), "连接成功");
+        }
         else if (s_status.state == READ_PICO_TRANSFER_ERROR) snprintf(s_network_message, sizeof(s_network_message), "连接失败，请检查密码或信号");
         return changed ? APP_REDRAW_PAGE : APP_REDRAW_NONE;
     }
-    if (!s_scan_pending) return APP_REDRAW_NONE;
-    s_scan_pending = false;
-    s_network_count = s_network_page = 0;
-    // The scan notice is already in the framebuffer. Drop rebuildable glyph
-    // bitmaps before starting WiFi, then recreate them while drawing the result.
-    // This prevents the hosted radio from competing with the UI cache at init.
-    ttf_font_cache_clear();
-    esp_err_t err = read_pico_transfer_scan_wifi(s_networks, &s_network_count);
-    s_scan_error = err;
-    if (err != ESP_OK) {
-        s_network_count = 0;
-        snprintf(s_network_message, sizeof(s_network_message), "%s",
-                 err == ESP_ERR_NO_MEM ? "内存已清理，请点下方按钮重试" : "扫描失败，请点下方按钮重试");
-    }
-    else if (!s_network_count) snprintf(s_network_message, sizeof(s_network_message), "未发现网络，请靠近路由器后重扫");
-    else s_network_message[0] = 0;
-    s_pressed = -1;
-    return APP_REDRAW_PAGE;
+    return APP_REDRAW_NONE;
+}
+
+// 保存凭据要求传输栈完全空闲，但后台回连（解锁自动连 / 主循环兜底）随时可能把 STA 拉起来——
+// 那样保存必然拿到状态错误，这正是用户看到的"保存失败，输入已保留，请重试"。
+// 保存前先主动停栈，把"谁在用无线"这件事由用户操作优先。
+// Saving credentials needs an idle transfer stack, yet the background auto-reconnect (unlock or
+// the loop fallback) can raise the STA at any moment; the save then fails on a state error, which
+// is exactly the old "保存失败，输入已保留，请重试". Stop the stack first so the user's action wins.
+static bool release_stack_for_save(void) {
+    if (stop_upload_if_idle()) return true;
+    snprintf(s_network_message, sizeof(s_network_message), "正在传输，请完成后再改网络");
+    return false;
 }
 
 static int provisioning_hit(uint16_t x, uint16_t y) {
@@ -549,20 +619,24 @@ static app_redraw_t provisioning_action(int id) {
                 return APP_REDRAW_PAGE;
             }
             if (!s_selected.requires_password) {
+                if (!release_stack_for_save()) return APP_REDRAW_PAGE;
                 esp_err_t err = read_pico_transfer_save_wifi(s_selected.ssid, "");
                 if (err == ESP_OK) {
                     queue_network_start(READ_PICO_TRANSFER_MODE_STA);
                     return APP_REDRAW_PAGE;
                 }
-                snprintf(s_network_message, sizeof(s_network_message), "开放网络保存失败，请重试");
+                snprintf(s_network_message, sizeof(s_network_message), "%s",
+                         err == ESP_ERR_INVALID_STATE ? "网络正忙，请再点一次" : "开放网络保存失败，请重试");
                 return APP_REDRAW_PAGE;
             }
             char known_password[65] = {0};
             if (read_pico_transfer_known_wifi_password(s_selected.ssid, known_password, sizeof(known_password))) {
+                if (!release_stack_for_save()) { memset(known_password, 0, sizeof(known_password)); return APP_REDRAW_PAGE; }
                 esp_err_t err = read_pico_transfer_save_wifi(s_selected.ssid, known_password);
                 memset(known_password, 0, sizeof(known_password));
                 if (err == ESP_OK) { queue_network_start(READ_PICO_TRANSFER_MODE_STA); return APP_REDRAW_PAGE; }
-                snprintf(s_network_message, sizeof(s_network_message), "连接信息保存失败，请重试");
+                snprintf(s_network_message, sizeof(s_network_message), "%s",
+                         err == ESP_ERR_INVALID_STATE ? "网络正忙，请再点一次" : "连接信息保存失败，请重试");
                 return APP_REDRAW_PAGE;
             }
             memset(known_password, 0, sizeof(known_password));
@@ -577,6 +651,7 @@ static app_redraw_t provisioning_action(int id) {
                     return APP_REDRAW_PAGE;
                 }
                 s_network_connect_pending = false;
+                s_user_disconnect_hold = true;
                 snprintf(s_network_message, sizeof(s_network_message), "已断开，连接信息保留");
             } else {
                 // 未连上不等于驱动已停止；重试前先释放仍在等待或超时的旧 STA。
@@ -585,6 +660,7 @@ static app_redraw_t provisioning_action(int id) {
                     snprintf(s_network_message, sizeof(s_network_message), "正在传输，请完成后再连接");
                     return APP_REDRAW_PAGE;
                 }
+                s_user_disconnect_hold = false;
                 s_network_connect_pending = false;
                 queue_network_start(READ_PICO_TRANSFER_MODE_STA);
             }
@@ -605,12 +681,16 @@ static app_redraw_t provisioning_action(int id) {
     else if (id == 46) {
         if (s_selected.requires_password && len < 8) {
             snprintf(s_network_message, sizeof(s_network_message), "加密网络密码至少 8 个字符");
+        } else if (!release_stack_for_save()) {
+            // 后台回连占着无线时先让位；输入的密码原样保留，再点一次即可。
+            // Yield when the background reconnect holds the radio; the typed password stays put.
         } else {
             esp_err_t err = read_pico_transfer_save_wifi(s_selected.ssid,
                 s_selected.requires_password ? s_password : "");
             if (err == ESP_OK) { queue_network_start(READ_PICO_TRANSFER_MODE_STA); return APP_REDRAW_PAGE; }
             snprintf(s_network_message, sizeof(s_network_message), "%s", err == ESP_ERR_INVALID_ARG ?
-                     "密码须 8–63 字符或 64 位十六进制" : "保存失败，输入已保留，请重试");
+                     "密码须 8–63 字符或 64 位十六进制" :
+                     err == ESP_ERR_INVALID_STATE ? "网络正忙，请再点一次" : "保存失败，输入已保留，请重试");
         }
     }
     return APP_REDRAW_AREA;
@@ -915,6 +995,11 @@ static void on_enter(app_ctx_t* ctx) {
             s_saved_configured = s_status.wifi_configured;
             snprintf(s_saved_ssid, sizeof(s_saved_ssid), "%s", s_status.wifi_ssid);
             snprintf(s_network_message, sizeof(s_network_message), "连接成功");
+            // 已联网也要扫一次：否则附近网络列表是空的，用户必须先点"重新扫描"才看得到。
+            // Scan even while online: otherwise the nearby list stays empty and the user has to
+            // press the scan button before seeing anything.
+            s_scan_pending = true;
+            s_scan_error = ESP_OK;
         } else {
             (void)enter_networks();
         }
