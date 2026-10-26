@@ -721,6 +721,20 @@ static void auto_connect_after_unlock(void) {
 // lasts only until the next wake, so waking still joins whatever saved network is in range.
 static void auto_connect_on_wake(void) {
     app_transfer_wifi_release_hold();
+    // 睡眠前被 pause 的会话会在唤醒时 resume，而 resume 用的是睡前保存的配置（不带选网）——
+    // 那条会话只会盲连旧热点。亮屏正是"用户在场、值得扫一次"的时刻，先把它停掉，
+    // 交给下面带 prefer_known 的重连去扫描换网。
+    // A paused session resumes on wake with the config saved before sleep (no best-known pick),
+    // so it only blindly retries the old hotspot. A wake is exactly when the user is present and
+    // a scan is worth it: stop that session and let the prefer_known path below pick a network.
+    read_pico_transfer_status_t status;
+    read_pico_transfer_get_status(&status);
+    if (status.state == READ_PICO_TRANSFER_STARTING && !status.network_ready &&
+        app_settings_wifi_auto_connect()) {
+        // 上传中返回 false，此时不要动它，下面也会因为状态非 STOPPED 而跳过。
+        // A busy upload returns false; leave it alone (the call below skips it anyway).
+        (void)read_pico_transfer_try_stop_if_idle();
+    }
     auto_connect_after_unlock();
 }
 

@@ -252,7 +252,7 @@ static void draw_upgrade_progress_delta(uint8_t *fb) {
 // download lasts minutes, so it shows elapsed seconds. The x is fixed so a changing notice text
 // never shifts the indicator (that shift is what left a gap after the words).
 static const EpdRect s_upgrade_notice_area = {52, 424, 464, 42};
-static const int s_upgrade_tail_x = 430;
+static const int s_upgrade_tail_right = 500;
 static int64_t s_upgrade_beat_ms;
 static int s_upgrade_beat_second = -1;
 static void upgrade_beat_paint(app_ctx_t *ctx, int64_t elapsed_ms) {
@@ -268,14 +268,17 @@ static void upgrade_beat_paint(app_ctx_t *ctx, int64_t elapsed_ms) {
     ui_fill_rect_fast(s_upgrade_notice_area, UI_GRAY_WHITE, ctx->fb);
     ui_text(ctx->fb, 60, 436, 21, s_update.message, EPD_DRAW_ALIGN_LEFT, false);
     if (checking) {
-        // 直径 14px、间隔 22px，一秒加一个，看不清都难。
+        // 三个直径 14px 的圆点从右往左长出来，一秒加一个：靠右排，不依赖提示文字宽度，
+        // 也就不会因为系统字号放大而把点和文字挤在一起压字。
         const int dots = second % 3 + 1;
-        for (int i = 0; i < dots; ++i)
-            ui_fill_round_rect(ctx->fb, (EpdRect){s_upgrade_tail_x + i * 22, 441, 14, 14}, 7, UI_GRAY_BLACK);
+        for (int i = 0; i < dots; ++i) {
+            const int x = s_upgrade_tail_right - (dots - i) * 22;
+            ui_fill_round_rect(ctx->fb, (EpdRect){x, 441, 14, 14}, 7, UI_GRAY_BLACK);
+        }
     } else {
         char text[12];
         snprintf(text, sizeof(text), "%ds", second);
-        ui_text_fixed_vc(ctx->fb, s_upgrade_tail_x, 448, 26, text, EPD_DRAW_ALIGN_LEFT, false);
+        ui_text_fixed_vc(ctx->fb, s_upgrade_tail_right, 448, 26, text, EPD_DRAW_ALIGN_RIGHT, false);
     }
     epd_poweron();
     guard_draw_result(ctx->hl, update_display_area_diff_with(

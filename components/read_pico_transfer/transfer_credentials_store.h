@@ -82,21 +82,28 @@ static void known_upsert(const transfer_credentials_t *net) {
     nvs_close(handle);
 }
 
-static bool known_has_other(const char *ssid) {
+// 二改：一次把已知网络库整个读进内存。选网时要拿扫描结果逐条比对，如果每条都
+// known_find()，就是"每个 AP 一次 nvs_open + 最多 8 次 blob 读"——扫描二十个 AP 时
+// 几百次 NVS 访问，白等好几百毫秒。这里一次读完，后续纯内存比较。
+// Mod: load the whole known library in one pass. Comparing each scan record with known_find()
+// would open NVS per AP and read up to eight blobs — hundreds of NVS accesses for twenty APs,
+// wasting hundreds of milliseconds. Read once, then compare in memory.
+static int known_load_all(transfer_credentials_t nets[TRANSFER_KNOWN_WIFI_MAX]) {
+    if (!nets) return 0;
+    int found = 0;
     nvs_handle_t handle;
-    if (nvs_open("rp_wifi", NVS_READONLY, &handle) != ESP_OK) return false;
-    bool other = false;
-    for (int i = 0; i < TRANSFER_KNOWN_WIFI_MAX && !other; ++i) {
+    if (nvs_open("rp_wifi", NVS_READONLY, &handle) != ESP_OK) return 0;
+    for (int i = 0; i < TRANSFER_KNOWN_WIFI_MAX; ++i) {
         char key[9];
         snprintf(key, sizeof(key), "known%d", i);
         transfer_credentials_t net = {0};
         size_t size = sizeof(net);
-        if (nvs_get_blob(handle, key, &net, &size) == ESP_OK && size == sizeof(net) &&
-            credentials_valid(&net) && (!ssid || strcmp(net.ssid, ssid))) other = true;
+        if (nvs_get_blob(handle, key, &net, &size) == ESP_OK && size == sizeof(net) && credentials_valid(&net))
+            nets[found++] = net;
         clear_secret(&net, sizeof(net));
     }
     nvs_close(handle);
-    return other;
+    return found;
 }
 
 static bool known_find(const char *ssid, transfer_credentials_t *out) {

@@ -293,9 +293,11 @@ static EpdRect network_control_rect(int id) {
     if (id == 11) return s_forget_confirm ? ui_row_rect(0, 2, 600, UI_BTN_H) : (EpdRect){501, 315, 123, 52};
     if (id == 12) return ui_row_rect(1, 2, 600, UI_BTN_H);
     // "附近网络"标题行右侧的空档：自动连接开关，用户在这里就找得到。
+    // 宽 186 而不是占满空档：右侧计数在"12 个 · 12/12 页"时会更长，留出余量避免压字。
     // The free space right of the "附近网络" heading carries the auto-connect switch, where a
-    // user looking for it actually looks.
-    if (id == 13) return (EpdRect){296, 402, 208, 46};
+    // user looking for it actually looks. Width 186 leaves room: the counter grows to
+    // "12 个 · 12/12 页" and must not collide with it.
+    if (id == 13) return (EpdRect){272, 402, 186, 46};
     bool paged = s_network_count > NETWORK_ROWS;
     if (id == 7) return paged ? (EpdRect){36, transfer_footer_top()-103, 64, 66} : (EpdRect){0};
     if (id == 8) return paged ? (EpdRect){112, transfer_footer_top()-103, 460, 66} : (EpdRect){36, transfer_footer_top()-103, 612, 66};
@@ -502,9 +504,12 @@ static bool enter_networks(void) {
     s_saved_ssid[0] = 0;
     s_saved_configured = false;
     read_pico_transfer_get_saved_wifi(s_saved_ssid, &s_saved_configured);
-    // 有保存过的网络就"扫完列表后自动接续连接"，别让人干等后台兜底。
-    // With a saved network, continue with a connection once the list is up instead of waiting.
-    s_auto_connect_after_scan = s_saved_configured;
+    // 有保存过的网络就"扫完列表后自动接续连接"，别让人干等后台兜底；
+    // 但"自动连接"关掉时必须尊重开关——进页面也不该自己连，只能由用户点。
+    // With a saved network, continue with a connection once the list is up instead of waiting for
+    // the fallback. The auto-connect switch still wins: when it is off, opening the page must not
+    // connect on its own.
+    s_auto_connect_after_scan = s_saved_configured && app_settings_wifi_auto_connect();
     clear_password();
     return true;
 }
@@ -552,7 +557,11 @@ static app_redraw_t network_ui_tick(app_ctx_t* ctx) {
     if (!s_session_started) {
         read_pico_transfer_status_t live = {0};
         read_pico_transfer_get_status(&live);
-        if (live.state != READ_PICO_TRANSFER_STOPPED) {
+        // 只接管 STA 会话：热点模式（AP）也在这个组件里，接管它会让本页显示"连接成功"
+        // 却在离开时把它停掉，属于误伤。
+        // Adopt STA sessions only: the AP hotspot lives in the same component, and adopting it
+        // would make this page show "连接成功" while stopping it on exit.
+        if (live.state != READ_PICO_TRANSFER_STOPPED && live.mode == READ_PICO_TRANSFER_MODE_STA) {
             s_session_started = true;
             s_status = live;
             if (live.network_ready) snprintf(s_network_message, sizeof(s_network_message), "连接成功");
@@ -731,7 +740,11 @@ static app_redraw_t provisioning_action(int id) {
         }
         else if (id == 7 && s_network_page) --s_network_page;
         else if (id == 8) {
-            if (s_session_started) stop_session();
+            // 二改：重新扫描不再先停会话——现网 radio 上就能扫（read_pico_transfer_scan_wifi
+            // 已支持 live 扫描）。以前这里 stop_session()，点一下"重新扫描"就把好好的连接断掉。
+            // Mod: rescanning no longer tears the session down; the live radio can scan in place
+            // (read_pico_transfer_scan_wifi supports it). It used to stop_session() and drop a
+            // perfectly good connection on a single tap.
             s_scan_pending = true; s_scan_error = ESP_OK; s_network_message[0] = 0;
         }
         else if (id == 9 && (s_network_page + 1) * NETWORK_ROWS < s_network_count) ++s_network_page;

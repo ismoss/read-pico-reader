@@ -22,6 +22,8 @@
 User-visible changes by release; see [README](../README.md) for usage.
 
 ## 待发布 / Unreleased
+- 对抗式审查后的六处修正（都是"跑得通但会咬人"的细节）：①亮屏时若传输栈正在盲连（睡眠前恢复的会话不带选网），先停掉再走带扫描的重连——亮屏正是"扫一次再连"的时机；②配网页"重新扫描"不再先停会话（现网 radio 就能扫），以前点一下会把好好的连接断掉；③"自动连接"关闭时，进配网页也不再自己连，只认手动点；④选网把已知网络库一次读进内存再比对（此前每个 AP 都开一次 NVS、最多八次 blob 读，二十个 AP 就是几百次访问），扫描记录改放 PSRAM；⑤配网页只接管 STA 会话，热点模式不再被误当成"当前网络"并在离开时停掉；⑥升级页的点点点/秒数改为右端对齐，系统字号放大也不会压到提示文字。
+  Six fixes from an adversarial review — all "works but bites" details: (1) if the stack is blind-retrying a session resumed from sleep when the screen wakes, it is stopped first so the scan-capable reconnect runs (waking is exactly when a scan is worth it); (2) "重新扫描" no longer tears the session down, the live radio scans in place; (3) with auto-connect off, opening the page never connects on its own; (4) the known library is read into memory once instead of opening NVS per AP (hundreds of accesses for twenty APs), and scan records move to PSRAM; (5) the page adopts STA sessions only, so the hotspot is no longer mistaken for the current network and stopped on exit; (6) the upgrade dots/seconds are right-aligned so a scaled-up system font cannot overlap the notice text.
 - 自动连接开关搬到看得见的地方：无线网络页"附近网络"标题行的空档直接有"自动连接 开/关"，点一下即切；设置 → WiFi 子页里的同名开关保留。
   The auto-connect switch now sits where it is looked for: the free gap in the "附近网络" heading row of the wireless network page, one tap to toggle; the one in Settings → WiFi stays.
 - 亮屏/解锁解除"手动断开"的压制：点过"断开"之后，下次亮屏仍会去连当前在场的已保存网络（一次断开只管到下次亮屏）；兜底检查不会提前把它连回来。

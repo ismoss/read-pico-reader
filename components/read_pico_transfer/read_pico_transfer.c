@@ -2035,47 +2035,57 @@ static bool pick_best_known_wifi(wifi_config_t *wifi, transfer_credentials_t *ac
     // Scan whenever the library holds any valid record (no longer "another network besides the
     // active one"): with a single network the scan decides whether it is even in range, which
     // avoids a wasted thirty-second association.
-    if (!known_has_other(NULL)) return false;
+    transfer_credentials_t known[TRANSFER_KNOWN_WIFI_MAX];
+    memset(known, 0, sizeof(known));
+    const int known_count = known_load_all(known);
+    if (!known_count) { clear_secret(known, sizeof(known)); return false; }
     wifi_scan_config_t scan = {0};
-    if (esp_wifi_scan_start(&scan, true) != ESP_OK) return false;
+    if (esp_wifi_scan_start(&scan, true) != ESP_OK) { clear_secret(known, sizeof(known)); return false; }
     uint16_t count = 0;
-    if (esp_wifi_scan_get_ap_num(&count) != ESP_OK || !count) { (void)esp_wifi_clear_ap_list(); return false; }
-    wifi_ap_record_t *records = malloc((size_t)count * sizeof(*records));
-    if (!records) { esp_wifi_clear_ap_list(); return false; }
-    if (esp_wifi_scan_get_ap_records(&count, records) != ESP_OK) { free(records); esp_wifi_clear_ap_list(); return false; }
+    if (esp_wifi_scan_get_ap_num(&count) != ESP_OK || !count) {
+        clear_secret(known, sizeof(known)); (void)esp_wifi_clear_ap_list(); return false;
+    }
+    // 驱动按信号强度排序；只要前 N 个最强就够，省下内部 RAM（扫描时 WiFi 自己也要内存）。
+    // The driver sorts by signal strength, so the strongest N suffice — and PSRAM keeps scarce
+    // internal RAM free while the radio is up.
+    if (count > READ_PICO_TRANSFER_SCAN_MAX) count = READ_PICO_TRANSFER_SCAN_MAX;
+    wifi_ap_record_t *records = heap_caps_calloc(count, sizeof(*records), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!records) records = heap_caps_calloc(count, sizeof(*records), MALLOC_CAP_8BIT);
+    if (!records) { clear_secret(known, sizeof(known)); esp_wifi_clear_ap_list(); return false; }
+    if (esp_wifi_scan_get_ap_records(&count, records) != ESP_OK) {
+        heap_caps_free(records); clear_secret(known, sizeof(known)); esp_wifi_clear_ap_list(); return false;
+    }
     bool active_seen = false;
-    transfer_credentials_t best = {0};
+    int best_index = -1;
     int best_rssi = -128;
     for (int i = 0; i < count; ++i) {
         if (!strcmp((const char *)records[i].ssid, active->ssid)) active_seen = true;
-        transfer_credentials_t net = {0};
-        if (!known_find((const char *)records[i].ssid, &net)) continue;
-        if (records[i].rssi > best_rssi) {
-            best_rssi = records[i].rssi;
-            clear_secret(&best, sizeof(best));
-            best = net;
-            net.version = 0;
-        } else clear_secret(&net, sizeof(net));
+        for (int k = 0; k < known_count; ++k) {
+            if (strcmp((const char *)records[i].ssid, known[k].ssid)) continue;
+            if (records[i].rssi > best_rssi) { best_rssi = records[i].rssi; best_index = k; }
+            break;
+        }
     }
-    free(records);
+    heap_caps_free(records);
     esp_wifi_clear_ap_list();
-    bool change = !active_seen && best.version == 1 && strcmp(best.ssid, active->ssid);
+    const bool change = !active_seen && best_index >= 0 && strcmp(known[best_index].ssid, active->ssid);
     if (change) {
         clear_secret(active, sizeof(*active));
-        *active = best;
+        *active = known[best_index];
         memset(&wifi->sta, 0, sizeof(wifi->sta));
-        memcpy(wifi->sta.ssid, best.ssid, strlen(best.ssid));
-        memcpy(wifi->sta.password, best.password, strlen(best.password));
-        wifi->sta.threshold.authmode = best.password[0] ? WIFI_AUTH_WPA_PSK : WIFI_AUTH_OPEN;
+        memcpy(wifi->sta.ssid, active->ssid, strlen(active->ssid));
+        memcpy(wifi->sta.password, active->password, strlen(active->password));
+        wifi->sta.threshold.authmode = active->password[0] ? WIFI_AUTH_WPA_PSK : WIFI_AUTH_OPEN;
         wifi->sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
         wifi->sta.sort_method = WIFI_CONNECT_AP_BY_SIGNAL;
         wifi->sta.pmf_cfg.capable = true;
         wifi->sta.sae_pwe_h2e = WPA3_SAE_PWE_BOTH;
-        ESP_LOGI("transfer", "wifi auto-pick %s rssi=%d", best.ssid, best_rssi);
-    } else clear_secret(&best, sizeof(best));
+        ESP_LOGI("transfer", "wifi auto-pick %s rssi=%d", active->ssid, best_rssi);
+    }
     // 活动网络不在场，库里也没有别的可用网络 → 附近没有能连的东西。
     // Active network absent and no other known network in range: nothing to join out there.
     if (!change && !active_seen && absent) *absent = true;
+    clear_secret(known, sizeof(known));
     return change;
 }
 
