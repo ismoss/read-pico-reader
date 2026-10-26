@@ -1114,7 +1114,8 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
         row(fb, 296, wifi_live ? wifi_now.connected_ssid : s_main_wifi_saved ? s_main_wifi : "尚未配置",
             wifi_live ? "已连接" : s_main_wifi_saved ? "未连接" : "");
         row(fb, 408, "连接或更改网络", "前往传输  ›");
-        ui_text(fb, 54, 529, 21, "配网后可在日期与时间中进行 WiFi 对时。", EPD_DRAW_ALIGN_LEFT, false);
+        row(fb, 520, "自动连接", app_settings_wifi_auto_connect() ? "开启" : "关闭");
+        ui_text(fb, 54, 631, 21, "配网后可在日期与时间中对时；关闭后不再后台重连。", EPD_DRAW_ALIGN_LEFT, false);
         settings_navigation(fb);
         return;
     }
@@ -2244,6 +2245,15 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
             extern const app_desc_t app_transfer;
             app_transfer_request_wifi_setup();
             ctx->request_app = &app_transfer;
+            return APP_REDRAW_NONE;
+        }
+        // 第三行：自动连接开关（默认开）。关掉后解锁/后台都不再自动联网。
+        // Third row: the auto-connect switch (default on); off means no background connection.
+        if (y >= 508 && y < 600) {
+            const bool next = !app_settings_wifi_auto_connect();
+            app_settings_set_wifi_auto_connect(next);
+            s_notice[0] = 0; // 值本身（开启/关闭）就是反馈，别留旧提示。/ The value itself is the feedback.
+            return APP_REDRAW_PAGE;
         }
         return APP_REDRAW_NONE;
     }

@@ -2012,11 +2012,12 @@ void read_pico_transfer_stop(void) {
     portEXIT_CRITICAL(&s_lock);
 }
 
-// 二改：已知网络库选优——库里有活动网络之外的已知网络时，连接前扫一次；
-// 活动网络不在场（换到家里/公司）就切到信号最好的已知网络。只有活动一个已知网络时不扫，零额外开销。
-// Mod: best-known pick — when the library holds known networks beyond the active one, scan once
-// before connecting; if the active network is absent (home/office switch), switch to the strongest
-// known one. With no other known networks the scan never runs, costing nothing.
+// 二改：已知网络库选优——重连前扫一次，活动网络不在场就换在场信号最好的已知网络。
+// 三态返回：切换成功 / 保持活动网络 / 附近没有任何已保存网络（absent=true，调用方别再发起
+// 30 秒的无效连接——那一次射频比扫描贵得多）。
+// Mod: best-known pick — scan once before reconnecting and switch when the active network is
+// absent. Three outcomes: switched, keep-active, or nothing-known-in-range (`absent`, so the
+// caller skips a pointless 30-second association attempt, which costs far more than the scan).
 bool read_pico_transfer_known_wifi_password(const char *ssid, char *password, size_t cap) {
     if (!ssid || !password || cap < sizeof(((transfer_credentials_t *)0)->password)) return false;
     transfer_credentials_t net = {0};
@@ -2026,9 +2027,15 @@ bool read_pico_transfer_known_wifi_password(const char *ssid, char *password, si
     return found;
 }
 
-static bool pick_best_known_wifi(wifi_config_t *wifi, transfer_credentials_t *active) {
+static bool pick_best_known_wifi(wifi_config_t *wifi, transfer_credentials_t *active, bool *absent) {
+    if (absent) *absent = false;
     if (!wifi || !active || active->version != 1) return false;
-    if (!known_has_other(active->ssid)) return false;
+    // 库里有任何一条有效记录就值得扫（不再要求"除活动网络外还有别的"）：
+    // 只有活动网络时，扫描用来判断它在不在场，避免 30 秒白连。
+    // Scan whenever the library holds any valid record (no longer "another network besides the
+    // active one"): with a single network the scan decides whether it is even in range, which
+    // avoids a wasted thirty-second association.
+    if (!known_has_other(NULL)) return false;
     wifi_scan_config_t scan = {0};
     if (esp_wifi_scan_start(&scan, true) != ESP_OK) return false;
     uint16_t count = 0;
@@ -2066,6 +2073,9 @@ static bool pick_best_known_wifi(wifi_config_t *wifi, transfer_credentials_t *ac
         wifi->sta.sae_pwe_h2e = WPA3_SAE_PWE_BOTH;
         ESP_LOGI("transfer", "wifi auto-pick %s rssi=%d", best.ssid, best_rssi);
     } else clear_secret(&best, sizeof(best));
+    // 活动网络不在场，库里也没有别的可用网络 → 附近没有能连的东西。
+    // Active network absent and no other known network in range: nothing to join out there.
+    if (!change && !active_seen && absent) *absent = true;
     return change;
 }
 
@@ -2214,20 +2224,30 @@ esp_err_t read_pico_transfer_start(const read_pico_transfer_cfg_t *cfg) {
         ESP_LOGI("transfer", "ap ready url=%s", READ_PICO_TRANSFER_URL);
     } else {
         // 二改：只有"换环境重连"的路径才做选网扫描（阻塞数秒，普通启动不付这个代价）。
-        // 活动网络不在场就切到在场信号最强的已知网络，并把活动凭据改成它（下次开机直接连）。
-        // Mod: only reconnection paths scan the known library (a blocking scan that a plain start
-        // must not pay). When the active network is absent, switch to the strongest known one in
-        // range and make it the active credential so the next boot connects straight to it.
+        // 活动网络不在场就切到在场信号最强的已知网络，并把活动凭据改成它（下次开机直接连）；
+        // 附近一个已保存网络都没有就直接收栈——比盲目连 30 秒省得多。
+        // Mod: only reconnection paths scan (a blocking scan a plain start must not pay). Switch to
+        // the strongest known network in range and make it the active credential; if none is in
+        // range, tear the session down instead of burning thirty seconds on a blind association.
+        bool absent = false;
         if (cfg->prefer_known) {
             (void)esp_wifi_disconnect();
-            if (pick_best_known_wifi(&wifi, &saved)) {
+            if (pick_best_known_wifi(&wifi, &saved, &absent)) {
                 if (esp_wifi_set_config(WIFI_IF_STA, &wifi) == ESP_OK) {
                     (void)store_credentials(&saved);
                     publish_credentials(&saved);
                 }
             }
+            clear_secret(&wifi, sizeof(wifi));
         }
         clear_secret(&saved, sizeof(saved));
+        if (absent) {
+            ESP_LOGW("transfer", "no known wifi in range");
+            read_pico_transfer_stop();
+            set_error(ESP_ERR_NOT_FOUND);
+            release_config();
+            return ESP_ERR_NOT_FOUND;
+        }
         int64_t now = esp_timer_get_time() / 1000;
         portENTER_CRITICAL(&s_lock); connection_begin(&s_connection, now); portEXIT_CRITICAL(&s_lock);
         read_pico_transfer_service_poll();

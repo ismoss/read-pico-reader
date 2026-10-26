@@ -517,7 +517,9 @@ static app_redraw_t network_ui_tick(app_ctx_t* ctx) {
         esp_err_t err = read_pico_transfer_start(&cfg);
         s_session_started = err == ESP_OK;
         read_pico_transfer_get_status(&s_status);
-        if (err != ESP_OK) snprintf(s_network_message, sizeof(s_network_message), "连接启动失败，请重试");
+        if (err == ESP_ERR_NOT_FOUND)
+            snprintf(s_network_message, sizeof(s_network_message), "附近没有已保存的网络，请选下面的网络连接一次");
+        else if (err != ESP_OK) snprintf(s_network_message, sizeof(s_network_message), "连接启动失败，请重试");
         return APP_REDRAW_PAGE;
     }
     // 后台自动连（解锁/兜底）起的会话不是本页启动的；只要组件在跑就接管过来跟随，

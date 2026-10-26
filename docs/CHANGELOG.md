@@ -22,6 +22,10 @@
 User-visible changes by release; see [README](../README.md) for usage.
 
 ## 待发布 / Unreleased
+- 自动连接开关：设置 → WiFi 新增"自动连接"（默认开启），关掉后解锁与后台都不再自动联网，只有手动点"连接"才联网。
+  Auto-connect switch: Settings → WiFi gains 自动连接 (on by default); when off, neither unlock nor the background connects — only a manual connect does.
+- 重连前先扫一次：自动/手动重连都先扫描附近网络再决定——活动网络在场就连它（不必等失败），不在场就换在场信号最好的已保存网络；一个已保存网络都不在附近时直接收栈并提示"附近没有已保存的网络"，不再盲目连三十秒。扫描约一两秒、耗电远低于一次无效连接。
+  Scan before reconnecting: both paths scan nearby first — join the active network if it is there (no need to fail first), otherwise switch to the strongest saved one in range; when none is in range the session is torn down with "附近没有已保存的网络" instead of a blind thirty-second attempt. The scan takes a second or two and costs far less than one wasted association.
 - 配网页看得到自动连接：进页面先出列表，随后自动接续一次连接（等同点"连接"），不必干等后台三分钟兜底；后台自动连起的会话现在会被本页接管并刷新，不再一直显示"尚未连接"。后台回连只在"正在输密码"和"主动断开"时让位——此前停在网络上就会把自动连一直拦住，这正是"点进来等很久也不连"的原因。
   The provisioning page shows the automatic connection: it lists nearby networks, then continues with a connect attempt on its own (same as tapping connect) instead of waiting for the three-minute fallback; a session raised by the background is adopted and repainted by the page. The background now yields only to the password editor and a deliberate disconnect — sitting on the network page used to block auto-connect entirely, which is why "opening it and waiting" connected nothing.
 - 设置页显示真实链路：首页 WiFi 行与 WiFi 子页改显示当前真正连着的网络（未连接时写"未连接"），不再把保存的那个网络名当成现状。

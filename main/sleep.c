@@ -692,6 +692,10 @@ static void auto_connect_after_unlock(void) {
     char ssid[33];
     bool configured = false;
     if (pico_online_busy()) return;
+    // 二改：后台自动连是可选行为（设置 → WiFi → 自动连接，默认开）。关掉后只剩用户手动连接。
+    // Mod: background auto-connect is optional (Settings → WiFi → 自动连接, default on); when it
+    // is off, only a manual connect joins a network.
+    if (!app_settings_wifi_auto_connect()) return;
     // 连接超时后栈会停在 ERROR 态反复重试旧热点：换了环境（如 A 地 ↔ B 地）时旧热点不在场，
     // 必须先停栈再重启——重启路径会扫描已知网络并切到在场信号最好的一路。
     // After a connection timeout the stack sits in ERROR retrying the old hotspot; in a new

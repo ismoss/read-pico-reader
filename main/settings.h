@@ -192,6 +192,12 @@ void app_settings_set_shelf_recent_sort(bool on);
 /// by default. Turning it off tears the whole stack down and returns NimBLE's memory.
 bool app_settings_ble_turner(void);
 void app_settings_set_ble_turner(bool on);
+
+// 二改：后台自动重连已保存 WiFi 的开关（默认开）。关闭后解锁/兜底都不再自动连，
+// 只有用户在配网页手动"连接"才联网。/ Mod: switch for background WiFi auto-reconnect
+// (default on); when off, neither unlock nor the loop fallback connects on its own.
+bool app_settings_wifi_auto_connect(void);
+void app_settings_set_wifi_auto_connect(bool on);
 /// 字间距默认0px，31档以0居中。/ Default 0px, centered among 31 tracking stops.
 #define APP_BOOK_TRACK_MIN (-15)
 #define APP_BOOK_TRACK_MAX 15

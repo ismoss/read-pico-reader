@@ -77,6 +77,8 @@
 #define NVS_KEY_VERTICAL_TURN "rd_vertical"
 #define NVS_KEY_READER_LANDSCAPE "rd_land"
 #define NVS_KEY_BLE_TURNER "ble_turn"
+// 二改：后台自动重连已保存 WiFi 的总开关（默认开）。/ Mod: master switch for background WiFi auto-reconnect (default on).
+#define NVS_KEY_WIFI_AUTO "wifi_auto"
 #define NVS_KEY_SHELF_RECENT "shelf_recent"
 #define NVS_KEY_BOOK_LINE "bk_line"
 #define NVS_KEY_BOOK_PARA "bk_para"
@@ -138,6 +140,7 @@ static bool s_reader_vertical_turn;
 // In-book landscape: 0 portrait, 1/2 the two holding directions; body only, shelf and panels stay portrait.
 static uint8_t s_reader_landscape;
 static bool s_ble_turner;
+static bool s_wifi_auto = true;
 static bool s_shelf_recent_sort;
 // 书内自带字体默认开启：多数带字体的书排版就是靠它才对得上版。
 // Embedded book faces are on by default: most books that ship a face only typeset correctly
@@ -330,9 +333,10 @@ void app_settings_init(void) {
         s_reader_keys[2] == APP_READER_KEY_NEXT;
     uint8_t vertical_turn = 0;
     if (nvs_get_u8(h, NVS_KEY_VERTICAL_TURN, &vertical_turn) == ESP_OK) s_reader_vertical_turn = vertical_turn == 1;
-    uint8_t hide_images = 0, recent_sort = 0, ble_turner = 0, book_fonts = 1, book_vertical = 0;
+    uint8_t hide_images = 0, recent_sort = 0, ble_turner = 0, book_fonts = 1, book_vertical = 0, wifi_auto = 1;
     if (nvs_get_u8(h, NVS_KEY_HIDE_IMAGES, &hide_images) == ESP_OK) s_reader_hide_images = hide_images == 1;
     if (nvs_get_u8(h, NVS_KEY_BLE_TURNER, &ble_turner) == ESP_OK) s_ble_turner = ble_turner == 1;
+    if (nvs_get_u8(h, NVS_KEY_WIFI_AUTO, &wifi_auto) == ESP_OK) s_wifi_auto = wifi_auto == 1;
     if (nvs_get_u8(h, NVS_KEY_SHELF_RECENT, &recent_sort) == ESP_OK) s_shelf_recent_sort = recent_sort == 1;
     if (nvs_get_u8(h, NVS_KEY_BOOK_FONTS, &book_fonts) == ESP_OK) s_book_fonts = book_fonts == 1;
     if (nvs_get_u8(h, NVS_KEY_BOOK_VERTICAL, &book_vertical) == ESP_OK) s_book_vertical = book_vertical == 1;
@@ -810,6 +814,12 @@ void app_settings_set_reader_hold_refresh(bool on) {
     if (s_reader_hold_refresh == on) return;
     s_reader_hold_refresh = on;
     nvs_put_u8(NVS_KEY_HOLD_REFRESH, on ? 1 : 0);
+}
+bool app_settings_wifi_auto_connect(void) { return s_wifi_auto; }
+void app_settings_set_wifi_auto_connect(bool on) {
+    if (s_wifi_auto == on) return;
+    s_wifi_auto = on;
+    nvs_put_u8(NVS_KEY_WIFI_AUTO, on ? 1 : 0);
 }
 void app_settings_set_ble_turner(bool on) {
     if (s_ble_turner == on) return;
