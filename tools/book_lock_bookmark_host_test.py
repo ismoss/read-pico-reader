@@ -126,7 +126,7 @@ with tempfile.TemporaryDirectory() as d:
  white_raw=b''.join(b'\0'+b''.join(bytes((0,0,0)) if 3<=x<=28 and 3<=y<=28 and not (9<=x<=22 and 9<=y<=22) else bytes((255,255,255)) for x in range(32)) for y in range(32))
  (d/'white.png').write_bytes(b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',struct.pack('>IIBBBBB',32,32,8,2,0,0,0))+chunk(b'IDAT',zlib.compress(white_raw))+chunk(b'IEND',b''))
  vendor=r/'managed_components/espressif__libpng/libpng'
- if not vendor.exists():vendor=Path('/private/tmp/kiikoread-rc90-lock-build-20261011/managed_components/espressif__libpng/libpng')
+ assert vendor.exists(),'Build IDF once to resolve libpng'
  (d/'pnglibconf.h').write_bytes((vendor/'scripts/pnglibconf.h.prebuilt').read_bytes())
  names='png pngerror pngget pngmem pngpread pngread pngrio pngrtran pngrutil pngset pngtrans pngwrite pngwio pngwtran pngwutil'.split()
  subprocess.run(['cc','-std=gnu11','-O2','-Wall','-Wextra','-Werror','-Wno-unused-function','-Wno-misleading-indentation','-fsanitize=address,undefined','-DPNG_ARM_NEON_OPT=0','-DPNG_INTEL_SSE_OPT=0','-DCACHE_ROOT="'+str(d/'cache')+'"','-I'+str(d),'-I'+str(vendor),str(d/'test.c')]+[str(vendor/(n+'.c')) for n in names]+['-lz','-lm','-o',str(d/'test')],check=True)

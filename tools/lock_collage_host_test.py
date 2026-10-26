@@ -15,7 +15,7 @@ parser.add_argument('--font', type=Path, default=ROOT/'main/assets/builtin.ttf')
 parser.add_argument('--covers', type=Path)
 parser.add_argument('--output', type=Path)
 args = parser.parse_args()
-with tempfile.TemporaryDirectory(prefix='pico-lock-', dir='/private/tmp') as folder:
+with tempfile.TemporaryDirectory(prefix='pico-lock-') as folder:
     work = Path(folder)
     (work/'books/nested').mkdir(parents=True)
     (work/'images').mkdir()
