@@ -82,7 +82,7 @@ int main(void){touch_t touch={0};app_ctx_t ctx={.touch=&touch};
 '''
 assert 'const bool artwork = shelf_cover_frame_ready();' in function('draw_shelf_cover',book)
 assert 's_cover_batch_present_pending = true;' in function('on_tick',book)
-with tempfile.TemporaryDirectory(dir='/private/tmp') as d:
+with tempfile.TemporaryDirectory() as d:
  c=Path(d)/'test.c';exe=Path(d)/'test';c.write_text(unit)
  subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-fsanitize=address,undefined','-I'+str(ROOT/'main/book'),str(c),'-o',str(exe)],check=True)
  subprocess.run([str(exe)],check=True)
