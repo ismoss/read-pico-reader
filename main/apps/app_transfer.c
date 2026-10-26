@@ -292,12 +292,11 @@ static EpdRect network_control_rect(int id) {
     if (id == 6) return (EpdRect){501, 244, 123, 56};
     if (id == 11) return s_forget_confirm ? ui_row_rect(0, 2, 600, UI_BTN_H) : (EpdRect){501, 315, 123, 52};
     if (id == 12) return ui_row_rect(1, 2, 600, UI_BTN_H);
-    // "附近网络"标题行右侧的空档：自动连接开关，用户在这里就找得到。
-    // 宽 186 而不是占满空档：右侧计数在"12 个 · 12/12 页"时会更长，留出余量避免压字。
-    // The free space right of the "附近网络" heading carries the auto-connect switch, where a
-    // user looking for it actually looks. Width 186 leaves room: the counter grows to
-    // "12 个 · 12/12 页" and must not collide with it.
-    if (id == 13) return (EpdRect){272, 402, 186, 46};
+    // 自动连接开关：右下角，与底部两行文字（976 说明行 / footer_top+38 状态行）垂直居中，
+    // 右端与"附近网络"栏的计数对齐，读起来不突兀。
+    // Auto-connect switch: bottom-right, vertically centred between the two bottom text lines,
+    // its right edge aligned with the network counter above. Reads as part of the page, not a stray pill.
+    if (id == 13) return (EpdRect){432, 992, 210, 36};
     bool paged = s_network_count > NETWORK_ROWS;
     if (id == 7) return paged ? (EpdRect){36, transfer_footer_top()-103, 64, 66} : (EpdRect){0};
     if (id == 8) return paged ? (EpdRect){112, transfer_footer_top()-103, 460, 66} : (EpdRect){36, transfer_footer_top()-103, 612, 66};
@@ -390,17 +389,6 @@ static void draw_networks(uint8_t* fb) {
              (unsigned)s_network_page + 1, (unsigned)(s_network_count ? (s_network_count + NETWORK_ROWS - 1) / NETWORK_ROWS : 1));
     ui_text(fb, 42, 418, 24, "附近网络", EPD_DRAW_ALIGN_LEFT, false);
     ui_text(fb, 642, 420, 21, count, EPD_DRAW_ALIGN_RIGHT, false);
-    // 自动连接开关：放在标题行中间的空档，进这个页面就能看到、能改。
-    // Auto-connect switch in the gap of the heading row: visible and reachable right here.
-    {
-        EpdRect toggle = network_control_rect(13);
-        char label[24];
-        snprintf(label, sizeof(label), "自动连接 %s", app_settings_wifi_auto_connect() ? "开" : "关");
-        ui_fill_round_rect(fb, toggle, 16, s_pressed == 13 ? 0xb0 : UI_GRAY_WHITE);
-        network_border(fb, toggle, 16);
-        ui_text_vc(fb, toggle.x + toggle.width / 2, toggle.y + toggle.height / 2, 21, label,
-                   EPD_DRAW_ALIGN_CENTER, false);
-    }
     EpdRect list = {36, 465, 612, 380};
     ui_fill_round_rect(fb, list, 22, UI_GRAY_WHITE);
     if (s_scan_pending) {
@@ -439,12 +427,28 @@ static void draw_networks(uint8_t* fb) {
     }
     network_button(fb, 8, s_scan_error == ESP_OK ? "重新扫描" : "重试扫描", false);
     if (s_network_count <= NETWORK_ROWS) ui_draw_icon(fb, 597, 906, 32, UI_ICON_ROTATE_CW, UI_GRAY_BLACK);
-    ui_text(fb, 42, 976, 21, "支持 2.4 GHz WiFi（信道 1–13）", EPD_DRAW_ALIGN_LEFT, false);
+    // 底部两行（说明 + 状态）留给文字，开关放右下角并与这两行的中间对齐：
+    // 左侧文字一律限宽 370，右侧 432 起画开关，互不侵占。
+    // The two bottom lines keep the left side; the switch sits bottom-right, vertically centered
+    // between them. Left text is clamped to 370 px, the switch starts at 432, so neither collides.
+    char band[64];
+    snprintf(band, sizeof(band), "支持 2.4 GHz（信道 1–13）");
+    fit_label(band, 21, 370);
+    ui_text(fb, 42, 976, 21, band, EPD_DRAW_ALIGN_LEFT, false);
     char message[96];
     snprintf(message, sizeof(message), "%s", s_network_message[0] ? s_network_message :
              s_status.network_ready ? "退出此页后，WiFi 仍保持连接。" : "连接后，可退出此页继续使用。");
-    fit_label(message, 21, 600);
+    fit_label(message, 21, 370);
     ui_text(fb, 42, transfer_footer_top()+38, 21, message, EPD_DRAW_ALIGN_LEFT, false);
+    {
+        EpdRect toggle = network_control_rect(13);
+        char label[24];
+        snprintf(label, sizeof(label), "自动连接 %s", app_settings_wifi_auto_connect() ? "开" : "关");
+        ui_fill_round_rect(fb, toggle, toggle.height / 2, s_pressed == 13 ? 0xb0 : UI_GRAY_WHITE);
+        network_border(fb, toggle, toggle.height / 2);
+        ui_text_vc(fb, toggle.x + toggle.width / 2, toggle.y + toggle.height / 2, 21, label,
+                   EPD_DRAW_ALIGN_CENTER, false);
+    }
     transfer_navigation(fb,3);
 }
 
@@ -650,9 +654,10 @@ static int provisioning_hit(uint16_t x, uint16_t y) {
     if (s_view == TRANSFER_PASSWORD) {
         for (int i = 44; i < 48; ++i) if (ui_rect_hit(password_control_rect(i), x, y)) return i;
     } else {
-        // 开关在任何状态下都可点（扫描中也允许改）。
-        // The switch stays tappable in every state, scanning included.
-        if (ui_rect_hit(network_control_rect(13), x, y)) return 13;
+        // 开关在任何状态下都可点（扫描中也允许改）；热区比视觉框上下各扩 10px 方便点中。
+        // The switch stays tappable in every state, scanning included; the touch area is 10 px
+        // taller than the pill on both sides.
+        if (ui_rect_hit((EpdRect){432, 982, 210, 56}, x, y)) return 13;
         for (int i = 0; i < 12; ++i) {
             if (i < NETWORK_ROWS && (s_scan_pending || s_network_page * NETWORK_ROWS + i >= s_network_count)) continue;
             if ((i == 6 || i == 11) && !s_saved_configured) continue;
