@@ -108,14 +108,31 @@ static esp_err_t page_handler(httpd_req_t *req) {
         "<!doctype html><html><head><meta charset=utf-8>"
         "<meta name=viewport content=\"width=device-width,initial-scale=1\">"
         "<title>Pico</title><style>body{margin:0;background:#1c1c1c;color:#ddd;"
-        "font-family:sans-serif;text-align:center}#s{width:100%;touch-action:none;"
-        "image-rendering:pixelated}#t{font-size:13px;padding:6px}</style></head><body>"
+        "font-family:sans-serif;text-align:center}#s{display:block;margin:0 auto;"
+        "max-width:100vw;max-height:calc(100vh - 34px);width:auto;height:auto;"
+        "touch-action:none;image-rendering:pixelated}#t{font-size:13px;padding:6px}"
+        "</style></head><body>"
         "<div id=t>...</div><img id=s alt=\"\">"
         "<script>const i=document.getElementById('s'),t=document.getElementById('t');"
-        "let d=false,busy=false,mv=0;"
-        "function g(){if(busy)return;busy=true;i.src='/screen?n='+Date.now();}"
-        "i.onload=()=>{busy=false;t.textContent='live';setTimeout(g,600);};"
-        "i.onerror=()=>{busy=false;t.textContent='waiting';setTimeout(g,1500);};"
+        // 宽高都留 auto + max 约束：图片按比例缩进窗口，元素框正好等于渲染后的图，触摸换算才准。
+        // 原来 width:100% 会把 342x608 的帧拉到整个窗口宽，桌面浏览器只露出最上面几分之一，
+        // Ctrl+- 缩放也救不了（宽度跟着视口走）。
+        // width/height stay auto under max constraints so the picture scales proportionally inside
+        // the window and its box equals the rendered image (tap mapping depends on that). The old
+        // width:100% blew a 342x608 frame up to the window width, so a desktop browser showed only
+        // the top fraction and zooming out could not help because the width followed the viewport.
+        "let d=false,busy=false,mv=0,wd=0;"
+        "function g(){if(busy)return;busy=true;i.src='/screen?n='+Date.now();"
+        // 看门狗：请求被浏览器丢弃时既不会 onload 也不会 onerror，busy 会永久卡住不再刷新
+        // （手机切后台再回来就是这样）。八秒没有结果就当作失败重来。
+        // Watchdog: a discarded request fires neither onload nor onerror and leaves busy stuck, so
+        // nothing refreshes any more (that is what a phone does after being backgrounded). Give up
+        // after eight seconds and retry.
+        "clearTimeout(wd);wd=setTimeout(()=>{if(busy){busy=false;g();}},8000);}"
+        "i.onload=()=>{clearTimeout(wd);busy=false;t.textContent='live';setTimeout(g,600);};"
+        "i.onerror=()=>{clearTimeout(wd);busy=false;t.textContent='waiting';setTimeout(g,1500);};"
+        "document.addEventListener('visibilitychange',"
+        "()=>{if(!document.hidden&&!busy)g();});"
         "function p(e){const b=i.getBoundingClientRect();return{x:Math.max(0,Math.min(683,"
         "Math.round((e.clientX-b.left)/b.width*684))),y:Math.max(0,Math.min(1215,"
         "Math.round((e.clientY-b.top)/b.height*1216)))};}"

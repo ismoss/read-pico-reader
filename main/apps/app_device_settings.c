@@ -244,15 +244,19 @@ static void draw_upgrade_progress_delta(uint8_t *fb) {
     ui_fill_rect_fast((EpdRect){61 + s_upgrade_bar_width, 519, width - s_upgrade_bar_width, 8}, UI_GRAY_BLACK, fb);
     s_upgrade_bar_width = width;
 }
-// 进行中提示行（联网 OTA 卡片的详情行）：活体指示画在这一行的右端，由 on_tick 每秒驱动。
-// 检查只有几秒 → 点点点（轻快）；下载几十秒到几分钟 → 秒数（有信息量）。
-// 位置固定在 x=430，不受提示文字长度影响，不会再出现"点和文字之间空一截"。
-// The in-progress notice line of the OTA card; its right end carries the liveness indicator,
-// driven once per second by on_tick. A check lasts seconds, so it shows advancing dots; a
-// download lasts minutes, so it shows elapsed seconds. The x is fixed so a changing notice text
-// never shifts the indicator (that shift is what left a gap after the words).
-static const EpdRect s_upgrade_notice_area = {52, 424, 464, 42};
-static const int s_upgrade_tail_right = 500;
+// 进行中提示行（联网 OTA 卡片的详情行）：活体指示贴在本行的**最后**（右端 x=624，与上方
+// 百分比数字右端对齐），由 on_tick 每秒驱动。检查只有几秒 → 点点点，从左往右长（. .. ...）；
+// 下载几十秒到几分钟 → 秒数。文字本身限宽 460px，保证不与指示区重叠。
+// The in-progress notice line of the OTA card. Its liveness indicator sits at the very end of the
+// row (x=624, flush with the percentage digits above) and is driven once per second by on_tick.
+// A check lasts seconds and grows its dots left to right (. .. ...); a download shows elapsed
+// seconds. The notice text itself is clamped to 460 px so it never runs into the indicator zone.
+static const EpdRect s_upgrade_notice_area = {52, 424, 572, 42};
+// 第一颗圆点的左沿；三颗（14px + 22px 间距）正好收在行尾 624。
+// Left edge of the first dot; three of them (14 px, 22 px pitch) end flush at the row edge.
+static const int s_upgrade_dots_left = 564;
+static const int s_upgrade_tail_right = 624;
+static const int s_upgrade_notice_text_max = 460;
 static int64_t s_upgrade_beat_ms;
 static int s_upgrade_beat_second = -1;
 static void upgrade_beat_paint(app_ctx_t *ctx, int64_t elapsed_ms) {
@@ -266,17 +270,19 @@ static void upgrade_beat_paint(app_ctx_t *ctx, int64_t elapsed_ms) {
     // Only a queued check/download animates the notice; the TF-install side path leaves it alone.
     if (!s_update.busy || !s_update.message[0] || (!checking && !downloading)) return;
     ui_fill_rect_fast(s_upgrade_notice_area, UI_GRAY_WHITE, ctx->fb);
-    ui_text(ctx->fb, 60, 436, 21, s_update.message, EPD_DRAW_ALIGN_LEFT, false);
+    char detail[96];
+    snprintf(detail, sizeof(detail), "%s", s_update.message);
+    fit_value(detail, s_upgrade_notice_text_max);
+    ui_text(ctx->fb, 60, 436, 21, detail, EPD_DRAW_ALIGN_LEFT, false);
     if (checking) {
-        // 三个直径 14px 的圆点从右往左长出来，一秒加一个：靠右排，不依赖提示文字宽度，
-        // 也就不会因为系统字号放大而把点和文字挤在一起压字。
+        // 一秒加一颗、从左往右：. → .. → ... → .（不再从右往左长）
+        // One dot per second, left to right: . -> .. -> ... -> . (no longer right to left).
         const int dots = second % 3 + 1;
-        for (int i = 0; i < dots; ++i) {
-            const int x = s_upgrade_tail_right - (dots - i) * 22;
-            ui_fill_round_rect(ctx->fb, (EpdRect){x, 441, 14, 14}, 7, UI_GRAY_BLACK);
-        }
+        for (int i = 0; i < dots; ++i)
+            ui_fill_round_rect(ctx->fb, (EpdRect){s_upgrade_dots_left + i * 22, 441, 14, 14}, 7,
+                               UI_GRAY_BLACK);
     } else {
-        char text[12];
+        char text[16];
         snprintf(text, sizeof(text), "%ds", second);
         ui_text_fixed_vc(ctx->fb, s_upgrade_tail_right, 448, 26, text, EPD_DRAW_ALIGN_RIGHT, false);
     }
@@ -1423,7 +1429,9 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
             ui_text(fb, 60, 383, 29, "联网 OTA", EPD_DRAW_ALIGN_LEFT, false);
             char detail[96];
             snprintf(detail, sizeof(detail), "%s", s_update.message[0] ? s_update.message : "连接 WiFi，检查官网发布的新版本");
-            fit_value(detail, 540);
+            // 进行中时给行尾的点点点/秒数留出位置；空闲时用满整行。
+            // While busy leave room for the dots/seconds at the row end; use the full row when idle.
+            fit_value(detail, s_update.busy ? s_upgrade_notice_text_max : 540);
             ui_text(fb, 60, 436, 21, detail, EPD_DRAW_ALIGN_LEFT, false);
             if (s_update.state == PICO_UPDATE_AVAILABLE)
                 ui_text(fb, 60, 477, 24, s_update.release.version, EPD_DRAW_ALIGN_LEFT, false);
