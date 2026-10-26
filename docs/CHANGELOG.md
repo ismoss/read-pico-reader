@@ -23,8 +23,8 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## 待发布 / Unreleased
 
-清单里的 mod27 条目已在 2026-10-26 作为 **0.3.3-rc100-mod27** 发布上线（OTA feed `https://ismoss.github.io/read-pico-reader/update.json`，size 3,193,232B / SHA256 `af2ec162…483897`）；**真机验收仍待执行**。本节顶部第一条是 mod28 的新增项。
-The mod27 entries below shipped as **0.3.3-rc100-mod27** on 2026-10-26 (live feed, 3,193,232 B / SHA256 `af2ec162…483897`); on-device acceptance is still pending. The first entry is what mod28 adds.
+整份清单已在 2026-10-26 分两次发布：先 **0.3.3-rc100-mod27**（size 3,193,232B / SHA256 `af2ec162…483897`），同日再发 **0.3.3-rc100-mod28**（size 3,193,232B / SHA256 `0a2367f8…21a7`，本节第一条的 DNS 搬家）。线上 feed：`https://ismoss.github.io/read-pico-reader/update.json`；**真机验收仍待执行**（mod27/28 都还没刷机验证）。
+The whole list shipped on 2026-10-26 in two steps: **0.3.3-rc100-mod27** first (3,193,232 B / SHA256 `af2ec162…483897`), then **0.3.3-rc100-mod28** the same day (3,193,232 B / SHA256 `0a2367f8…21a7`, carrying the DNS relocation in the first entry). Live feed: `https://ismoss.github.io/read-pico-reader/update.json`; on-device acceptance is still pending for both.
 
 - **DNS 设置搬进「连接与时间」**：它和 WiFi、日期与时间、远程监看一样是"这台设备怎么上网"的项，挪过去后排在同一组第 5 行（图标沿用 DNS 的 19），「个性化功能」只留书架样式/锁屏样式/锁屏密码/状态栏签名。两组行数 4+5 → 5+4，页面总高与下方「升级和恢复」位置都不变。
   **DNS moved into 连接与时间**: it belongs with WiFi, clock sync and the remote monitor — the same "how this device reaches the network" family — so it now sits on row 5 of that group (same icon 19), and 个性化功能 keeps only shelf style, lock style, lock PIN and status signature. The two groups go 4+5 → 5+4, so the page height and the 升级和恢复 position below are unchanged.
