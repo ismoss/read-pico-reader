@@ -18,6 +18,10 @@ void app_transfer_request_wifi_setup(void);
 // is sitting on the provisioning / password page, so the background must leave the radio alone.
 bool app_transfer_wifi_auto_connect_blocked(void);
 
+// 二改：亮屏/解锁时解除"手动断开"的压制（一次断开只管到下次亮屏）。
+// Mod: clear the manual-disconnect hold on a wake/unlock (one disconnect lasts until then).
+void app_transfer_wifi_release_hold(void);
+
 // 文件管理打开 WiFi/热点方式选择，选择前不启动传输。
 // File manager opens a WiFi/hotspot chooser before starting either service.
 void app_transfer_request_method_picker(void);

@@ -22,6 +22,12 @@
 User-visible changes by release; see [README](../README.md) for usage.
 
 ## 待发布 / Unreleased
+- 自动连接开关搬到看得见的地方：无线网络页"附近网络"标题行的空档直接有"自动连接 开/关"，点一下即切；设置 → WiFi 子页里的同名开关保留。
+  The auto-connect switch now sits where it is looked for: the free gap in the "附近网络" heading row of the wireless network page, one tap to toggle; the one in Settings → WiFi stays.
+- 亮屏/解锁解除"手动断开"的压制：点过"断开"之后，下次亮屏仍会去连当前在场的已保存网络（一次断开只管到下次亮屏）；兜底检查不会提前把它连回来。
+  A wake/unlock releases the manual-disconnect hold: after tapping 断开, the next wake still joins whatever saved network is in range (one disconnect lasts until then); the idle fallback never undoes it early.
+- 升级动画按用户要求对调：检查更新（只有几秒）用提示行右端的点点点——三个直径 14px 的圆点每秒加一个，固定 x 位置不再因为提示文字长短而错位；下载（几十秒到几分钟）在同一个位置显示秒数。原来右上角的秒数盒取消（下载期那块是百分比数字）。
+  The upgrade animation is swapped as requested: checking (a few seconds) shows advancing dots at the right end of the notice line — three 14 px dots, one added per second, at a fixed x so a changing notice never shifts them; downloading (minutes) shows elapsed seconds in the same spot. The old top-right seconds box is gone (downloading owns that area with the percent digits).
 - 自动连接开关：设置 → WiFi 新增"自动连接"（默认开启），关掉后解锁与后台都不再自动联网，只有手动点"连接"才联网。
   Auto-connect switch: Settings → WiFi gains 自动连接 (on by default); when off, neither unlock nor the background connects — only a manual connect does.
 - 重连前先扫一次：自动/手动重连都先扫描附近网络再决定——活动网络在场就连它（不必等失败），不在场就换在场信号最好的已保存网络；一个已保存网络都不在附近时直接收栈并提示"附近没有已保存的网络"，不再盲目连三十秒。扫描约一两秒、耗电远低于一次无效连接。

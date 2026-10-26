@@ -244,14 +244,15 @@ static void draw_upgrade_progress_delta(uint8_t *fb) {
     ui_fill_rect_fast((EpdRect){61 + s_upgrade_bar_width, 519, width - s_upgrade_bar_width, 8}, UI_GRAY_BLACK, fb);
     s_upgrade_bar_width = width;
 }
-// 每秒耗时小区域：慢网络下证明还在跑而不是卡死；由 on_tick 在检查/下载态每秒驱动。
-// A per-second elapsed label so slow networks still look alive; on_tick drives it once per
-// second during checks and downloads.
-static const EpdRect s_upgrade_beat_area = {520, 462, 104, 42};
-// 进行中提示行（联网 OTA 卡片的详情行）：省略号逐秒推进，同一跟随 DU 机制。
-// The in-progress notice line (the OTA card's detail row): the ellipsis advances each second
-// with the same FOLLOW DU mechanism.
+// 进行中提示行（联网 OTA 卡片的详情行）：活体指示画在这一行的右端，由 on_tick 每秒驱动。
+// 检查只有几秒 → 点点点（轻快）；下载几十秒到几分钟 → 秒数（有信息量）。
+// 位置固定在 x=430，不受提示文字长度影响，不会再出现"点和文字之间空一截"。
+// The in-progress notice line of the OTA card; its right end carries the liveness indicator,
+// driven once per second by on_tick. A check lasts seconds, so it shows advancing dots; a
+// download lasts minutes, so it shows elapsed seconds. The x is fixed so a changing notice text
+// never shifts the indicator (that shift is what left a gap after the words).
 static const EpdRect s_upgrade_notice_area = {52, 424, 464, 42};
+static const int s_upgrade_tail_x = 430;
 static int64_t s_upgrade_beat_ms;
 static int s_upgrade_beat_second = -1;
 static void upgrade_beat_paint(app_ctx_t *ctx, int64_t elapsed_ms) {
@@ -259,39 +260,26 @@ static void upgrade_beat_paint(app_ctx_t *ctx, int64_t elapsed_ms) {
     const int second = (int)(elapsed_ms / 1000);
     if (second <= s_upgrade_beat_second) return;
     s_upgrade_beat_second = second;
-    // 心跳盒只在检查态出现：下载态同一位置是百分比数字，两块每秒互画会互相抹除。
-    // The heartbeat box paints only while checking: downloading owns that rect for the percent
-    // digits, and painting both there erases each other every second.
-    const bool beat_box = s_update.state == PICO_UPDATE_CHECKING;
-    if (beat_box) {
-        char text[12];
-        snprintf(text, sizeof(text), "%ds", second);
-        ui_fill_rect_fast(s_upgrade_beat_area, UI_GRAY_WHITE, ctx->fb);
-        ui_text_fixed_vc(ctx->fb, s_upgrade_beat_area.x + s_upgrade_beat_area.width / 2,
-                         s_upgrade_beat_area.y + s_upgrade_beat_area.height / 2, 24, text,
-                         EPD_DRAW_ALIGN_CENTER, false);
-    }
+    const bool checking = s_update.state == PICO_UPDATE_CHECKING;
+    const bool downloading = s_update.state == PICO_UPDATE_DOWNLOADING;
     // 排队中的检查/下载才动画提示行；TF 安装等旁路不碰它。
     // Only a queued check/download animates the notice; the TF-install side path leaves it alone.
-    if (s_update.busy && s_update.message[0]) {
-        // 点动画放在提示文字右侧、30px 大字，一秒一步（一个点→两个点→三个点→一个点）。
-        // The dots sit right of the notice text at 30 px, one step per second.
-        char dots[4];
-        snprintf(dots, sizeof(dots), "%.*s", second % 3 + 1, "...");
-        ui_fill_rect_fast(s_upgrade_notice_area, UI_GRAY_WHITE, ctx->fb);
-        ui_text(ctx->fb, 60, 436, 21, s_update.message, EPD_DRAW_ALIGN_LEFT, false);
-        const int message_width =
-            ui_text_fixed_width_px(ui_text_effective_px(21), s_update.message);
-        ui_text_fixed_vc(ctx->fb, 60 + message_width + 14, 448, 30, dots,
-                         EPD_DRAW_ALIGN_LEFT, false);
+    if (!s_update.busy || !s_update.message[0] || (!checking && !downloading)) return;
+    ui_fill_rect_fast(s_upgrade_notice_area, UI_GRAY_WHITE, ctx->fb);
+    ui_text(ctx->fb, 60, 436, 21, s_update.message, EPD_DRAW_ALIGN_LEFT, false);
+    if (checking) {
+        // 直径 14px、间隔 22px，一秒加一个，看不清都难。
+        const int dots = second % 3 + 1;
+        for (int i = 0; i < dots; ++i)
+            ui_fill_round_rect(ctx->fb, (EpdRect){s_upgrade_tail_x + i * 22, 441, 14, 14}, 7, UI_GRAY_BLACK);
+    } else {
+        char text[12];
+        snprintf(text, sizeof(text), "%ds", second);
+        ui_text_fixed_vc(ctx->fb, s_upgrade_tail_x, 448, 26, text, EPD_DRAW_ALIGN_LEFT, false);
     }
     epd_poweron();
-    if (beat_box)
-        guard_draw_result(ctx->hl, update_display_area_diff_with(
-            ctx->hl, &E0470_FOLLOW_WAVEFORM, MODE_DU, s_upgrade_beat_area));
-    if (s_update.busy && s_update.message[0])
-        guard_draw_result(ctx->hl, update_display_area_diff_with(
-            ctx->hl, &E0470_FOLLOW_WAVEFORM, MODE_DU, s_upgrade_notice_area));
+    guard_draw_result(ctx->hl, update_display_area_diff_with(
+        ctx->hl, &E0470_FOLLOW_WAVEFORM, MODE_DU, s_upgrade_notice_area));
     epd_poweroff();
 }
 

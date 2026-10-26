@@ -674,7 +674,7 @@ void enter_lock_and_sleep(
     if (ignore_until_ms) {
         *ignore_until_ms = esp_timer_get_time() / 1000 + APP_LOCK_IGNORE_BOOT_MS;
     }
-    auto_connect_after_unlock();
+    auto_connect_on_wake();
     ESP_LOGI(TAG, "unlocked");
 }
 
@@ -712,6 +712,15 @@ static void auto_connect_after_unlock(void) {
     read_pico_transfer_cfg_t cfg = {.mode = READ_PICO_TRANSFER_MODE_STA, .network_only = true,
                                     .prefer_known = true};
     if (read_pico_transfer_start(&cfg) == ESP_OK) ESP_LOGI(TAG, "auto-connect after unlock");
+}
+
+// 二改：亮屏/解锁入口——先解除"手动断开"的压制再尝试连接：一次断开只管到下次亮屏，
+// 这样用户关掉某个网络后亮屏仍会去连"当前在场的已保存网络"。兜底检查不走这里。
+// Mod: wake/unlock entry — release the manual-disconnect hold first, then try. One disconnect
+// lasts only until the next wake, so waking still joins whatever saved network is in range.
+static void auto_connect_on_wake(void) {
+    app_transfer_wifi_release_hold();
+    auto_connect_after_unlock();
 }
 
 // 主循环低速兜底：未连接时自动重连，体验对齐手机（换环境后不用解锁也会回到已保存网络）。
@@ -771,7 +780,7 @@ void app_lock_boot_gate(EpdiyHighlevelState *hl, cst836u_handle_t touch, sc7a20h
         if(pico_boot_has_resume()) {
             pico_boot_ready();pico_boot_hold_resume();
             (void)app_light_sleep_wait_timed(NULL,0);
-            auto_connect_after_unlock();
+            auto_connect_on_wake();
         }
         s_boot_lock_hl=NULL;s_boot_lock_active=false;s_lock_hint_hl=NULL;return;
     }
@@ -803,5 +812,5 @@ void app_lock_boot_gate(EpdiyHighlevelState *hl, cst836u_handle_t touch, sc7a20h
     // 二改：开机验证通过也是一种解锁——同样自动连网（此前只接了浅睡唤醒路径，深睡开机漏了）。
     // Mod: a verified boot is also an unlock — auto-connect here too (previously wired only
     // for the light-sleep wake path, the deep-sleep boot was missed).
-    auto_connect_after_unlock();
+    auto_connect_on_wake();
 }
