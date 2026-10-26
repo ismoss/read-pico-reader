@@ -399,9 +399,9 @@ static int settings_main_row_height(void) {
     return 82;
 }
 #define SETTINGS_ROW_H settings_main_row_height()
-#define SETTINGS_WIRELESS_ROWS 3
+#define SETTINGS_WIRELESS_ROWS 4
 #define SETTINGS_DISPLAY_ROWS 7
-#define SETTINGS_PERSONAL_ROWS 6
+#define SETTINGS_PERSONAL_ROWS 5
 #define SETTINGS_MAINTENANCE_ROWS 5
 #define SETTINGS_WIRELESS_Y (180 + settings_profile_height() + 77)
 #define SETTINGS_DISPLAY_Y (SETTINGS_WIRELESS_Y + SETTINGS_WIRELESS_ROWS * SETTINGS_ROW_H + 78)
@@ -1610,9 +1610,14 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
         snprintf(wifi, sizeof(wifi), "未连接");
     else
         snprintf(wifi, sizeof(wifi), "未配置");
-    const char *connection_labels[]={"WiFi","蓝牙翻页器","日期与时间"};
-    const char *connection_values[]={wifi,app_settings_ble_turner()?"已开启":"已关闭","设置"};
-    const int connection_icons[]={0,1,6};
+    // 远程监看放在这里：它是"看这台设备"的网络功能，和 WiFi/对时同类；
+    // 个性化功能那一栏只留外观与锁屏。
+    // The remote monitor lives here: it is a network feature about this device, like WiFi and
+    // clock sync; the personalization group keeps only look-and-feel and lock screen entries.
+    const char *connection_labels[]={"WiFi","蓝牙翻页器","日期与时间","远程监看"};
+    const char *connection_values[]={wifi,app_settings_ble_turner()?"已开启":"已关闭","设置",
+        mod_monitor_enabled()?"已开启":"已关闭"};
+    const int connection_icons[]={0,1,6,20};
     setting_group(fb,SETTINGS_WIRELESS_Y-49,"连接与时间",SETTINGS_WIRELESS_Y,
                   connection_icons,connection_labels,connection_values,SETTINGS_WIRELESS_ROWS);
     char font_name[96],contrast[24],idle[24],signature[96];
@@ -1628,13 +1633,12 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
     setting_group(fb,SETTINGS_DISPLAY_Y-49,"显示",SETTINGS_DISPLAY_Y,
                   display_icons,display_labels,display_values,SETTINGS_DISPLAY_ROWS);
     snprintf(signature,sizeof(signature),"%s",app_settings_status_signature()[0]?app_settings_status_signature():"未设置");
-    const char *personal_labels[]={"书架样式","锁屏样式","锁屏密码","状态栏签名","DNS 设置","远程监看"};
+    const char *personal_labels[]={"书架样式","锁屏样式","锁屏密码","状态栏签名","DNS 设置"};
     char dns_value[32]; snprintf(dns_value,sizeof(dns_value),"%s",mod_dns_entry(mod_dns_saved_index())->name);
     const char *personal_values[]={app_settings_shelf_style()==5?"列表书架":app_settings_shelf_style()==1?"深色书轨":"亚克力书架",
         app_settings_lock_style()==3?"透明书封":app_settings_lock_style()==2?"书架拼贴":app_settings_lock_style()==1?"壁纸":"阅读票根",
-        lock_pin_enabled()?"已开启":"已关闭",signature,dns_value,
-        mod_monitor_enabled()?"已开启":"已关闭"};
-    const int personal_icons[]={4,5,16,10,19,20};
+        lock_pin_enabled()?"已开启":"已关闭",signature,dns_value};
+    const int personal_icons[]={4,5,16,10,19};
     setting_group(fb,SETTINGS_PERSONAL_Y-49,"个性化功能",SETTINGS_PERSONAL_Y,
                   personal_icons,personal_labels,personal_values,SETTINGS_PERSONAL_ROWS);
     const char *maintenance_labels[]={"系统升级","保存与恢复","屏幕修复","BOOT 刷机","恢复出厂设置"};
@@ -2562,7 +2566,8 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
             s_page=SETTINGS_BLUETOOTH;s_ble_scroll=s_ble_learning=0;s_ble_notice[0]=s_ble_feedback[0]=0;
             ble_pt_raw_t unused;while(ble_pt_pop_raw(&unused)){}return APP_REDRAW_PAGE;
         }
-        s_page=SETTINGS_TIME;return APP_REDRAW_PAGE;
+        if(row==2){s_page=SETTINGS_TIME;return APP_REDRAW_PAGE;}
+        s_page=SETTINGS_MONITOR;s_notice[0]=0;return APP_REDRAW_PAGE;
     }
     if(y>=SETTINGS_DISPLAY_Y && y<SETTINGS_DISPLAY_Y+SETTINGS_DISPLAY_ROWS*SETTINGS_ROW_H) {
         row=(y-SETTINGS_DISPLAY_Y)/SETTINGS_ROW_H;
@@ -2581,8 +2586,7 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         else if(row==1)s_page=SETTINGS_LOCK_STYLE;
         else if(row==2){s_page=SETTINGS_LOCK_PIN;s_notice[0]=0;}
         else if(row==3) profile_editor_open(true);
-        else if(row==4) {s_page=SETTINGS_SPECIAL;s_notice[0]=0;}
-        else {s_page=SETTINGS_MONITOR;s_notice[0]=0;}
+        else {s_page=SETTINGS_SPECIAL;s_notice[0]=0;}
         return APP_REDRAW_PAGE;
     }
     if(y>=SETTINGS_MAINTENANCE_Y && y<SETTINGS_MAINTENANCE_Y+SETTINGS_MAINTENANCE_ROWS*SETTINGS_ROW_H) {
