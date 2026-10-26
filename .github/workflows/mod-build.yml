@@ -9,6 +9,12 @@ name: mod-build
 # tests and build pass, then verifies the live endpoints.
 # 不用 GitHub Releases 直链当下载地址：OTA 客户端禁用跟随重定向，Releases 会 302。
 # Never use GitHub Releases links as download URLs: they 302 and the OTA client never follows redirects.
+# 触发方式（重要）：本文件只存在于二改分支，默认分支 main 是上游镜像、故意不收录它，
+# 所以 dispatch 必须显式指定分支，否则会得到 "Workflow does not have workflow_dispatch trigger"：
+#   gh workflow run mod-build.yml --ref mod/glass-dock-lockoff -f version=... -f notes=...
+# How to trigger: this file lives only on the mod branch (main is the upstream mirror on purpose),
+# so a dispatch must name the branch explicitly or GitHub answers "Workflow does not have
+# workflow_dispatch trigger" because it resolves the file on the default branch.
 
 on:
   workflow_dispatch:
@@ -77,6 +83,18 @@ jobs:
     container: espressif/idf:v6.1
     steps:
       - uses: actions/checkout@v4
+
+      # 中文：IDF 镜像没有 zlib 开发头，而 EPUB/ZIP 宿主测试的 inflate 替身
+      # （tools/zip_host_stubs/miniz.h）要 #include <zlib.h>。装上开发包把测试原样跑完，
+      # 不要为了少一个依赖而跳过 ZIP/EPUB 覆盖。
+      # English: the IDF image ships no zlib development headers, and the EPUB/ZIP host
+      # tests' inflate shim (tools/zip_host_stubs/miniz.h) includes <zlib.h>. Install the
+      # headers so the tests run unchanged instead of dropping ZIP/EPUB coverage.
+      - name: Install host build dependencies
+        shell: bash
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends zlib1g-dev
 
       # This suite compiles the transfer/OTA tests against IDF-managed components,
       # including cJSON. Resolve the same pinned dependencies before running it.
@@ -157,7 +175,9 @@ jobs:
           if-no-files-found: error
 
   publish-ota:
-    if: github.event_name == 'workflow_dispatch'
+    # 中文：只有二改分支上的手动 dispatch 才发布，避免从其它 ref 误发。
+    # English: publish only from a manual dispatch on the mod branch, never from another ref.
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/mod/glass-dock-lockoff'
     needs: [display-host-tests, host-management-tests, mod-bin]
     runs-on: ubuntu-latest
     permissions:
