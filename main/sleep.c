@@ -693,11 +693,11 @@ static void auto_connect_after_unlock(void) {
     char ssid[33];
     bool configured = false;
     if (pico_online_busy()) return;
-    // 二改：后台自动连是可选行为（设置 → 连接与时间 → WiFi → 自动连接；mod27 起新设备默认关，
-    // 从没拨过开关的旧设备升级后也是关）。关掉后只剩用户手动连接。
-    // Mod: background auto-connect is optional (Settings → 连接与时间 → WiFi → 自动连接; off by
-    // default for new devices since mod27, and a device that never toggled it reads as off after
-    // the upgrade). When off, only a manual connect joins a network.
+    // 二改：后台自动连是可选行为（设置 → 连接与时间 → WiFi → 自动连接）。mod27 起新设备默认关，
+    // mod29 起旧设备按原来状态继承（之前自动连的继续自动连，之前关掉的仍然关）。关掉后只剩手动连接。
+    // Mod: background auto-connect is optional (Settings → 连接与时间 → WiFi → 自动连接). Off by
+    // default for new devices since mod27; since mod29 an existing device inherits what it had
+    // (auto-connecting stays on, switched off stays off). When off, only a manual connect does.
     if (!app_settings_wifi_auto_connect()) return;
     // 连接超时后栈会停在 ERROR 态反复重试旧热点：换了环境（如 A 地 ↔ B 地）时旧热点不在场，
     // 必须先停栈再重启——重启路径会扫描已知网络并切到在场信号最好的一路。

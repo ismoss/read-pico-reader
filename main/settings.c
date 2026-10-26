@@ -147,11 +147,16 @@ static bool s_reader_vertical_turn;
 // In-book landscape: 0 portrait, 1/2 the two holding directions; body only, shelf and panels stay portrait.
 static uint8_t s_reader_landscape;
 static bool s_ble_turner;
-// 二改（mod27）：自动重连改成"新设备默认关"。只有真正把开关拨过一次、NVS 里留下键的设备才
-// 算"保留已存选择"；升级前一直在用默认值、从没拨过的设备，升级后会变成关——要开得手动拨一次。
-// Mod (mod27): auto-reconnect is off for new devices. Only a device that actually wrote the key
-// keeps its choice; one that never touched the switch turns off on upgrade and needs one tap.
+// 二改（mod27 默认关，mod29 继承旧默认）：`wifi_auto` 只有用户拨过开关才有键，所以"键存在"本身
+// 就是"用户做过选择"的证据。键缺失时由 app_main 在开机按旧默认判定一次并落盘：有已保存 WiFi
+// 凭据 → 开（老设备一直在自动连），没有 → 关（新设备）。于是"之前自动连，升级后仍自动连"，
+// "之前关掉，升级后仍关"。
+// Mod (mod27 default-off, mod29 inherit): the key only exists once the user toggled the switch, so
+// its presence is itself the evidence of a real choice. When missing, app_main decides once at boot
+// from the old default and persists it — a saved WiFi credential means "was auto-connecting" (on),
+// none means a new device (off). Hence "auto-connecting before -> still does", "off before -> off".
 static bool s_wifi_auto;
+static bool s_wifi_auto_stored;
 static bool s_shelf_recent_sort;
 // 书内自带字体默认开启：多数带字体的书排版就是靠它才对得上版。
 // Embedded book faces are on by default: most books that ship a face only typeset correctly
@@ -364,7 +369,10 @@ void app_settings_init(void) {
     uint8_t hide_images = 0, recent_sort = 0, ble_turner = 0, book_fonts = 1, book_vertical = 0, wifi_auto = 0;
     if (nvs_get_u8(h, NVS_KEY_HIDE_IMAGES, &hide_images) == ESP_OK) s_reader_hide_images = hide_images == 1;
     if (nvs_get_u8(h, NVS_KEY_BLE_TURNER, &ble_turner) == ESP_OK) s_ble_turner = ble_turner == 1;
-    if (nvs_get_u8(h, NVS_KEY_WIFI_AUTO, &wifi_auto) == ESP_OK) s_wifi_auto = wifi_auto == 1;
+    if (nvs_get_u8(h, NVS_KEY_WIFI_AUTO, &wifi_auto) == ESP_OK) {
+        s_wifi_auto = wifi_auto == 1;
+        s_wifi_auto_stored = true;
+    }
     if (nvs_get_u8(h, NVS_KEY_SHELF_RECENT, &recent_sort) == ESP_OK) s_shelf_recent_sort = recent_sort == 1;
     if (nvs_get_u8(h, NVS_KEY_BOOK_FONTS, &book_fonts) == ESP_OK) s_book_fonts = book_fonts == 1;
     if (nvs_get_u8(h, NVS_KEY_BOOK_VERTICAL, &book_vertical) == ESP_OK) s_book_vertical = book_vertical == 1;
@@ -867,9 +875,14 @@ void app_settings_set_reader_hold_refresh(bool on) {
     nvs_put_u8(NVS_KEY_HOLD_REFRESH, on ? 1 : 0);
 }
 bool app_settings_wifi_auto_connect(void) { return s_wifi_auto; }
+bool app_settings_wifi_auto_stored(void) { return s_wifi_auto_stored; }
+// 不做"值没变就跳过"的短路：首次开机按旧默认继承时必须把判定落盘，否则每次开机都会重判，
+// 用户后来保存的网络就会在下次开机悄悄把开关掰开。
+// No "skip when unchanged" short-circuit: the one-time inherit has to persist its verdict, or every
+// boot would re-decide and a network saved later would silently flip the switch on next boot.
 void app_settings_set_wifi_auto_connect(bool on) {
-    if (s_wifi_auto == on) return;
     s_wifi_auto = on;
+    s_wifi_auto_stored = true;
     nvs_put_u8(NVS_KEY_WIFI_AUTO, on ? 1 : 0);
 }
 void app_settings_set_ble_turner(bool on) {

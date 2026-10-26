@@ -202,10 +202,15 @@ void app_settings_set_shelf_recent_sort(bool on);
 bool app_settings_ble_turner(void);
 void app_settings_set_ble_turner(bool on);
 
-// 二改：后台自动重连已保存 WiFi 的开关（默认开）。关闭后解锁/兜底都不再自动连，
-// 只有用户在配网页手动"连接"才联网。/ Mod: switch for background WiFi auto-reconnect
-// (default on); when off, neither unlock nor the loop fallback connects on its own.
+// 二改：后台自动重连已保存 WiFi 的开关（mod27 起新设备默认关，mod29 起旧设备按原状态继承）。
+// 关闭后解锁/兜底都不再自动连，只有用户在配网页手动"连接"才联网。
+// Mod: switch for background WiFi auto-reconnect (off by default for new devices since mod27;
+// since mod29 a device inherits what it had). When off, neither unlock nor the loop fallback
+// connects on its own.
 bool app_settings_wifi_auto_connect(void);
+/// 开关是否已经落过盘（用户拨动过，或首次开机按旧默认继承过）。
+/// Whether the switch was ever persisted (a real toggle, or the one-time legacy inherit).
+bool app_settings_wifi_auto_stored(void);
 void app_settings_set_wifi_auto_connect(bool on);
 /// 字间距默认0px，31档以0居中。/ Default 0px, centered among 31 tracking stops.
 #define APP_BOOK_TRACK_MIN (-15)

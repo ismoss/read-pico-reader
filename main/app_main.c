@@ -44,6 +44,7 @@
 #include "read_pico_pmu_protocol.h"
 #include "settings.h"
 #include "mod_dns.h"
+#include "read_pico_transfer.h"
 #include "sleep.h"
 #include "ttf_font.h"
 #include "usb_storage.h"
@@ -159,6 +160,21 @@ void app_main(void) {
     const esp_reset_reason_t reset = esp_reset_reason();
     ESP_LOGI(TAG, "startup reset=%d stack=%u", (int)reset, (unsigned)uxTaskGetStackHighWaterMark(NULL));
     app_settings_init();
+    // 二改（mod29）：自动连接"老设备继承、新设备默认关"。mod27 把默认从开改成关，而开关值只有
+    // 用户拨动时才写 NVS，于是"从没拨过"的旧设备升级后会被判成关。这里只在键还缺失的开机里判定
+    // 一次并落盘：有已保存的 WiFi 凭据 = 这台设备之前确实在自动连 → 开；没有任何凭据 = 新设备
+    // → 关。落盘后不再判断，用户以后怎么拨就怎么存。
+    // Mod (mod29): auto-connect inherits the old default exactly once. mod27 flipped the default to
+    // off, but the key is only written on a toggle, so a device that never toggled read as off after
+    // the upgrade. On a boot where the key is still absent, decide from the saved WiFi credential
+    // (present -> it really was auto-connecting, keep it on; none -> new device, off) and persist it,
+    // so a network saved later can never flip the switch behind the user's back.
+    if (!app_settings_wifi_auto_stored()) {
+        char legacy_ssid[33];
+        bool legacy_configured = false;
+        if (read_pico_transfer_get_saved_wifi(legacy_ssid, &legacy_configured) == ESP_OK)
+            app_settings_set_wifi_auto_connect(legacy_configured);
+    }
     // 应用「DNS 设置」里保存的选择，赶在任何联网之前。/ Apply the saved DNS choice before any networking.
     mod_dns_init();
     // 远程监看开关在 NVS；服务本体由主循环按联网状态起停。
