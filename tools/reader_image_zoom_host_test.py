@@ -40,8 +40,21 @@ static const uint8_t s_bayer4[16]={0,8,2,10,12,4,14,6,3,11,1,9,15,7,13,5};
 for name in ('reader_sqrt','reader_image_cache_ready','reader_single_image_page',
              'reader_zoom_image','reader_zoom_mode','reader_inline_image_at','reader_page_image_hit',
              'reader_image_clamp_center','reader_sample_bilinear','reader_logical_to_phys',
-             'reader_phys_to_logical','zoom_bits_build','zoom_blit_bits'):
+             'zoom_bits_build','zoom_blit_bits'):
     unit+=function(name,book)+'\n'
+# 冻结副本：这个反解 helper 已作为死代码从固件删除（mod30）；测试保留它来断言"位图打在哪个物理像素"。
+# Frozen copy: the inverse mapping helper was removed from the firmware as dead code (mod30); the
+# test keeps it to assert which physical pixel each sample lands on.
+unit+=r'''
+static void reader_phys_to_logical(int px, int py, int *lx, int *ly) {
+    switch (epd_get_rotation()) {
+        case EPD_ROT_PORTRAIT: *lx = py; *ly = epd_width() - 1 - px; break;
+        case EPD_ROT_INVERTED_LANDSCAPE: *lx = epd_width() - 1 - px; *ly = epd_height() - 1 - py; break;
+        case EPD_ROT_INVERTED_PORTRAIT: *lx = epd_height() - 1 - py; *ly = px; break;
+        default: *lx = px; *ly = py; break;
+    }
+}
+'''
 unit+=r'''
 static int pixel(uint8_t *fb,int x,int y){return(fb[y*12+x/2]>>((x&1)*4))&15;}
 int main(void){

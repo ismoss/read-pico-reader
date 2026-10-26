@@ -56,7 +56,10 @@ static const char *app_settings_status_signature(void){return "慢慢阅读";}
 scenes = [
     ('main/apps/app_files.c', 'editor_start', 's_editor', r' strcpy(s_selected.name,"你好世界.epub");editor_start();assert(!strcmp(s_editor_ext,".epub")&&!strcmp(s_editor,"你好世界")); s_selected.is_dir=true;strcpy(s_selected.name,"目录");editor_start();assert(!*s_editor_ext);'),
     ('main/apps/app_device_settings.c', 'profile_editor_open', 's_editor', r' profile_editor_open(false);assert(!strcmp(s_editor,"我的Pico"));profile_editor_open(true);assert(!strcmp(s_editor,"慢慢阅读"));'),
-    ('main/apps/app_book.c', 'editor_start', 's_editor_title', r' strcpy(s_managed.name,"你好世界");editor_start();assert(!strcmp(s_editor_title,"你好世界"));'),
+    # app_book.c 的 editor_start 已作为死代码删除（mod30）：书架侧没有任何入口把 s_view 设成 EDIT，
+    # 书名编辑实际走文件管理里的那份（上面第一条 scene 覆盖的是它）。
+    # app_book.c's editor_start was deleted as dead code (mod30): nothing on the shelf side ever set
+    # s_view to EDIT, so title editing actually goes through the file-manager copy covered above.
 ]
 common += r"""
 static ui_text_edit_t *test_bound;

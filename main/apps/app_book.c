@@ -903,60 +903,6 @@ static void prepare_fast_covers(void) {
     }
 }
 void app_book_cover_mode_changed(void) { invalidate_covers(); }
-static uint8_t* load_cover_gray(const char* source, const char* title, const char* author,
-                                bool decode, bool* pending) {
-    *pending = false;
-    if (!pico_boot_asset_allowed(source)) return NULL;
-    uint8_t* gray = heap_caps_malloc(BOOK_COVER_W * BOOK_COVER_H, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (!gray) return NULL;
-    if (!book_cover_load_gray(source, title, author, gray, decode, pending)) {
-        free(gray); return NULL;
-    }
-    return gray;
-}
-static uint8_t *load_shelf_cover_gray(int row, const char *source, const char *title,
-                                      const char *author, bool decode, bool *pending) {
-    if (s_view != SHELF || app_settings_shelf_style() != 5)
-        return load_cover_gray(source, title, author, decode, pending);
-    *pending = false;
-    if (!pico_boot_asset_allowed(source)) return NULL;
-    s_covers[row].width = BOOK_COVER_W; s_covers[row].height = BOOK_COVER_H;
-    uint8_t *gray = heap_caps_malloc(BOOK_COVER_W * BOOK_COVER_H, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (gray && !book_cover_load_list_gray(source, title, author, gray, decode, pending,
-                                          &s_covers[row].width, &s_covers[row].height)) {
-        free(gray); gray = NULL;
-    }
-    return gray;
-}
-
-// 直接读最终点阵：不分配灰阶工作区，也不在每次书架切页重新转换。
-// Read the finished raster: no gray workspace or repeated conversion on shelf paging.
-static bool load_shelf_cover_fast(int row, int index) {
-    if (s_view != SHELF || !app_settings_main_fast_refresh() || row >= BOOK_GRID_ROWS ||
-        !pico_boot_asset_allowed(s_shelf[index].path)) return false;
-    EpdRect image = shelf_cover_image(row);
-    size_t bytes = (size_t)SHELF_FAST_COVER_STRIDE * image.height;
-    if (bytes > SHELF_FAST_COVER_BYTES || heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
-        < SHELF_FAST_CACHE_RESERVE + SHELF_FAST_COVER_BYTES) return false;
-    uint8_t *bits = heap_caps_calloc(1, SHELF_FAST_COVER_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (!bits) return false;
-    book_fast_cover_key_t key = {(unsigned)image.width, (unsigned)image.height, SHELF_FAST_COVER_STRIDE,
-        app_settings_system_contrast(), (image.x&3)|((image.y&3)<<2)};
-    bool edge;
-    if (!book_cover_fast_cache_read(s_shelf[index].path, s_shelf[index].name, s_shelf[index].author,
-                                   key, bits, &edge)) { free(bits); return false; }
-    s_covers[row].fast_bits = bits; s_covers[row].fast_white_edge = edge;
-    s_covers[row].fast_contrast = key.contrast; s_covers[row].fast_phase = key.phase;
-    return true;
-}
-static void save_shelf_cover_fast(int row, int index) {
-    if (!s_covers[row].fast_bits) return;
-    EpdRect image = shelf_cover_image(row);
-    book_fast_cover_key_t key = {(unsigned)image.width, (unsigned)image.height, SHELF_FAST_COVER_STRIDE,
-        s_covers[row].fast_contrast, s_covers[row].fast_phase};
-    book_cover_fast_cache_write(s_shelf[index].path, s_shelf[index].name, s_shelf[index].author,
-                                key, s_covers[row].fast_bits, s_covers[row].fast_white_edge);
-}
 
 static unsigned prepare_cover_batch(app_ctx_t *ctx,bool cache_only) {
     if((s_view!=SHELF&&s_view!=MANAGE)||(!cache_only&&ctx->touch&&ctx->touch->touched))return 0;
@@ -1614,19 +1560,6 @@ static void draw_manage(uint8_t* fb) {
         draw_control(fb, manage_rect(2, 3), "删除文件", 402);
     }
 }
-
-static void editor_start(void) {
-    free(s_editor_cover);
-    bool pending = false;
-    s_editor_cover = load_cover_gray(s_managed.path, s_managed.name, "", false, &pending);
-    copy_text(s_editor_title, sizeof(s_editor_title), s_managed.name);
-    ui_text_edit_init(&s_editor_input, s_editor_title, sizeof(s_editor_title));
-    s_editor_notice[0] = 0;
-    ui_keyboard_begin(&s_editor_input, false);
-    s_view = EDIT;
-}
-
-
 
 static void draw_editor(uint8_t* fb) {
     ui_clear_page(fb);
@@ -2555,7 +2488,7 @@ static EpdRect rule_style_rect(int index) {
 }
 
 static void draw_rule_settings(uint8_t *fb) {
-    const int top = reader_rule_top(), w = reader_w();
+    const int top = reader_rule_top();
     const bool wide = reader_panel_landscape();
     draw_sheet(fb, top, "阅读线");
     draw_sheet_back(fb, top);
@@ -3654,16 +3587,6 @@ static void draw_zoomed_image(uint8_t *fb, EpdRect band, int scale, int cx, int 
     }
 }
 /* ---- 跟手帧：1bit 目标帧 / Gesture frames from a 1-bit target ---- */
-// 物理像素反解成逻辑坐标，与 epdiy 的 _rotate 一一对应。
-// Map a physical pixel back to logical coordinates, mirroring epdiy's _rotate().
-static void reader_phys_to_logical(int px, int py, int *lx, int *ly) {
-    switch (epd_get_rotation()) {
-        case EPD_ROT_PORTRAIT: *lx = py; *ly = epd_width() - 1 - px; break;
-        case EPD_ROT_INVERTED_LANDSCAPE: *lx = epd_width() - 1 - px; *ly = epd_height() - 1 - py; break;
-        case EPD_ROT_INVERTED_PORTRAIT: *lx = epd_height() - 1 - py; *ly = px; break;
-        default: *lx = px; *ly = py; break;
-    }
-}
 
 // 旋转把两个轴整体对调或翻转，所以各建一张轴映射表，逐像素只剩数组取值；点阵图按物理行
 // 顺序写，顺序内存访问比逐像素 nibble 读写快得多。灰度双线性只在松手后做。
@@ -5806,31 +5729,6 @@ static app_redraw_t turn_page(app_ctx_t* ctx, int dir) {
     s_water_turn_dir = dir > 0 ? E0470_TURN_RTL : E0470_TURN_LTR;
     return chrome_changed ? APP_REDRAW_PAGE : redraw;
 }
-static app_redraw_t resize_text(app_ctx_t* ctx, int dir) {
-    int next = s_px + dir * BOOK_PX_STEP;
-    if (next < BOOK_PX_MIN || next > BOOK_PX_MAX) return APP_REDRAW_NONE;
-    size_t off = book_layout_page_start_offset(s_page);
-    lock_draw();
-    invalidate_prep();
-    int old = s_px;
-    if (!book_layout_build_blocks(s_text, s_text_len, s_blocks, s_block_count, body_rect(), next)) {
-        bool restored = book_layout_build_blocks(s_text, s_text_len, s_blocks, s_block_count, body_rect(), old);
-        unlock_draw();
-        if (!restored) {
-            free_book();
-            s_view = SHELF;
-            copy_text(s_message, sizeof(s_message), "排版失败，请重新扫描并打开图书");
-            return APP_REDRAW_PAGE;
-        }
-        return APP_REDRAW_NONE;
-    }
-    s_px = next;
-    s_page = book_layout_page_for_offset(off);
-    unlock_draw();
-    app_settings_set_book_px(s_px);
-    save_progress();
-    return paint_reading(ctx, MODE_DU);
-}
 
 static app_redraw_t apply_reader_layout(app_ctx_t* ctx, int next_px, int next_margin,
                                         uint8_t next_line, uint8_t next_para) {
@@ -6726,70 +6624,6 @@ static app_redraw_t reader_panel_action(app_ctx_t* ctx, uint16_t x, uint16_t y) 
         return APP_REDRAW_NONE;
     }
     return APP_REDRAW_NONE;
-}
-static app_redraw_t adjust_spacing(app_ctx_t* ctx, int control) {
-    uint8_t old_line = app_settings_book_line_spacing();
-    uint8_t old_para = app_settings_book_paragraph_spacing();
-    uint8_t line = old_line, para = old_para;
-    if (control == 3 && line > 120) line -= 30;
-    if (control == 4 && line < 180) line += 30;
-    uint8_t para_level=app_settings_book_paragraph_level(para);
-    if (control == 5 && para_level > 0) para=app_settings_book_paragraph_value(para_level-1);
-    if (control == 6 && para_level+1 < APP_BOOK_PARAGRAPH_COUNT) para=app_settings_book_paragraph_value(para_level+1);
-    if (control == 17) { line = 150; para = 50; }
-    if (line == old_line && para == old_para) return APP_REDRAW_NONE;
-    size_t off = book_layout_page_start_offset(s_page);
-    lock_draw();
-    invalidate_prep();
-    book_layout_set_spacing(line, para);
-    bool ok = book_layout_build_blocks(s_text, s_text_len, s_blocks, s_block_count, body_rect(), s_px);
-    if (ok) s_page = book_layout_page_for_offset(off);
-    else {
-        book_layout_set_spacing(old_line, old_para);
-        (void)book_layout_build_blocks(s_text, s_text_len, s_blocks, s_block_count, body_rect(), s_px);
-    }
-    unlock_draw();
-    if (!ok) return APP_REDRAW_NONE;
-    app_settings_set_book_line_spacing(line);
-    app_settings_set_book_paragraph_spacing(para);
-    save_progress();
-    return paint_reading(ctx, MODE_DU);
-}
-static app_redraw_t select_reading_font(app_ctx_t* ctx, int style) {
-    static const char* filenames[] = {
-        "Song.ttf", "Hei.ttf", "Kai.ttf", "WenKai.ttf", "FangSong.ttf", "KingHwa.ttf",
-        "CangErYunHei05.ttf", "ChillKai.ttf"
-    };
-    static const char* names[] = {"宋体", "黑体", "楷体", "文楷", "仿宋", "京华老宋", "仓耳云黑05", "寒蝉正楷"};
-    char path[160];
-    if (snprintf(path, sizeof(path), "%s/%s", app_settings_fonts_dir(), filenames[style]) >= sizeof(path)) return APP_REDRAW_NONE;
-    if (!strcmp(ttf_font_path(), path)) return APP_REDRAW_NONE;
-    struct stat font_stat;
-    if (stat(path, &font_stat) != 0) {
-        snprintf(s_message, sizeof(s_message), "请将 %s 字体放入所选字体目录", names[style]);
-        return APP_REDRAW_PAGE;
-    }
-    if (ttf_font_open(path) != ESP_OK) {
-        snprintf(s_message, sizeof(s_message), "请将 %s 字体放入所选字体目录", names[style]);
-        return APP_REDRAW_PAGE;
-    }
-    app_settings_set_font_path(path);
-    s_message[0] = 0;
-    size_t off = book_layout_page_start_offset(s_page);
-    save_progress();
-    lock_draw();
-    invalidate_prep();
-    bool ok = book_layout_build_blocks(s_text, s_text_len, s_blocks, s_block_count, body_rect(), s_px);
-    if (ok) s_page = book_layout_page_for_offset(off);
-    copy_text(s_font_path, sizeof(s_font_path), ttf_font_path());
-    unlock_draw();
-    if (!ok) {
-        free_book(); s_view = SHELF;
-        copy_text(s_message, sizeof(s_message), "字体重排失败，请重新打开图书");
-        return APP_REDRAW_PAGE;
-    }
-    save_progress();
-    return paint_reading(ctx, MODE_GL16);
 }
 static app_redraw_t manage_action(app_ctx_t* ctx, uint16_t x, uint16_t y) {
     if (ui_rect_hit(manage_back_rect(), x, y)) {

@@ -62,7 +62,39 @@ static void *heap_caps_calloc(size_t n,size_t size,unsigned caps){assert(caps==3
 static void tracked_free(void *p){if(p){assert(live>=4494);live-=4494;}free(p);}
 #define free tracked_free
 '''
-for n in ('load_shelf_cover_fast','save_shelf_cover_fast'):unit+=function(n,book)+'\n'
+# 冻结副本：这两个书架侧适配器已作为死代码从 app_book.c 删除（mod30，书架改走 cover_jobs）；
+# 缓存 API 本身仍是现役代码，保留这份适配器让回归继续覆盖它的读写/失效分支。
+# Frozen copy: these shelf-side adapters were deleted from app_book.c as dead code (mod30 — the
+# shelf goes through cover_jobs now); the cache API itself is live, so keep the adapter here and
+# the read/invalidate branches stay covered without depending on dead production code.
+unit+=r'''
+static bool load_shelf_cover_fast(int row, int index) {
+    if (s_view != SHELF || !app_settings_main_fast_refresh() || row >= BOOK_GRID_ROWS ||
+        !pico_boot_asset_allowed(s_shelf[index].path)) return false;
+    EpdRect image = shelf_cover_image(row);
+    size_t bytes = (size_t)SHELF_FAST_COVER_STRIDE * image.height;
+    if (bytes > SHELF_FAST_COVER_BYTES || heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
+        < SHELF_FAST_CACHE_RESERVE + SHELF_FAST_COVER_BYTES) return false;
+    uint8_t *bits = heap_caps_calloc(1, SHELF_FAST_COVER_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!bits) return false;
+    book_fast_cover_key_t key = {(unsigned)image.width, (unsigned)image.height, SHELF_FAST_COVER_STRIDE,
+        app_settings_system_contrast(), (image.x&3)|((image.y&3)<<2)};
+    bool edge;
+    if (!book_cover_fast_cache_read(s_shelf[index].path, s_shelf[index].name, s_shelf[index].author,
+                                   key, bits, &edge)) { free(bits); return false; }
+    s_covers[row].fast_bits = bits; s_covers[row].fast_white_edge = edge;
+    s_covers[row].fast_contrast = key.contrast; s_covers[row].fast_phase = key.phase;
+    return true;
+}
+static void save_shelf_cover_fast(int row, int index) {
+    if (!s_covers[row].fast_bits) return;
+    EpdRect image = shelf_cover_image(row);
+    book_fast_cover_key_t key = {(unsigned)image.width, (unsigned)image.height, SHELF_FAST_COVER_STRIDE,
+        s_covers[row].fast_contrast, s_covers[row].fast_phase};
+    book_cover_fast_cache_write(s_shelf[index].path, s_shelf[index].name, s_shelf[index].author,
+                                key, s_covers[row].fast_bits, s_covers[row].fast_white_edge);
+}
+'''
 unit+=r'''
 int main(int argc,char **argv){
  assert(argc==2);root=argv[1];const char *path="/sdcard/books/a.epub";
