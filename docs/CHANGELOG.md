@@ -22,6 +22,12 @@
 User-visible changes by release; see [README](../README.md) for usage.
 
 ## 待发布 / Unreleased
+- 配网页看得到自动连接：进页面先出列表，随后自动接续一次连接（等同点"连接"），不必干等后台三分钟兜底；后台自动连起的会话现在会被本页接管并刷新，不再一直显示"尚未连接"。后台回连只在"正在输密码"和"主动断开"时让位——此前停在网络上就会把自动连一直拦住，这正是"点进来等很久也不连"的原因。
+  The provisioning page shows the automatic connection: it lists nearby networks, then continues with a connect attempt on its own (same as tapping connect) instead of waiting for the three-minute fallback; a session raised by the background is adopted and repainted by the page. The background now yields only to the password editor and a deliberate disconnect — sitting on the network page used to block auto-connect entirely, which is why "opening it and waiting" connected nothing.
+- 设置页显示真实链路：首页 WiFi 行与 WiFi 子页改显示当前真正连着的网络（未连接时写"未连接"），不再把保存的那个网络名当成现状。
+  Settings shows the real link: the WiFi row on the settings home page and the WiFi subpage print the network actually connected ("未连接" when offline) instead of the saved name.
+- 连接失败时的提示改为可操作的引导：写明"连不上 X；换一个网络连一次，之后会自动切换"——自动切换只对保存过密码的网络生效，没连过一次的网络不会被自动加入。
+  A failed round now explains the actionable part: "连不上 X；换一个网络连一次，之后会自动切换" — automatic switching only covers networks whose password is already saved; a network never joined once is never added by itself.
 - 换环境自动换网（真因修复）：此前"多网自动切换"是死代码——连接前把活动凭据清零了才去选网，选网函数开头就判定无凭据直接返回，所以从 mod4 到 mod19 这段功能从未生效，到了公司只会一直重试家里的热点。现在选网发生在重连/换环境路径上（普通启动不扫描、不多花时间），活动网络不在场就切到在场信号最好的已知网络并把它记为活动凭据；连接失败当轮立刻重试一次（这一次会带扫描），之后 45s→90s→180s 退避，不再每 3 分钟才动一次、也不起停射频死循环。
   Automatic network switching actually works now (root cause): the old "auto-switch" path was dead code — the active credential was wiped before the picker ran, and the picker returned immediately without credentials, so the feature never worked from mod4 through mod19 and the device kept retrying the home hotspot at the office. The pick now runs on reconnection paths only (a plain start neither scans nor slows down), switches to the strongest known network in range and records it as active; a failed round retries once immediately (that is the round that scans), then backs off 45s→90s→180s instead of restarting the radio in a loop or waiting three minutes.
 - 无线网络页显示真实连接：卡片此前显示的是"保存的那个网络名"，所以人到了公司页面上仍写着家里的 WiFi。现在显示实际关联上的网络（新增状态字段），没连上就写"尚未连接 · 上次使用 X"，并把"断开/连接"按钮跟着真实连接走。

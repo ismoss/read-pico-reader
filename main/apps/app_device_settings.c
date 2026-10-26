@@ -1105,8 +1105,14 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
     }
     if (s_page == SETTINGS_WIFI) {
         back_header(fb, "WiFi");
-        section(fb, 253, "已保存网络");
-        row(fb, 296, s_main_wifi_saved ? s_main_wifi : "尚未配置", s_main_wifi_saved ? "已保存" : "");
+        // 子页同样区分"当前连着的"和"保存过的"：换环境后两者会不一样。
+        // Distinguish the live link from the saved one; after a change of place they differ.
+        read_pico_transfer_status_t wifi_now = {0};
+        read_pico_transfer_get_status(&wifi_now);
+        const bool wifi_live = wifi_now.network_ready && wifi_now.connected_ssid[0];
+        section(fb, 253, wifi_live ? "当前网络" : "已保存网络");
+        row(fb, 296, wifi_live ? wifi_now.connected_ssid : s_main_wifi_saved ? s_main_wifi : "尚未配置",
+            wifi_live ? "已连接" : s_main_wifi_saved ? "未连接" : "");
         row(fb, 408, "连接或更改网络", "前往传输  ›");
         ui_text(fb, 54, 529, 21, "配网后可在日期与时间中进行 WiFi 对时。", EPD_DRAW_ALIGN_LEFT, false);
         settings_navigation(fb);
@@ -1591,7 +1597,19 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
         ui_text_vc(fb,588,profile_y+53,20,"编辑",EPD_DRAW_ALIGN_RIGHT,false);
         ui_draw_icon(fb,625,profile_y+profile_h/2,26,UI_ICON_CHEVRON_RIGHT,UI_GRAY_BLACK);
     }
-    char wifi[56];snprintf(wifi,sizeof(wifi),"%s",s_main_wifi_saved?s_main_wifi:"未配置");
+    // WiFi 行显示真实链路：保存的网络名在换环境后可能根本不在场，
+    // 一直把它摆在设置首页就等于告诉用户"你还连着家里那个"。
+    // Show the real link: the saved SSID can be absent after moving places, and printing it on the
+    // settings home page claims the user is still on the old network.
+    read_pico_transfer_status_t wifi_live = {0};
+    read_pico_transfer_get_status(&wifi_live);
+    char wifi[56];
+    if (wifi_live.network_ready && wifi_live.connected_ssid[0])
+        snprintf(wifi, sizeof(wifi), "%s", wifi_live.connected_ssid);
+    else if (s_main_wifi_saved)
+        snprintf(wifi, sizeof(wifi), "未连接");
+    else
+        snprintf(wifi, sizeof(wifi), "未配置");
     const char *connection_labels[]={"WiFi","蓝牙翻页器","日期与时间"};
     const char *connection_values[]={wifi,app_settings_ble_turner()?"已开启":"已关闭","设置"};
     const int connection_icons[]={0,1,6};

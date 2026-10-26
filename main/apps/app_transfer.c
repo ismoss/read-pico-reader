@@ -182,18 +182,23 @@ typedef enum { TRANSFER_METHODS, TRANSFER_HOME, TRANSFER_NETWORKS, TRANSFER_PASS
 #define PASSWORD_MAX 64
 static transfer_view_t s_view;
 
-// 二改：主循环的自动回连先问这里——用户主动断开、或正停在配网/密码页时不要抢无线，
-// 否则会出现"刚断开又被连回来""输密码时后台占着栈导致保存失败"。
-// Mod: the loop-side auto-reconnect asks here first. Never grab the radio while the user
-// disconnected on purpose or is on the provisioning / password page; otherwise the link bounces
-// back right after a manual disconnect and a background session breaks the credential save.
+// 二改：主循环的自动回连先问这里——只有"用户正在输密码"和"用户主动断开"才拦，
+// 看列表时不拦（否则用户在配网页等自动连接，永远等不到；页面会跟随后台会话刷新）。
+// Mod: the loop-side auto-reconnect asks here first. Only the password editor and a deliberate
+// disconnect block it — the network list must not, or waiting on that page for an automatic
+// connection never ends (the page now follows the background session and repaints).
 bool app_transfer_wifi_auto_connect_blocked(void) {
     if (s_user_disconnect_hold) return true;
-    return s_wifi_settings_only && (s_view == TRANSFER_NETWORKS || s_view == TRANSFER_PASSWORD);
+    return s_wifi_settings_only && s_view == TRANSFER_PASSWORD;
 }
 static read_pico_transfer_network_t s_networks[READ_PICO_TRANSFER_SCAN_MAX], s_selected;
 static size_t s_network_count, s_network_page;
 static bool s_scan_pending, s_network_connect_pending, s_saved_configured, s_password_visible, s_forget_confirm;
+// 进页面先出列表，扫完再自动接续一次连接（等同用户点"连接"）：
+// 用户在配网页就是想看它自己连上，别让他干等到三分钟兜底。
+// List first, then continue with a connection attempt on its own (the same as tapping connect):
+// someone opening this page wants to watch the device rejoin, not to wait for the slow fallback.
+static bool s_auto_connect_after_scan;
 static char s_saved_ssid[33], s_password[PASSWORD_MAX + 1], s_network_message[96], s_method_message[96];
 static ui_text_edit_t s_password_input;
 
@@ -474,6 +479,9 @@ static bool enter_networks(void) {
     s_saved_ssid[0] = 0;
     s_saved_configured = false;
     read_pico_transfer_get_saved_wifi(s_saved_ssid, &s_saved_configured);
+    // 有保存过的网络就"扫完列表后自动接续连接"，别让人干等后台兜底。
+    // With a saved network, continue with a connection once the list is up instead of waiting.
+    s_auto_connect_after_scan = s_saved_configured;
     clear_password();
     return true;
 }
@@ -512,6 +520,20 @@ static app_redraw_t network_ui_tick(app_ctx_t* ctx) {
         if (err != ESP_OK) snprintf(s_network_message, sizeof(s_network_message), "连接启动失败，请重试");
         return APP_REDRAW_PAGE;
     }
+    // 后台自动连（解锁/兜底）起的会话不是本页启动的；只要组件在跑就接管过来跟随，
+    // 否则页面会一直停在"尚未连接"，看起来像自动连接从未发生。
+    // A background session (unlock or the loop fallback) was not started here; adopt it while
+    // the component runs, or the page keeps claiming "尚未连接" as if auto-connect never ran.
+    if (!s_session_started) {
+        read_pico_transfer_status_t live = {0};
+        read_pico_transfer_get_status(&live);
+        if (live.state != READ_PICO_TRANSFER_STOPPED) {
+            s_session_started = true;
+            s_status = live;
+            if (live.network_ready) snprintf(s_network_message, sizeof(s_network_message), "连接成功");
+            return APP_REDRAW_PAGE;
+        }
+    }
     // 扫描先于状态轮询：进页面就该看到附近网络；已联网（READY）也允许扫，只有正在连接
     // （STARTING）时先等出结果，避免扫描打断握手。
     // Scan before polling, and allow it while READY; only a connecting session (STARTING) waits.
@@ -534,6 +556,16 @@ static app_redraw_t network_ui_tick(app_ctx_t* ctx) {
         else if (!s_network_count) snprintf(s_network_message, sizeof(s_network_message), "未发现网络，请靠近路由器后重扫");
         else if (s_status.network_ready) s_network_message[0] = 0;
         s_pressed = -1;
+        // 列表出来后再自动接续一次连接：有人在配网页就是想看它自己连回去。
+        // Continue with a connection attempt once the list is up: opening this page means
+        // "watch it rejoin", not "wait for the three-minute fallback".
+        if (s_auto_connect_after_scan) {
+            s_auto_connect_after_scan = false;
+            if (!s_status.network_ready) {
+                s_network_connect_pending = true;
+                snprintf(s_network_message, sizeof(s_network_message), "正在连接…");
+            }
+        }
         return APP_REDRAW_PAGE;
     }
     if (s_session_started) {
@@ -554,7 +586,9 @@ static app_redraw_t network_ui_tick(app_ctx_t* ctx) {
             }
             snprintf(s_network_message, sizeof(s_network_message), "连接成功");
         }
-        else if (s_status.state == READ_PICO_TRANSFER_ERROR) snprintf(s_network_message, sizeof(s_network_message), "连接失败，请检查密码或信号");
+        else if (s_status.state == READ_PICO_TRANSFER_ERROR)
+            snprintf(s_network_message, sizeof(s_network_message), "连不上 %s；换一个网络连一次，之后会自动切换",
+                     s_saved_ssid);
         return changed ? APP_REDRAW_PAGE : APP_REDRAW_NONE;
     }
     return APP_REDRAW_NONE;
@@ -948,6 +982,7 @@ static void on_enter(app_ctx_t* ctx) {
     s_forget_confirm = false;
     s_scan_pending = false;
     s_network_connect_pending = false;
+    s_auto_connect_after_scan = false;
     clear_password();
     s_session_started = false;
     s_pressed = -1;
