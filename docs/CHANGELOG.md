@@ -23,8 +23,11 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## 待发布 / Unreleased
 
-已作为 **0.3.3-rc100-mod27** 发布上线（2026-10-26，CI 全绿，OTA feed `https://ismoss.github.io/read-pico-reader/update.json` 已核对 size 3,193,232B / SHA256 `af2ec162…483897`）；**真机验收仍待执行**，本轮没有刷机。
-Shipped as **0.3.3-rc100-mod27** (2026-10-26, CI green, live OTA feed checked at 3,193,232 B / SHA256 `af2ec162…483897`); on-device acceptance is still pending — this round flashed nothing.
+清单里的 mod27 条目已在 2026-10-26 作为 **0.3.3-rc100-mod27** 发布上线（OTA feed `https://ismoss.github.io/read-pico-reader/update.json`，size 3,193,232B / SHA256 `af2ec162…483897`）；**真机验收仍待执行**。本节顶部第一条是 mod28 的新增项。
+The mod27 entries below shipped as **0.3.3-rc100-mod27** on 2026-10-26 (live feed, 3,193,232 B / SHA256 `af2ec162…483897`); on-device acceptance is still pending. The first entry is what mod28 adds.
+
+- **DNS 设置搬进「连接与时间」**：它和 WiFi、日期与时间、远程监看一样是"这台设备怎么上网"的项，挪过去后排在同一组第 5 行（图标沿用 DNS 的 19），「个性化功能」只留书架样式/锁屏样式/锁屏密码/状态栏签名。两组行数 4+5 → 5+4，页面总高与下方「升级和恢复」位置都不变。
+  **DNS moved into 连接与时间**: it belongs with WiFi, clock sync and the remote monitor — the same "how this device reaches the network" family — so it now sits on row 5 of that group (same icon 19), and 个性化功能 keeps only shelf style, lock style, lock PIN and status signature. The two groups go 4+5 → 5+4, so the page height and the 升级和恢复 position below are unchanged.
 
 - DNS 默认改为“跟随路由器”，不再默认覆盖公共解析器。切回跟随路由器会立即恢复本次 DHCP 下发的主备 DNS；公共 DNS 选择改为按名称和主备地址持久化，在线列表换序、删项或固件更新都不会把已选项悄悄改成另一组地址。在线更新要求 WiFi 已连接，下载放到后台任务，不再卡住设置页；列表先完整解析再原子替换，下载、解析或保存失败时保留原列表。
   DNS now defaults to router-provided resolvers instead of overriding them. Switching back restores the current DHCP main/backup pair immediately; public choices persist label plus both addresses, so online-list reordering/removal and firmware updates cannot silently move the selection to another pair. Online refresh requires an existing WiFi connection and downloads in a background task instead of freezing Settings; lists are fully parsed before an atomic replacement, and download/parse/save failures keep the previous list.
@@ -50,8 +53,8 @@ Shipped as **0.3.3-rc100-mod27** (2026-10-26, CI green, live OTA feed checked at
   A wake/unlock releases the manual-disconnect hold: after tapping 断开, the next wake still joins whatever saved network is in range (one disconnect lasts until then); the idle fallback never undoes it early.
 - 升级动画按用户要求对调：检查更新（只有几秒）用提示行右端的点点点——三个直径 14px 的圆点每秒加一个，固定 x 位置不再因为提示文字长短而错位；下载（几十秒到几分钟）在同一个位置显示秒数。原来右上角的秒数盒取消（下载期那块是百分比数字）。
   The upgrade animation is swapped as requested: checking (a few seconds) shows advancing dots at the right end of the notice line — three 14 px dots, one added per second, at a fixed x so a changing notice never shifts them; downloading (minutes) shows elapsed seconds in the same spot. The old top-right seconds box is gone (downloading owns that area with the percent digits).
-- 自动连接开关：设置 → WiFi 新增"自动连接"（新设备默认关闭；已有设备保留原选择），关掉后解锁与后台都不再自动联网，只有手动点"连接"才联网。
-  Auto-connect switch: Settings → WiFi gains 自动连接 (off by default on new devices; existing choices are preserved); when off, neither unlock nor the background connects — only a manual connect does.
+- 自动连接开关：设置 → WiFi 新增"自动连接"（**mod27 起新设备默认关闭**；拨过开关、NVS 里有记录的设备保留当时的选择——**从没拨过、一直在用旧默认值的设备，升级 mod27 后会变成关，需要手动拨一次**），关掉后解锁与后台都不再自动联网，只有手动点"连接"才联网。
+  Auto-connect switch: Settings → WiFi gains 自动连接 (**off by default on new devices since mod27**; a device that actually toggled it keeps that choice — **one that never touched the switch, i.e. still on the old default, turns off on the mod27 upgrade and needs one tap**); when off, neither unlock nor the background connects — only a manual connect does.
 - 重连前先扫一次：自动/手动重连都先扫描附近网络再决定——活动网络在场就连它（不必等失败），不在场就换在场信号最好的已保存网络；一个已保存网络都不在附近时直接收栈并提示"附近没有已保存的网络"，不再盲目连三十秒。扫描约一两秒、耗电远低于一次无效连接。
   Scan before reconnecting: both paths scan nearby first — join the active network if it is there (no need to fail first), otherwise switch to the strongest saved one in range; when none is in range the session is torn down with "附近没有已保存的网络" instead of a blind thirty-second attempt. The scan takes a second or two and costs far less than one wasted association.
 - 配网页看得到自动连接：进页面先出列表，随后自动接续一次连接（等同点"连接"），不必干等后台三分钟兜底；后台自动连起的会话现在会被本页接管并刷新，不再一直显示"尚未连接"。后台回连只在"正在输密码"和"主动断开"时让位——此前停在网络上就会把自动连一直拦住，这正是"点进来等很久也不连"的原因。

@@ -147,8 +147,10 @@ static bool s_reader_vertical_turn;
 // In-book landscape: 0 portrait, 1/2 the two holding directions; body only, shelf and panels stay portrait.
 static uint8_t s_reader_landscape;
 static bool s_ble_turner;
-// Automatic Wi-Fi reconnect is opt-in on new devices. Existing users retain the
-// persisted value loaded below, so an upgrade never silently changes their choice.
+// 二改（mod27）：自动重连改成"新设备默认关"。只有真正把开关拨过一次、NVS 里留下键的设备才
+// 算"保留已存选择"；升级前一直在用默认值、从没拨过的设备，升级后会变成关——要开得手动拨一次。
+// Mod (mod27): auto-reconnect is off for new devices. Only a device that actually wrote the key
+// keeps its choice; one that never touched the switch turns off on upgrade and needs one tap.
 static bool s_wifi_auto;
 static bool s_shelf_recent_sort;
 // 书内自带字体默认开启：多数带字体的书排版就是靠它才对得上版。
