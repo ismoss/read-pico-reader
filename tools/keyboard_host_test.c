@@ -128,7 +128,8 @@ int main(void) {
     }while(out->has_more);
     assert(unique==total);for(size_t i=0;i<total;i++)assert(seen[all[i]]);free(out);ui_ime_release();
     text[0]=0;ui_text_edit_init(&edit,text,sizeof(text));ui_keyboard_begin(&edit,false);type("shizzz");
-    for(int i=0;i<8;i++)assert(ui_keyboard_page(1));assert(s_window>=24);
+    for(int i=0;i<8;i++)assert(ui_keyboard_page(1));
+    assert(s_window>=24);
     size_t selection=s_page;char chosen[UI_IME_TEXT_MAX];strcpy(chosen,s_candidates->items[selection].text);
     assert(commit(selection));assert(!strcmp(s_raw,"zzz")&&!strcmp(text,chosen));
     ui_keyboard_end();
