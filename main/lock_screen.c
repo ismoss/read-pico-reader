@@ -36,7 +36,12 @@ typedef struct {uint32_t magic,rotation,style,checksum;uint64_t wallpaper;} art_
 static uint32_t checksum(const uint8_t *bytes){uint32_t h=2166136261u;for(unsigned i=0;i<FRAME_BYTES;++i)h=(h^bytes[i])*16777619u;return h;}
 static uint64_t wallpaper_key(void){
     if(app_settings_lock_style()!=1 && app_settings_lock_style()!=3)return 0;
+    // 壁纸缓存键必须跟着实际用的那张图：横屏且设了横屏壁纸时用横屏那张。
+    // The art cache key follows the image actually used: on the landscape canvas with a dedicated
+    // landscape image set, that one.
     const char *path=app_settings_lock_style()==3?app_settings_bookmark_path():app_settings_wallpaper_path();
+    const char *land=app_settings_wallpaper_landscape_path();
+    if(app_settings_lock_style()==1&&land[0]&&epd_rotated_display_width()>epd_rotated_display_height())path=land;
     uint64_t key=UINT64_C(14695981039346656037);
     for(const unsigned char *p=(const unsigned char*)path;*p;++p)key=(key^*p)*UINT64_C(1099511628211);
     struct stat st;

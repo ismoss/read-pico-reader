@@ -60,6 +60,7 @@
 #define NVS_KEY_SYS_CONTRAST "sys_contrast"
 #define NVS_KEY_LOCK_STYLE "lock_ui"
 #define NVS_KEY_WALLPAPER "wallpaper"
+#define NVS_KEY_WALLPAPER_LAND "wallpaper_land"
 #define NVS_KEY_BOOKMARK "lock_png"
 #define NVS_KEY_WAKE "lwake"
 #define NVS_KEY_BOOT "lboot"
@@ -123,6 +124,7 @@ static uint8_t s_system_size = 120;
 static uint8_t s_system_contrast = 100;
 static uint8_t s_lock_style;
 static char s_wallpaper[288];
+static char s_wallpaper_land[288];
 static char s_bookmark[288];
 static uint8_t s_last_wake;
 static uint8_t s_last_boot;
@@ -310,6 +312,9 @@ void app_settings_init(void) {
     // 4 = lock face off (blank sleep), kept in the same enum as ticket/wallpaper/collage/bookmark.
     if (nvs_get_u8(h, NVS_KEY_LOCK_STYLE, &lock_style) == ESP_OK && lock_style <= 4)
         s_lock_style = lock_style;
+    size_t land_len = sizeof(s_wallpaper_land);
+    if (nvs_get_str(h, NVS_KEY_WALLPAPER_LAND, s_wallpaper_land, &land_len) != ESP_OK ||
+        strncmp(s_wallpaper_land, "/sdcard/", 8)) s_wallpaper_land[0] = 0;
     size_t wallpaper_len = sizeof(s_wallpaper);
     if (nvs_get_str(h, NVS_KEY_WALLPAPER, s_wallpaper, &wallpaper_len) != ESP_OK ||
         strncmp(s_wallpaper, "/sdcard/", 8)) s_wallpaper[0] = 0;
@@ -646,6 +651,17 @@ void app_settings_set_bookmark_path(const char *path) {
     if(err==ESP_OK)strlcpy(s_bookmark,path,sizeof(s_bookmark));
 }
 const char* app_settings_wallpaper_path(void) { return s_wallpaper; }
+const char* app_settings_wallpaper_landscape_path(void) { return s_wallpaper_land; }
+void app_settings_set_wallpaper_landscape_path(const char* path) {
+    if (!path || (path[0] && strncmp(path, "/sdcard/", 8)) ||
+        strnlen(path, sizeof(s_wallpaper_land)) >= sizeof(s_wallpaper_land)) return;
+    strlcpy(s_wallpaper_land, path, sizeof(s_wallpaper_land));
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS, NVS_READWRITE, &h) != ESP_OK) return;
+    nvs_set_str(h, NVS_KEY_WALLPAPER_LAND, s_wallpaper_land);
+    nvs_commit(h);
+    nvs_close(h);
+}
 void app_settings_set_wallpaper_path(const char* path) {
     if (!path || (path[0] && strncmp(path, "/sdcard/", 8)) ||
         strnlen(path, sizeof(s_wallpaper)) >= sizeof(s_wallpaper)) return;

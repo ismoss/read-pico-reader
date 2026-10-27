@@ -112,6 +112,7 @@ static void transfer_file_deleted(const char *path) {
     if (!strcmp(app_settings_system_font_path(), path)) app_settings_set_system_font_path("");
     if (!strcmp(app_settings_font_path(), path)) app_settings_set_font_path("");
     if (!strcmp(app_settings_wallpaper_path(), path)) app_settings_set_wallpaper_path("");
+    if (!strcmp(app_settings_wallpaper_landscape_path(), path)) app_settings_set_wallpaper_landscape_path("");
 }
 
 static void transfer_file_moved(const char *old_path, const char *new_path, uint32_t size) {
@@ -128,6 +129,7 @@ static void transfer_file_moved(const char *old_path, const char *new_path, uint
     if (!strcmp(app_settings_system_font_path(), old_path)) app_settings_set_system_font_path(new_path);
     if (!strcmp(app_settings_font_path(), old_path)) app_settings_set_font_path(new_path);
     if (!strcmp(app_settings_wallpaper_path(), old_path)) app_settings_set_wallpaper_path(new_path);
+    if (!strcmp(app_settings_wallpaper_landscape_path(), old_path)) app_settings_set_wallpaper_landscape_path(new_path);
 }
 
 static bool transfer_set_wallpaper(const char *path) {

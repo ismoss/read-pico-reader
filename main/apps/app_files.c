@@ -270,6 +270,8 @@ static void sync_moved_settings(const char *old_path, const char *new_path) {
         app_settings_set_font_path(updated);
     if (rebased_path(app_settings_wallpaper_path(), old_path, new_path, updated, sizeof(updated)))
         app_settings_set_wallpaper_path(updated);
+    if (rebased_path(app_settings_wallpaper_landscape_path(), old_path, new_path, updated, sizeof(updated)))
+        app_settings_set_wallpaper_landscape_path(updated);
 }
 
 static void notify_moved_tree(const char *old_path, const char *new_path, unsigned depth) {
@@ -309,6 +311,7 @@ static void file_deleted(const char *path, bool directory, void *ctx) {
     }
     if (!strcmp(app_settings_font_path(), path)) app_settings_set_font_path("");
     if (!strcmp(app_settings_book_background_path(), path)) (void)app_settings_set_book_background_path("");
+    if (!strcmp(app_settings_wallpaper_landscape_path(), path)) app_settings_set_wallpaper_landscape_path("");
     if (!strcmp(app_settings_wallpaper_path(), path)) {
         app_settings_set_wallpaper_path("");
         app_settings_set_lock_style(0);

@@ -97,10 +97,17 @@ void app_lock_feedback(EpdiyHighlevelState *hl) {
         MODE_DU, area) == EPD_DRAW_SUCCESS;
 }
 
+// 横屏优先用专门的横屏壁纸；没设就沿用竖版图，按横屏画布居中裁切。
+// A dedicated landscape image wins on the landscape canvas; otherwise the portrait image is
+// centre-cropped into it.
+static const char *lock_wallpaper_path(void) {
+    const char *land = app_settings_wallpaper_landscape_path();
+    if (epd_rotated_display_width() > epd_rotated_display_height() && land[0]) return land;
+    return app_settings_wallpaper_path();
+}
 static bool draw_wallpaper(uint8_t *framebuffer) {
-    const char *path = app_settings_wallpaper_path();
     return app_settings_lock_style() == 1 &&
-        ui_wallpaper_prepare_lock(framebuffer,path);
+        ui_wallpaper_prepare_lock(framebuffer,lock_wallpaper_path());
 }
 
 static cst836u_handle_t s_tp;

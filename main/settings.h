@@ -108,6 +108,9 @@ const char* app_settings_bookmark_path(void);
 void app_settings_set_bookmark_path(const char *path);
 const char* app_settings_wallpaper_path(void);
 void app_settings_set_wallpaper_path(const char* path);
+/// 可选的横屏壁纸；空 = 跟随竖版壁纸（按画布居中裁切）。Only for the landscape canvas; empty follows the portrait image with a centre crop.
+const char* app_settings_wallpaper_landscape_path(void);
+void app_settings_set_wallpaper_landscape_path(const char* path);
 /// 上次浅睡唤醒源（app_wake_source_t），掉电也保留。/ Last light-sleep wake source (app_wake_source_t); kept across power loss.
 uint8_t app_settings_last_wake(void);
 void app_settings_set_last_wake(uint8_t src);

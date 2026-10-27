@@ -482,6 +482,16 @@ static int s_wallpaper_count;
 static int s_wallpaper_selected;
 static bool s_wallpaper_confirm, s_wallpaper_preview_ok;
 static bool s_bookmark_picker;
+// 壁纸选择器还有第三个目标：横屏专用壁纸（可选）。三个模式共用同一张列表页。
+// The picker has a third target: an optional landscape-only wallpaper. All three share one list page.
+static bool s_wallpaper_land;
+static const char* wallpaper_target_path(void) {
+    if (s_bookmark_picker) return app_settings_bookmark_path();
+    return s_wallpaper_land ? app_settings_wallpaper_landscape_path() : app_settings_wallpaper_path();
+}
+static const char* wallpaper_mode_label(void) {
+    return s_bookmark_picker ? "选择透明书封" : s_wallpaper_land ? "选择横屏壁纸" : "选择壁纸";
+}
 static uint8_t *s_bookmark_preview;
 static uint8_t *s_bookmark_preview_base;
 
@@ -1230,26 +1240,37 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
         return;
     }
     if (s_page == SETTINGS_WALLPAPER) {
-        back_header(fb,s_bookmark_picker?"选择透明书封":"选择壁纸");
-        section(fb,244,s_bookmark_picker?"pictures · 透明 PNG · 保留整张画布":"TF 卡图片 · JPG / PNG · 不超过 50 MB");
+        back_header(fb,wallpaper_mode_label());
+        section(fb,244,s_bookmark_picker?"pictures · 透明 PNG · 保留整张画布":
+                  s_wallpaper_land?"横屏 1216 × 684 · 不选就跟随竖版":"TF 卡图片 · JPG / PNG · 不超过 50 MB");
         if (!s_wallpaper_count)
             ui_text(fb, 54, 325, 25, "未找到图片，请放入 TF 卡的 pictures 文件夹", EPD_DRAW_ALIGN_LEFT, false);
         for (int i = 0; i < 8; ++i) {
             int index = s_wallpaper_page * 8 + i;
             if (index >= s_wallpaper_count) break;
             EpdRect box = {36, 292 + i * 92, 612, 78};
-            bool active = !strcmp(s_wallpapers[index].path,s_bookmark_picker?app_settings_bookmark_path():app_settings_wallpaper_path());
+            bool active = !strcmp(s_wallpapers[index].path,wallpaper_target_path());
             settings_card(fb, box, 18, active ? 0xd0 : UI_GRAY_WHITE, 0x70);
             char name[96]; snprintf(name, sizeof(name), "%s", s_wallpapers[index].name);
             fit_value(name, 490);
             ui_text_vc(fb, 60, box.y + 39, 24, name, EPD_DRAW_ALIGN_LEFT, false);
             if (active) epd_fill_circle(609, box.y + 39, 6, UI_GRAY_BLACK, fb);
         }
+        // 底部一格模式按钮：普通壁纸页提供"设置横屏壁纸"，横屏页提供"跟随竖版（清除）"。
+        // One mode slot at the bottom: the portrait list offers the landscape slot, the landscape list
+        // offers the follow-portrait reset.
+        if (!s_bookmark_picker) {
+            EpdRect box = {36, 1032, 612, 74};
+            settings_card(fb, box, 18, UI_GRAY_WHITE, 0x70);
+            ui_text_vc(fb, 60, box.y + 37, 24,
+                       s_wallpaper_land ? "跟随竖版（清除横屏图）" : "设置横屏壁纸 ›",
+                       EPD_DRAW_ALIGN_LEFT, false);
+        }
         settings_navigation(fb);
         return;
     }
     if (s_page == SETTINGS_WALLPAPER_PREVIEW) {
-        back_header(fb,s_bookmark_picker?"预览透明书封":"预览壁纸");
+        back_header(fb,s_bookmark_picker?"预览透明书封":s_wallpaper_land?"预览横屏壁纸":"预览壁纸");
         EpdRect image = {166, 194, 352, 626};
         ui_fill_round_rect(fb, image, 8, UI_GRAY_WHITE);
         s_wallpaper_preview_ok = s_wallpaper_selected >= 0 && s_wallpaper_selected < s_wallpaper_count &&
@@ -1269,14 +1290,14 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
         if (s_wallpaper_preview_ok) {
             EpdRect button = {94, 962, 496, 70};
             ui_fill_round_rect(fb, button, 22, 0x30);
-            ui_text_vc(fb, 342, 997, 25, s_bookmark_picker?"使用透明书封":"设为锁屏壁纸", EPD_DRAW_ALIGN_CENTER, true);
+            ui_text_vc(fb, 342, 997, 25, s_bookmark_picker?"使用透明书封":s_wallpaper_land?"设为横屏壁纸":"设为锁屏壁纸", EPD_DRAW_ALIGN_CENTER, true);
         }
         if (s_wallpaper_confirm) {
             EpdRect dialog = {68, 435, 548, 306};
             ui_fill_round_rect(fb, dialog, 26, UI_GRAY_WHITE);
             ui_draw_control_frame(fb, dialog, 26, 0x50);
-            ui_text_vc(fb, 342, 503, 31, s_bookmark_picker?"开启透明书封锁屏？":"设为壁纸锁屏？", EPD_DRAW_ALIGN_CENTER, false);
-            ui_text_vc(fb, 342, 565, 20, s_bookmark_picker?"以锁屏前当前页面为背景":"确认后，短按电源键将显示此图片", EPD_DRAW_ALIGN_CENTER, false);
+            ui_text_vc(fb, 342, 503, 31, s_bookmark_picker?"开启透明书封锁屏？":s_wallpaper_land?"设为横屏壁纸？":"设为壁纸锁屏？", EPD_DRAW_ALIGN_CENTER, false);
+            ui_text_vc(fb, 342, 565, 20, s_bookmark_picker?"以锁屏前当前页面为背景":s_wallpaper_land?"只在横屏锁屏时使用这张图":"确认后，短按电源键将显示此图片", EPD_DRAW_ALIGN_CENTER, false);
             EpdRect cancel = {94, 643, 232, 68}, confirm = {358, 643, 232, 68};
             ui_fill_round_rect(fb, cancel, 18, 0xe0);
             ui_fill_round_rect(fb, confirm, 18, 0x30);
@@ -2160,9 +2181,13 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         if (ev->y0 >= 643 && ev->y0 < 711 && ev->x0 >= 358 && ev->x0 < 590) {
             const char *path = s_wallpapers[s_wallpaper_selected].path;
             if(s_bookmark_picker)app_settings_set_bookmark_path(path);
+            else if(s_wallpaper_land)app_settings_set_wallpaper_landscape_path(path);
             else app_settings_set_wallpaper_path(path);
-            if (!strcmp(s_bookmark_picker?app_settings_bookmark_path():app_settings_wallpaper_path(), path)) {
-                app_settings_set_lock_style(s_bookmark_picker?3:1);
+            if (!strcmp(wallpaper_target_path(), path)) {
+                // 横屏图只是一张附加图，不改锁屏样式；竖版壁纸/书封才切样式。
+                // The landscape image is an extra, so it leaves the lock style alone; the portrait
+                // wallpaper and the cover do switch it.
+                if (!s_wallpaper_land) app_settings_set_lock_style(s_bookmark_picker?3:1);
                 s_page = SETTINGS_LOCK_STYLE;
                 bookmark_preview_release();
             }
@@ -2355,7 +2380,7 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
             return APP_REDRAW_PAGE;
         }
         if (y >= 428 && y < 538) {
-            s_bookmark_picker=false;wallpaper_scan();
+            s_bookmark_picker=false;s_wallpaper_land=false;wallpaper_scan();
             s_page = SETTINGS_WALLPAPER;
             return APP_REDRAW_PAGE;
         }
@@ -2369,17 +2394,28 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
             return APP_REDRAW_PAGE;
         }
         if(y>=812&&y<922){
-            s_bookmark_picker=true;wallpaper_scan();s_page=SETTINGS_WALLPAPER;
+            s_bookmark_picker=true;s_wallpaper_land=false;wallpaper_scan();s_page=SETTINGS_WALLPAPER;
             return APP_REDRAW_PAGE;
         }
         if (y >= 984 && app_settings_wallpaper_path()[0]) {
-            s_bookmark_picker=false;wallpaper_scan();
+            s_bookmark_picker=false;s_wallpaper_land=false;wallpaper_scan();
             s_page = SETTINGS_WALLPAPER;
             return APP_REDRAW_PAGE;
         }
         return APP_REDRAW_NONE;
     }
     if (s_page == SETTINGS_WALLPAPER) {
+        if (y >= 1032 && y < 1106) {
+            // 普通壁纸页 → 切到横屏槽；横屏页 → 清除，回到跟随竖版。
+            // Portrait list -> the landscape slot; landscape list -> clear it, back to follow-portrait.
+            if (!s_bookmark_picker) {
+                if (s_wallpaper_land) {
+                    app_settings_set_wallpaper_landscape_path("");
+                    s_wallpaper_land = false;
+                } else s_wallpaper_land = true;
+                return APP_REDRAW_PAGE;
+            }
+        }
         if (y < 292 || y >= 1028) return APP_REDRAW_NONE;
         int index = s_wallpaper_page * 8 + (y - 292) / 92;
         if (index >= s_wallpaper_count) return APP_REDRAW_NONE;
