@@ -172,7 +172,14 @@ void lock_screen_authenticate(EpdiyHighlevelState *hl,cst836u_handle_t touch,sc7
                 if(r!=UI_PIN_NONE){ui_pinpad_paint_input(fb,&pad);present_input(hl,dirty);}
                 if(r==UI_PIN_COMPLETE){
                     bool verified=lock_pin_verify(pad.digits);
-                    if(verified){ui_pinpad_end(&pad);free(original);read_pico_pmu_drain_events();ble_pt_event_t e;while(ble_pt_pop_key(&e)){}ble_pt_raw_t raw;while(ble_pt_pop_raw(&raw)){}return;}
+                    if(verified){
+                        // 密码键盘是按局部 DU 刷的，直接放行会让解锁后的第一帧带着键位残影；
+                        // 让下一页整屏 GC16 定稿，把键盘和圆点一次清干净。
+                        // The pad is presented with partial DU updates, so releasing straight away leaves
+                        // key ghosts in the first frame after unlock; the next full GC16 settles it.
+                        display_request_full_refresh();
+                        ui_pinpad_end(&pad);free(original);read_pico_pmu_drain_events();ble_pt_event_t e;while(ble_pt_pop_key(&e)){}ble_pt_raw_t raw;while(ble_pt_pop_raw(&raw)){}return;
+                    }
                     ui_pinpad_reset(&pad,NULL,"密码不正确，请重试");
                     if(++failures>=3){failures=0;retry_at=now+10000;pad.blocked=true;snprintf(pad.notice,sizeof(pad.notice),"请等待 10 秒后重试");}
                     ui_pinpad_paint(fb,&pad,ui_pinpad_entry_area());present(hl,ui_pinpad_entry_area());

@@ -148,6 +148,21 @@ static EpdiyHighlevelState *s_lock_hint_hl;
 static EpdiyHighlevelState *s_boot_lock_hl;
 static bool s_boot_lock_active, s_boot_lock_known, s_boot_lock_draw;
 
+// 开机锁面方向：这次开机要恢复进书、阅读是横屏、样式支持横版时，锁面按横屏画/校验。
+// 深睡重启会把旋转重置回竖屏，否则同一张横版票根在开机时变成竖版，和锁屏时看到的不是一张脸。
+// Boot lock face orientation: when this boot resumes into a landscape book and the style supports
+// landscape, draw and validate the face in landscape. A deep-sleep reboot resets the rotation, so
+// the same landscape ticket would otherwise come back portrait — a different face than the one the
+// user locked with.
+static bool boot_lock_landscape(void) {
+    uint8_t style = app_settings_lock_style();
+    return (style == 0 || style == 2) && pico_boot_has_resume() &&
+           pico_boot_resume_in_reader() && app_settings_reader_landscape() > 0;
+}
+static enum EpdRotation boot_lock_rotation(void) {
+    return app_settings_reader_landscape() == 1 ? EPD_ROT_INVERTED_LANDSCAPE : EPD_ROT_LANDSCAPE;
+}
+
 // 未恢复像素前不做差分提示；缺卡/坏透明底图仍保留物理锁图，不假设白底。
 // Never hint against unknown pixels; absent media or a damaged transparent backdrop keeps physical art rather than assuming white.
 static void lock_resume_service(void) {
@@ -156,6 +171,10 @@ static void lock_resume_service(void) {
     read_pico_sd_info_t info={0};
     if(read_pico_sd_get_info(&info)==ESP_ERR_NOT_FINISHED)return;
     if(!info.mounted){s_boot_lock_hl=NULL;return;}
+    // 先对齐方向再校验缓存：锁图头里记着旋转，竖屏去读横版锁图会被判失效而改画一张竖版。
+    // Align the orientation before validating the cache: the art header records the rotation, and
+    // reading a landscape frame in portrait marks it stale and redraws a portrait face instead.
+    if (boot_lock_landscape()) epd_set_rotation(boot_lock_rotation());
     uint8_t *fb=epd_hl_get_framebuffer(hl);
     bool restored=lock_screen_restore(fb);
     if(!restored && !s_boot_lock_draw)return;
@@ -811,13 +830,20 @@ bool lock_pin_grace_active(void) {
 void app_lock_boot_gate(EpdiyHighlevelState *hl, cst836u_handle_t touch, sc7a20h_handle_t acc) {
     s_lock_hint_hl=s_boot_lock_active&&!s_boot_lock_known?NULL:hl;s_lock_hint.serial=0;
     s_boot_lock_draw=true;lock_resume_service();
+    // 开机锁面沿用锁屏时的方向；验证/放行结束后交还竖屏，页面自己按设置重进横屏。
+    // Keep the boot face in the orientation the user locked with; hand portrait back once the gate
+    // is done, and the page re-enters landscape from the saved setting by itself.
+    const bool boot_landscape = boot_lock_landscape();
+    if (boot_landscape) epd_set_rotation(boot_lock_rotation());
     if (!lock_pin_enabled() || (pico_boot_has_resume() && lock_pin_grace_active())) {
         if(pico_boot_has_resume()) {
             pico_boot_ready();pico_boot_hold_resume();
             (void)app_light_sleep_wait_timed(NULL,0);
             auto_connect_on_wake();
         }
-        s_boot_lock_hl=NULL;s_boot_lock_active=false;s_lock_hint_hl=NULL;return;
+        s_boot_lock_hl=NULL;s_boot_lock_active=false;s_lock_hint_hl=NULL;
+        if (boot_landscape) epd_set_rotation(EPD_ROT_INVERTED_PORTRAIT);
+        return;
     }
     // 卡挂载有界等待仅为了字体/锁屏图；没有卡仍必须验证。
     // Bound mount waiting for the face/art only; absent media still requires authentication.
@@ -847,5 +873,6 @@ void app_lock_boot_gate(EpdiyHighlevelState *hl, cst836u_handle_t touch, sc7a20h
     // 二改：开机验证通过也是一种解锁——同样自动连网（此前只接了浅睡唤醒路径，深睡开机漏了）。
     // Mod: a verified boot is also an unlock — auto-connect here too (previously wired only
     // for the light-sleep wake path, the deep-sleep boot was missed).
+    if (boot_landscape) epd_set_rotation(EPD_ROT_INVERTED_PORTRAIT);
     auto_connect_on_wake();
 }

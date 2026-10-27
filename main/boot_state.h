@@ -21,6 +21,8 @@ void pico_boot_ready(void);
 bool pico_boot_recovery(void);
 /// 只观察恢复检查点，不消费也不改写Flash。/ Inspect the resume checkpoint without consuming it or writing Flash.
 bool pico_boot_has_resume(void);
+/// 这次开机要恢复进书时，记录里的阅读上下文是否在书内；只作开机锁面的方向提示，不消费。/ When this boot will resume, whether the recorded context sat inside a book; orientation hint for the boot lock face only, never consumed.
+bool pico_boot_resume_in_reader(void);
 /// 仅刚刚保存成功的实际锁屏可用作下次深睡启动参考。/ Only a successfully persisted actual lock frame may seed the next deep-sleep boot reference.
 esp_err_t pico_boot_mark_frame_cached(void);
 bool pico_boot_resume_frame_cached(void);

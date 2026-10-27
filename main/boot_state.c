@@ -219,6 +219,7 @@ esp_err_t pico_boot_mark_frame_cached(void) {
 }
 bool pico_boot_resume_frame_cached(void) { return s_resume_frame && s_resume_pending && !s_recovery; }
 bool pico_boot_has_resume(void) { return s_resume_pending && !s_recovery; }
+bool pico_boot_resume_in_reader(void) { return s_resume_pending && s_record.resume.reader == 1; }
 bool pico_boot_take_resume(pico_resume_t *resume) {
     if (!resume || !s_resume_pending) return false;
     // 密码等待可能再次持久化；先消费再允许恢复，写入失败不能重试开书。
