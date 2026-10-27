@@ -156,21 +156,19 @@ static void stop_server(void) {
     ESP_LOGI(TAG, "stopped");
 }
 
-// 四位数进入密码：只在设置里打开时生效，让用户在电脑上直接输 URL 就能看。
-// The four-digit entry PIN only applies while the option is on, so a desktop can open the page by
-// typing the URL instead of copying a 32-hex token.
-static bool pin_matches(const char *candidate) {
-    if (!candidate || strlen(candidate) != 4) return false;
-    if (!app_settings_monitor_pin_on()) return false;
-    uint16_t pin = app_settings_monitor_pin();
-    if (pin < 1000) return false;
-    char expected[12];
-    snprintf(expected, sizeof(expected), "%04u", (unsigned)pin);
-    return !strcmp(candidate, expected);
-}
-
 static bool token_matches(const char *candidate) {
-    if (candidate && strlen(candidate) == 4 && pin_matches(candidate)) return true;
+    // 四位数进入密码：只在设置里打开时生效，让电脑直接输 URL 就能看。逻辑内联在这里，
+    // 因为宿主测试按函数名切片，单独的 static 小助手会被切丢。
+    // The four-digit entry PIN applies only while the option is on, so a desktop can just type the
+    // URL. Kept inline because the host harness slices functions by name and would drop a helper.
+    if (candidate && strlen(candidate) == 4 && app_settings_monitor_pin_on()) {
+        uint16_t pin = app_settings_monitor_pin();
+        if (pin >= 1000) {
+            char expected[12];
+            snprintf(expected, sizeof(expected), "%04u", (unsigned)pin);
+            if (!strcmp(candidate, expected)) return true;
+        }
+    }
     if (!candidate || strlen(candidate) != MON_TOKEN_HEX) return false;
     char expected[MON_TOKEN_HEX + 1];
     portENTER_CRITICAL(&s_token_mux);

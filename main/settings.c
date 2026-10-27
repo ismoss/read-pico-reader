@@ -315,9 +315,9 @@ void app_settings_init(void) {
     // 4 = lock face off (blank sleep), kept in the same enum as ticket/wallpaper/collage/bookmark.
     if (nvs_get_u8(h, NVS_KEY_LOCK_STYLE, &lock_style) == ESP_OK && lock_style <= 4)
         s_lock_style = lock_style;
-    uint16_t mon_pin = 0;
-    if (nvs_get_u16(h, NVS_KEY_MON_PIN, &mon_pin) == ESP_OK && mon_pin >= 1000 && mon_pin <= 9999)
-        s_mon_pin = mon_pin;
+    uint32_t mon_pin_raw = 0;
+    if (nvs_get_u32(h, NVS_KEY_MON_PIN, &mon_pin_raw) == ESP_OK && mon_pin_raw >= 1000 && mon_pin_raw <= 9999)
+        s_mon_pin = (uint16_t)mon_pin_raw;
     size_t land_len = sizeof(s_wallpaper_land);
     if (nvs_get_str(h, NVS_KEY_WALLPAPER_LAND, s_wallpaper_land, &land_len) != ESP_OK ||
         strncmp(s_wallpaper_land, "/sdcard/", 8)) s_wallpaper_land[0] = 0;
@@ -672,7 +672,7 @@ void app_settings_set_monitor_pin(uint16_t pin) {
     s_mon_pin = pin;
     nvs_handle_t h;
     if (nvs_open(NVS_NS, NVS_READWRITE, &h) != ESP_OK) return;
-    nvs_set_u16(h, NVS_KEY_MON_PIN, pin);
+    nvs_set_u32(h, NVS_KEY_MON_PIN, (uint32_t)pin);
     nvs_commit(h);
     nvs_close(h);
 }

@@ -62,6 +62,10 @@ static char s_url[96];
 '''
 unit += function('write_bmp_header', monitor) + '\n'
 unit += function('build_frame', monitor) + '\n'
+# 监看进入密码：默认关闭，宿主里只需提供这两个设置查询（必须放在切片函数之前）。
+# Monitor PIN: off by default; only these two reads are needed, declared before the sliced function.
+unit += 'static bool app_settings_monitor_pin_on(void){return false;}\n'
+unit += 'static uint16_t app_settings_monitor_pin(void){return 0;}\n'
 unit += function('token_matches', monitor) + '\n'
 unit += function('mod_monitor_init', monitor) + '\n'
 unit += r'''
