@@ -347,6 +347,10 @@ static int64_t s_shelf_key_until;
 static int64_t s_reader_clock_minute = -1, s_reader_clock_painted_minute = -1;
 static bool s_reader_clock_pending;
 static char s_message[128], s_storage[128], s_path[BOOK_STORE_PATH_MAX], s_title[128];
+// 字体面板的一次性提示：载入/保存失败必须让用户看见，静默失败正是"字体改完又变回去"的来源。
+// One-shot notice inside the face panels: a failed load/save has to be visible, since a silent
+// failure is exactly what made the face look like it reverted on its own.
+static char s_font_picker_notice[96];
 static char s_book_title[128];
 static char s_chapter_heading_title[128], s_chapter_heading_label[32];
 static size_t s_chapter_lead_skip;
@@ -2933,10 +2937,22 @@ static void draw_font_picker(uint8_t* fb) {
     }
     if (active_builtin) (void)ttf_font_open_builtin();
     else if (active[0]) (void)ttf_font_open(active);
+    // 预览过最多 5 个字体后必须真的回到正文那个字体。回不去就先记一笔，正文的字体由 on_tick
+    // 在面板关闭后按"保存的设置"重新激活——绘制函数不再顺手改全局字体状态。
+    // After up to five previews the body face must really be back. If it is not, say so and let
+    // on_tick re-activate the saved setting once the panel closes: a render must not reach out and
+    // change global font state on its own.
+    if (strcmp(ttf_font_path(), active) != 0) {
+        ESP_LOGW("book", "face preview did not restore %s (now %s)", active, ttf_font_path());
+        copy_text(s_font_picker_notice, sizeof(s_font_picker_notice), "字体预览失败");
+    }
     // 字体名称预览归还真实阅读字库后，再确认本次选择是否回退。
     // Observe the actual reader face after name previews have restored it.
     reader_font_choice_finish();
     if (!count) reader_panel_text_vc(fb, wide ? w / 2 : 342, wide ? top + 280 : 780, 24, "所选字体目录中没有可用字体", EPD_DRAW_ALIGN_CENTER, false);
+    else if (s_font_picker_notice[0])
+        reader_panel_text_vc(fb, wide ? w / 2 : 342, wide ? top + 280 : 780, 22,
+                             s_font_picker_notice, EPD_DRAW_ALIGN_CENTER, false);
 }
 
 static EpdRect reader_font_recovery_button(int index) {
@@ -6024,13 +6040,38 @@ static app_redraw_t toggle_reader_fullscreen(app_ctx_t* ctx) {
 }
 
 static app_redraw_t select_reading_font_item(app_ctx_t* ctx, const ttf_font_item_t* item) {
-    if (item && ttf_font_path_is_builtin(item->path)) reader_font_choice_begin(item->path);
-    if (!item || !strcmp(ttf_font_path(), item->path)) return APP_REDRAW_NONE;
+    if (!item) return APP_REDRAW_NONE;
+    // 用户明确选择时先清掉"这个文件打不开"的缓存：一次瞬时读取失败不该把整个开机周期判成内建字体，
+    // 而 draw_font_picker 的预览正是最容易制造这种失败的地方。
+    // An explicit choice clears the "cannot open" cache: one transient read failure must not pin the
+    // whole boot to the built-in face, and the previews in draw_font_picker are the easiest way to
+    // manufacture one.
+    app_font_forget_rejection();
     reader_font_choice_begin(item->path);
+    if (!strcmp(ttf_font_path(), item->path)) {
+        // 预览可能已经把这张字体临时打开过：仍然要落库，不能因为"看起来已经是它"就整条跳过。
+        // A preview may already have this face open; still persist the choice instead of skipping it
+        // because the face already "looks" selected.
+        app_settings_set_font_path(item->path);
+        if (strcmp(app_settings_font_path(), item->path)) {
+            copy_text(s_font_picker_notice, sizeof(s_font_picker_notice), "字体路径过长，未能保存");
+        } else {
+            s_font_picker_notice[0] = 0;
+            copy_text(s_font_path, sizeof(s_font_path), item->path);
+        }
+        reader_font_choice_finish();
+        return APP_REDRAW_PAGE;
+    }
     char previous[TTF_FONT_PATH_MAX];
     copy_text(previous, sizeof(previous), ttf_font_path());
-    if (ttf_font_open(item->path) != ESP_OK) {
+    if (ttf_font_open(item->path) != ESP_OK || strcmp(ttf_font_path(), item->path) != 0) {
+        // 打不开就明说并把原字体放回去；以前这里静默 return，用户只看到"改完字体闪一下又变回思源黑体"。
+        // Say it out loud and restore the previous face: this used to return silently, which is why a
+        // pick looked like it worked while the body kept the built-in face.
+        ESP_LOGW("book", "reader face %s failed to open", item->path);
         reader_font_choice_finish();
+        (void)app_font_activate_reading();
+        copy_text(s_font_picker_notice, sizeof(s_font_picker_notice), "字体载入失败，已保留原字体");
         return APP_REDRAW_PAGE;
     }
     size_t off = book_layout_page_start_offset(s_page);
@@ -6043,8 +6084,15 @@ static app_redraw_t select_reading_font_item(app_ctx_t* ctx, const ttf_font_item
         (void)book_layout_build_blocks(s_text, s_text_len, s_blocks, s_block_count, body_rect(), s_px);
     }
     unlock_draw();
-    if (!ok) { reader_font_choice_finish(); return APP_REDRAW_PAGE; }
+    if (!ok) {
+        reader_font_choice_finish();
+        copy_text(s_font_picker_notice, sizeof(s_font_picker_notice), "字体重排失败，已保留原字体");
+        return APP_REDRAW_PAGE;
+    }
     app_settings_set_font_path(item->path);
+    if (strcmp(app_settings_font_path(), item->path))
+        copy_text(s_font_picker_notice, sizeof(s_font_picker_notice), "字体路径过长，未能保存");
+    else s_font_picker_notice[0] = 0;
     copy_text(s_font_path, sizeof(s_font_path), item->path);
     save_progress();
     return APP_REDRAW_PAGE;
@@ -6489,6 +6537,7 @@ static app_redraw_t reader_panel_action(app_ctx_t* ctx, uint16_t x, uint16_t y) 
                 if (item && !strcmp(active, item->path)) { s_font_page = i / BOOK_FONT_PAGE; break; }
             }
             s_reader_panel = READER_PANEL_FONT_PICKER;
+            s_font_picker_notice[0] = 0;
             return APP_REDRAW_PAGE;
         }
         if (ui_rect_hit(s_weight_card, x, y)) {
@@ -8148,7 +8197,20 @@ static app_redraw_t on_tick(app_ctx_t* ctx) {
     warm_shelf_lock_cover(ctx);
     if (ctx->request_app) return APP_REDRAW_NONE;
     // 目录暂借系统字体，不应把正文按系统字体重新分页。/ The directory borrows the system face without repaginating the reader.
-    if (s_view == READING && s_text && strcmp(s_font_path, ttf_font_path())) {
+    // 字体面板更狠：绘制预览会临时打开别的字体。面板开着时一律不重排——否则一次预览失败就会把整本书
+    // 永久按内建字体分页（用户看到的就是"改个字体，闪一下回到思源黑体"）。
+    // The face panels are worse: painting previews opens other faces. Never repaginate while a panel
+    // is up, or one failed preview permanently rebuilds the book in the built-in face — which is the
+    // "change the font, it flashes and reverts to Source Han Sans" report.
+    if (s_view == READING && s_reader_panel == READER_PANEL_NONE && s_text &&
+        strcmp(s_font_path, ttf_font_path())) {
+        // 正文的字体只认"保存的设置"：先把保存的字体重新激活，再决定是否重排。以前这里直接采用
+        // "当前激活的字体"，于是字体预览失败留下的内建字体就被当成正文基线写进 s_font_path。
+        // The body face follows the saved setting only: re-activate it first, then decide whether to
+        // rebuild. This used to adopt "whatever face happens to be active", so a failed preview's
+        // built-in face became the pagination baseline.
+        (void)app_font_activate_reading();
+        if (!strcmp(s_font_path, ttf_font_path())) return APP_REDRAW_NONE;
         size_t off = book_layout_page_start_offset(s_page);
         save_progress();
         lock_draw();

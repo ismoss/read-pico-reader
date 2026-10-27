@@ -2479,7 +2479,10 @@ static esp_err_t open_path_here(const char* path) {
         ESP_LOGW(TAG, "TTF missing: %s", path);
         if (prev_file) {
             font_fd = try_open_path(prev);
-            if (font_fd >= 0) return load_opened_font();
+            // 请求的字体没打开，只是把上一张放回去了：必须如实报告失败，否则调用方会以为切换成功。
+            // The requested face did not open; the previous one was merely restored. Report the
+            // failure honestly or callers believe the switch succeeded.
+            if (font_fd >= 0 && load_opened_font() == ESP_OK) return ESP_ERR_NOT_FOUND;
         }
         return ttf_font_open_builtin() == ESP_OK ? ESP_ERR_NOT_FOUND : ESP_FAIL;
     }

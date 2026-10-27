@@ -12,11 +12,14 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
+#include "esp_log.h"
 #include "settings.h"
 #include "boot_state.h"
 #include "ttf_font.h"
 #include "ui_kit.h"
 #include "ui_nav.h"
+
+static const char *TAG = "font";
 
 static bool s_reading;
 // Failed unchanged files are not repeatedly opened (opening unloads the active slot).
@@ -46,12 +49,19 @@ static bool activate(const char* path) {
     bool valid = builtin || font_file(path, &st);
     bool rejected = !builtin && !strcmp(s_rejected, path) &&
         s_rejected_mtime == st.st_mtime && s_rejected_size == st.st_size;
-    if (!valid || rejected) path = TTF_FONT_BUILTIN;
+    if (!valid || rejected) {
+        // 说清为什么退回内建字体：以前这里是静默的，用户只看到"字体自己变回去了"。
+        // Say why we fall back: this used to be silent, so the user only saw the face revert.
+        ESP_LOGW(TAG, "face %s unavailable (valid=%d rejected=%d)", path ? path : "(null)",
+                 (int)valid, (int)rejected);
+        path = TTF_FONT_BUILTIN;
+    }
     if (ttf_font_ready() && !strcmp(ttf_font_path(), path)) return false;
     if (ttf_font_open(path) == ESP_OK) {
         if (!ttf_font_path_is_builtin(path)) s_rejected[0] = 0;
         return true;
     }
+    ESP_LOGW(TAG, "open %s failed, falling back to builtin", path ? path : "(null)");
     if (!ttf_font_path_is_builtin(path)) {
         snprintf(s_rejected, sizeof(s_rejected), "%s", path);
         s_rejected_mtime = st.st_mtime;
@@ -59,6 +69,12 @@ static bool activate(const char* path) {
     }
     if (ttf_font_ready() && ttf_font_is_builtin()) return false;
     return ttf_font_open_builtin() == ESP_OK;
+}
+
+void app_font_forget_rejection(void) {
+    s_rejected[0] = 0;
+    s_rejected_mtime = 0;
+    s_rejected_size = 0;
 }
 
 bool app_font_activate_system(void) {
