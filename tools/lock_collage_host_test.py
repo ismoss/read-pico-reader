@@ -135,7 +135,7 @@ void epd_draw_pixel(int x,int y,uint8_t c,uint8_t *fb){if(x<0||y<0||x>=684||y>=1
 esp_err_t nvs_open(const char *s,int m,nvs_handle_t *h){(void)s;(void)m;*h=1;return ESP_OK;}
 esp_err_t nvs_get_str(nvs_handle_t h,const char *k,char *s,size_t *n){(void)h;(void)k;if(!hidden_path)return ESP_ERR_NOT_FOUND;size_t z=strlen(hidden_path)+1;if(*n<z)return ESP_FAIL;memcpy(s,hidden_path,z);*n=z;return ESP_OK;}
 void nvs_close(nvs_handle_t h){assert(h==1);}
-esp_err_t book_store_roots(book_store_root_t *r,int *n){snprintf(r[0].path,sizeof(r[0].path),"%s/books",fixtures);*n=1;return ESP_OK;}
+esp_err_t book_store_roots(book_store_root_t r[BOOK_STORE_ROOT_MAX],int *n){snprintf(r[0].path,sizeof(r[0].path),"%s/books",fixtures);*n=1;return ESP_OK;}
 bool book_store_roots_degraded(void){return false;}
 esp_err_t book_progress_list(book_progress_visit_fn f,void *c){(void)f;(void)c;return ESP_OK;}
 bool book_progress_load(const char *p,uint32_t s,book_progress_t *out){(void)s;const char *name=strrchr(p,'/');int id=atoi(name+1);out->last_open_s=100-(unsigned)id+recent_bump+(id==promoted?1000:0);return true;}
