@@ -130,12 +130,14 @@ static bool image_pixels_rot(uint8_t *fb, uint8_t *pixels, const char *path, Epd
             int dx = x - area.x, dy = y - area.y;
             int source_x, source_y;
             if (rotate) {
-                // 顺时针 90°：目标 (dx,dy) 取源 (dy, height-1-dx)。
-                // Clockwise 90°: destination (dx,dy) samples source (dy, height-1-dx).
-                source_x = (int)((int64_t)dy * crop_h / area.height) + crop_x;
-                source_y = (int)((int64_t)(height - 1 - dx) * crop_w / area.width) + crop_y;
-                if (source_y < 0) source_y = 0;
-                if (source_y >= (int)height) source_y = (int)height - 1;
+                // 顺时针 90°：源像素 (x,y) 落到 (x'=H-1-y, y'=x)，所以目标 (dx,dy) 取源
+                // (x=dy, y=H-1-dx)。这里 H = 解码高 = area.width，只在"比例已对齐"（整图裁切）
+                // 的路径用，见 ui_wallpaper_fit_pixels。
+                // Clockwise 90°: source (x,y) lands at (x'=H-1-y, y'=x), so destination (dx,dy)
+                // samples (x=dy, y=H-1-dx). H = decoded height = area.width; only used on the
+                // aspect-matched (full-crop) path from ui_wallpaper_fit_pixels.
+                source_x = dy + crop_x;
+                source_y = (int)height - 1 - dx + crop_y;
             } else {
                 source_x = crop_x + (int)((int64_t)dx * crop_w / area.width);
                 source_y = crop_y + (int)((int64_t)dy * crop_h / area.height);
@@ -175,10 +177,11 @@ bool ui_wallpaper_fit_pixels(const char *path, EpdRect box, uint8_t *pixels, Epd
     bool png = !strcasecmp(ext, ".png");
     unsigned sw = 0, sh = 0;
     if (!book_image_file_dimensions(path, png, &sw, &sh) || !sw || !sh) return false;
-    // 按原比例完整放进 box：横图取宽度、竖图取高度，都不裁切。
-    // Fit the whole image into the box: wide images take the width, tall ones the height; no crop.
-    int w = box.width, h = (int)((uint64_t)box.width * sh / sw);
-    if (h > box.height) { h = box.height; w = (int)((uint64_t)box.height * sw / sh); }
+    // 按原比例完整放进 box，不裁切；旋转时用"转过之后"的宽高（横图转完是竖的）。
+    // Fit the whole image into the box without cropping; when rotating, use the swapped aspect.
+    const unsigned eff_w = rotate ? sh : sw, eff_h = rotate ? sw : sh;
+    int w = box.width, h = (int)((uint64_t)box.width * eff_h / eff_w);
+    if (h > box.height) { h = box.height; w = (int)((uint64_t)box.height * eff_w / eff_h); }
     if (w < 1) w = 1;
     if (h < 1) h = 1;
     EpdRect area = {0, 0, w, h};
