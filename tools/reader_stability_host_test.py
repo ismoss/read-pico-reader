@@ -114,9 +114,9 @@ ticket+=function('text_fit',ROOT/'main/book/book_ticket.c')+'\n'+function('ticke
 ticket+=r'''
 int main(void){uint8_t fb[1];char line[128];
  for(scale=100;scale<=200;scale+=25)for(face_width=85;face_width<=150;face_width+=5){
-  min_y=914;max_y=962;snprintf(line,sizeof(line),"今日阅读 %llu 分钟  ·  翻页 %u 次",(unsigned long long)(UINT64_MAX/60),UINT32_MAX);ticket_stat(fb,min_y,48,28,line);
-  min_y=969;max_y=1043;snprintf(line,sizeof(line),"累计阅读 %llu 小时 %llu 分钟  ·  翻页 %u 次",(unsigned long long)(UINT64_MAX/3600),(unsigned long long)59,UINT32_MAX);ticket_stat(fb,min_y,74,28,line);
-  min_y=802;max_y=856;ticket_stat(fb,min_y,54,34,"已读 100%  ·  第 4294967295 章");
+  min_y=914;max_y=962;snprintf(line,sizeof(line),"今日阅读 %llu 分钟  ·  翻页 %u 次",(unsigned long long)(UINT64_MAX/60),UINT32_MAX);ticket_stat(fb,82,min_y,48,28,520,line);
+  min_y=969;max_y=1043;snprintf(line,sizeof(line),"累计阅读 %llu 小时 %llu 分钟  ·  翻页 %u 次",(unsigned long long)(UINT64_MAX/3600),(unsigned long long)59,UINT32_MAX);ticket_stat(fb,82,min_y,74,28,520,line);
+  min_y=802;max_y=856;ticket_stat(fb,82,min_y,54,34,520,"已读 100%  ·  第 4294967295 章");
  }assert(draws);puts("PASS: UINT64 durations/UINT32 turns and chapters remain within ticket at 100-200% UI and varying font widths");}
 '''
 with tempfile.TemporaryDirectory(dir=ROOT/'build') as directory:

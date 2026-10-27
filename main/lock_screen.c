@@ -93,6 +93,15 @@ static void present_input(EpdiyHighlevelState *hl,EpdRect area){
     if(result!=EPD_DRAW_SUCCESS)present(hl,ui_pinpad_full());
 }
 
+// 清白整块画布：横版锁屏时画布是 1216×684，用旋转感知尺寸才不会只白掉竖屏那一块。
+// 这里直接用 epdiy 的旋转查询（不经过 ui_kit），宿主测试切片编译本文件时只带 epdiy 替身。
+// White the whole canvas: a landscape lock canvas is 1216×684, so the rotation-aware size is what
+// keeps the portrait constants from blanking only part of the panel. The epdiy queries are used
+// directly (not via ui_kit) because the host test slices this file with only an epdiy shim.
+static void blank_canvas(uint8_t *fb){
+    ui_fill_rect_fast((EpdRect){0,0,epd_rotated_display_width(),epd_rotated_display_height()},UI_GRAY_WHITE,fb);
+}
+
 void lock_screen_authenticate(EpdiyHighlevelState *hl,cst836u_handle_t touch,sc7a20h_handle_t acc,bool boot){
     if(!lock_pin_enabled())return;
     uint8_t *fb=epd_hl_get_framebuffer(hl);
@@ -110,7 +119,7 @@ void lock_screen_authenticate(EpdiyHighlevelState *hl,cst836u_handle_t touch,sc7
     // the controls. The waiting phase still shows the original lock face; the prompt phase
     // whites the panel before painting the pad, and cancel restores the art via restore_art.
     // The pad's glass keys sample the white ground at begin time.
-    ui_fill_rect_fast((EpdRect){0,0,UI_LOCK_WIDTH,UI_LOCK_HEIGHT},UI_GRAY_WHITE,fb);
+    blank_canvas(fb);
     ui_pinpad_t pad={0};ui_pinpad_begin(&pad,fb,"输入密码");
     restore_art(fb,original);
     bool waiting=true;
@@ -126,7 +135,7 @@ void lock_screen_authenticate(EpdiyHighlevelState *hl,cst836u_handle_t touch,sc7
                 // 深睡回来 fb 是锁屏画面：先刷白让玻璃圆键重新采样，再由等待阶段的 restore_art 恢复样式。
                 // After deep sleep fb holds the lock art: white it so the glass keys resample,
                 // then the waiting phase restores the art again.
-                original=NULL;ui_fill_rect_fast((EpdRect){0,0,UI_LOCK_WIDTH,UI_LOCK_HEIGHT},UI_GRAY_WHITE,fb);
+                original=NULL;blank_canvas(fb);
                 ui_pinpad_begin(&pad,fb,"输入密码");
                 continue;
             }
@@ -137,7 +146,7 @@ void lock_screen_authenticate(EpdiyHighlevelState *hl,cst836u_handle_t touch,sc7
         // 弹出提示才刷白：等待阶段 fb 是锁屏画面，这里整屏置白再画键盘；取消由 restore_art 恢复。
         // White only when the prompt appears: fb holds the lock art during waiting, so blank
         // the panel here before painting the pad; cancel restores the art via restore_art.
-        ui_fill_rect_fast((EpdRect){0,0,UI_LOCK_WIDTH,UI_LOCK_HEIGHT},UI_GRAY_WHITE,fb);
+        blank_canvas(fb);
         // 直接推送完整密码画面一次，不再补刷第二段背景。/ Present the complete PIN screen once, without a second backdrop stage.
         ui_pinpad_paint(fb,&pad,ui_pinpad_full());present(hl,ui_pinpad_full());
         // 密码等待不是启动失败；待验证时保留一次性恢复，不提前开书。

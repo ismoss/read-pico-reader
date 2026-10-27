@@ -27,6 +27,18 @@ extern "C" {
 #define UI_LOCK_WIDTH 684
 #define UI_LOCK_HEIGHT 1216
 
+// 旋转感知的画布查询：竖屏 684×1216，横屏 1216×684。锁屏也可能跑在横屏画布上，布局请取这两个而不是常量。
+// 内联实现：宿主测试按函数切片编译 ui_kit.c，新增外部符号会让那些切片链接失败。
+// Rotation-aware canvas queries: 684×1216 portrait, 1216×684 landscape. The lock face can run on the
+// landscape canvas too, so layouts read these instead of the constants. Inline, because the host tests
+// slice individual functions out of ui_kit.c and a new external symbol would break their links.
+static inline bool ui_canvas_landscape(void) {
+    enum EpdRotation rotation = epd_get_rotation();
+    return rotation == EPD_ROT_LANDSCAPE || rotation == EPD_ROT_INVERTED_LANDSCAPE;
+}
+static inline int ui_canvas_width(void) { return epd_rotated_display_width(); }
+static inline int ui_canvas_height(void) { return epd_rotated_display_height(); }
+
 // 页内手势及局部定稿阈值，真机调优时同步 INTERACTION.md。
 // Page gesture and region-settling thresholds; update INTERACTION.md when tuning on hardware.
 #define UI_LONG_PRESS_MS 500

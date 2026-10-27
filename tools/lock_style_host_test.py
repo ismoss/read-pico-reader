@@ -81,6 +81,12 @@ static int read_pico_sd_get_info(read_pico_sd_info_t *i){i->mounted=true;return 
 static void vTaskDelay(int ms){(void)ms;}
 static int epd_width(void){return 684;}
 static int epd_height(void){return 1216;}
+// 锁屏入口现在会读当前旋转（横版阅读票根不再先回竖屏），测试固定在竖屏。
+// The lock entry now reads the current rotation (the landscape reading ticket no longer returns to
+// portrait first); this test stays in portrait.
+enum EpdRotation {EPD_ROT_LANDSCAPE,EPD_ROT_PORTRAIT,EPD_ROT_INVERTED_LANDSCAPE,EPD_ROT_INVERTED_PORTRAIT};
+static enum EpdRotation epd_get_rotation(void){return EPD_ROT_INVERTED_PORTRAIT;}
+static void epd_set_rotation(enum EpdRotation rotation){(void)rotation;}
 '''
 for name in ('draw_wallpaper', 'enter_lock_and_sleep', 'app_lock_boot_gate'):
     unit += function(name, ROOT/'main/sleep.c') + '\n'

@@ -165,22 +165,23 @@ static uint8_t *cover_load(const char *path, const char *title, const char *auth
     return gray;
 }
 static void cover_background_draw(uint8_t *fb, const uint8_t *gray) {
+    const int cw = ui_canvas_width(), ch = ui_canvas_height();
     if (!gray) {
-        ui_fill_rect_fast((EpdRect){0, 0, UI_LOCK_WIDTH, UI_LOCK_HEIGHT}, 0xb0, fb);
+        ui_fill_rect_fast((EpdRect){0, 0, cw, ch}, 0xb0, fb);
         return;
     }
     int crop_x = 0, crop_y = 0, crop_w = BOOK_COVER_W, crop_h = BOOK_COVER_H;
-    if ((int64_t)BOOK_COVER_W * UI_LOCK_HEIGHT > (int64_t)BOOK_COVER_H * UI_LOCK_WIDTH) {
-        crop_w = BOOK_COVER_H * UI_LOCK_WIDTH / UI_LOCK_HEIGHT;
+    if ((int64_t)BOOK_COVER_W * ch > (int64_t)BOOK_COVER_H * cw) {
+        crop_w = BOOK_COVER_H * cw / ch;
         crop_x = (BOOK_COVER_W - crop_w) / 2;
     } else {
-        crop_h = BOOK_COVER_W * UI_LOCK_HEIGHT / UI_LOCK_WIDTH;
+        crop_h = BOOK_COVER_W * ch / cw;
         crop_y = (BOOK_COVER_H - crop_h) / 2;
     }
-    for (int y = 0; y < UI_LOCK_HEIGHT; ++y) {
-        const int sy = crop_y + y * crop_h / UI_LOCK_HEIGHT;
-        for (int x = 0; x < UI_LOCK_WIDTH; ++x) {
-            const int sx = crop_x + x * crop_w / UI_LOCK_WIDTH;
+    for (int y = 0; y < ch; ++y) {
+        const int sy = crop_y + y * crop_h / ch;
+        for (int x = 0; x < cw; ++x) {
+            const int sx = crop_x + x * crop_w / cw;
             const uint8_t tone = ui_contrast_gray(gray[sy * BOOK_COVER_W + sx]);
             // 对比度输出已经是面板4bit灰阶；再次按255/15量化会把纯白变成灰点。
             // Contrast already yields panel 4-bit levels; quantizing again by 255/15 would dither solid white into gray.
@@ -196,8 +197,7 @@ static int notch_depth(int x) {
     if (dx < -radius || dx > radius) return 0;
     return radius - dx * dx / radius;
 }
-static void ticket_paper_draw(uint8_t *fb) {
-    const int left = 48, right = 636, top = 58, bottom = 1158;
+static void ticket_paper_draw(uint8_t *fb, int left, int right, int top, int bottom) {
     for (int x = left; x < right; ++x) {
         int cut = notch_depth(x);
         int y0 = top + cut, y1 = bottom - cut;
@@ -208,16 +208,14 @@ static void ticket_paper_draw(uint8_t *fb) {
     ui_fill_rect_fast((EpdRect){left, top + 20, 1, bottom - top - 40}, UI_GRAY_BLACK, fb);
     ui_fill_rect_fast((EpdRect){right - 1, top + 20, 1, bottom - top - 40}, UI_GRAY_BLACK, fb);
 }
-static void ticket_shadow_draw(uint8_t *fb) {
-    const int left = 48, right = 636, top = 58, bottom = 1158;
+static void ticket_shadow_draw(uint8_t *fb, int left, int right, int top, int bottom) {
     for (int x = left; x < right; ++x) {
         int cut = notch_depth(x);
         int y0 = top + cut + 8, y1 = bottom - cut + 8;
         ui_fill_rect_fast((EpdRect){x + 5, y0, 1, y1 - y0}, 0x80, fb);
     }
 }
-static void cover_draw(uint8_t *fb, const uint8_t *gray, const char *title) {
-    EpdRect box = {216, 378, 252, 344};
+static void cover_draw(uint8_t *fb, const uint8_t *gray, const char *title, EpdRect box) {
     ui_fill_rect_fast(box, UI_GRAY_LIGHT, fb);
     if (gray) {
         for (int y = 0; y < box.height; ++y)
@@ -237,32 +235,104 @@ static void cover_draw(uint8_t *fb, const uint8_t *gray, const char *title) {
     ui_draw_round_rect(fb, box, 0, UI_GRAY_BLACK);
 }
 // Preserve exact counters, shrinking only when needed. Two lines fit long statistics.
-static void ticket_stat(uint8_t *fb, int y, int height, int px, const char *text) {
+static void ticket_stat(uint8_t *fb, int x, int y, int height, int px, int maxw, const char *text) {
     px = ui_text_effective_px(px);
     if (px > height) px = height;
     char line[128]; snprintf(line, sizeof(line), "%s", text);
-    while (px > 18 && ui_text_fixed_width_px(px, line) > 520) --px;
-    if (ui_text_fixed_width_px(px, line) <= 520) {
-        ui_text_fixed(fb, 82, y, px, line, EPD_DRAW_ALIGN_LEFT, false);
+    while (px > 18 && ui_text_fixed_width_px(px, line) > maxw) --px;
+    if (ui_text_fixed_width_px(px, line) <= maxw) {
+        ui_text_fixed(fb, x, y, px, line, EPD_DRAW_ALIGN_LEFT, false);
         return;
     }
     char *sep = strstr(line, "  ·  ");
     if (sep && height >= 44) {
         *sep = 0; char *tail = sep + strlen("  ·  ");
-        text_fit(line, 18, 520); text_fit(tail, 18, 520);
-        ui_text_fixed(fb, 82, y, 18, line, EPD_DRAW_ALIGN_LEFT, false);
-        ui_text_fixed(fb, 82, y + height / 2, 18, tail, EPD_DRAW_ALIGN_LEFT, false);
+        text_fit(line, 18, maxw); text_fit(tail, 18, maxw);
+        ui_text_fixed(fb, x, y, 18, line, EPD_DRAW_ALIGN_LEFT, false);
+        ui_text_fixed(fb, x, y + height / 2, 18, tail, EPD_DRAW_ALIGN_LEFT, false);
     } else {
-        text_fit(line, px, 520);
-        ui_text_fixed(fb, 82, y, px, line, EPD_DRAW_ALIGN_LEFT, false);
+        text_fit(line, px, maxw);
+        ui_text_fixed(fb, x, y, px, line, EPD_DRAW_ALIGN_LEFT, false);
     }
 }
-static void ticket_heading(uint8_t *fb,int top,int height,int px,char *text) {
+static void ticket_heading(uint8_t *fb,int x,int top,int height,int px,int maxw,char *text) {
     // 锁屏入口已切系统字体；标题按原生轮廓输出，独立强制AA，测量与绘制用同一字库。
     // Lock entry selects the system face; rasterize native outlines with explicit AA and measure using the same face.
     px=ui_text_effective_px(px);if(px>height-2)px=height-2;
-    px=ui_text_title_fit(text,px,520,text);
-    ui_text_title_vc(fb,82,top+height/2,px,text,text,EPD_DRAW_ALIGN_LEFT);
+    px=ui_text_title_fit(text,px,maxw,text);
+    ui_text_title_vc(fb,x,top+height/2,px,text,text,EPD_DRAW_ALIGN_LEFT);
+}
+static void ticket_date_text(char *out, size_t n) {
+    time_t now = time(NULL);
+    if (now < 1704067200) {
+        const pmu_snapshot_t *pmu = read_pico_pmu_get();
+        if (pmu && pmu->time_synced && pmu->unix_sec >= 1704067200) now = pmu->unix_sec;
+    }
+    if (now < 1704067200) { snprintf(out, n, "日期未同步"); return; }
+    time_t local = now + 8 * 3600;   // 本机固定东八区，与 local_day() 一致。/ Fixed UTC+8, matching local_day().
+    struct tm date = {0};
+    gmtime_r(&local, &date);
+    snprintf(out, n, "%04d.%02d.%02d", date.tm_year + 1900, date.tm_mon + 1, date.tm_mday);
+}
+// 横版票根（1216×684）：书封在左，书名/进度/统计在中，右侧存根放今日数字与日期。
+// Landscape ticket on the 1216×684 canvas: cover on the left, title/progress/stats in the middle and
+// a stub on the right that carries today's figures and the date.
+static bool ticket_draw_landscape(uint8_t *fb, const uint8_t *gray, const char *title, const char *author,
+                                  bool progress_valid, const book_progress_t *progress,
+                                  const ticket_stats_t *stats, uint32_t day) {
+    const int left = 64, right = 1152, top = 44, bottom = 640;
+    ticket_shadow_draw(fb, left, right, top, bottom);
+    ticket_paper_draw(fb, left, right, top, bottom);
+    ui_text(fb, 96, 84, 24, "kiikoread  /  阅读票根", EPD_DRAW_ALIGN_LEFT, false);
+    ui_hairline(fb, 118, 96, 1024, UI_GRAY_BLACK);
+    cover_draw(fb, gray, title, (EpdRect){96, 148, 240, 328});
+    char text[256];
+    snprintf(text, sizeof(text), "%s", title);
+    ticket_heading(fb, 368, 142, 64, 44, 488, text);
+    if (author[0]) {
+        snprintf(text, sizeof(text), "%s", author);
+        ticket_heading(fb, 368, 212, 40, 26, 488, text);
+    }
+    ui_hairline(fb, 268, 368, 488, UI_GRAY_BLACK);
+    char line[128];
+    if (progress_valid) snprintf(line, sizeof(line), "已读 %u%%  ·  第 %u 章", progress->pct,
+                                 (unsigned)progress->chapter + 1);
+    else snprintf(line, sizeof(line), "已读 —  ·  章节 —");
+    ticket_stat(fb, 368, 286, 52, 32, 488, line);
+    EpdRect track = {368, 348, 488, 10};
+    ui_fill_rect_fast(track, UI_GRAY_LIGHT, fb);
+    track.width = progress_valid ? track.width * progress->pct / 100 : 0;
+    if (track.width) ui_fill_rect_fast(track, UI_GRAY_BLACK, fb);
+    const bool today = day && stats->day == day;
+    if (today) snprintf(line, sizeof(line), "今日阅读 %llu 分钟  ·  翻页 %u 次",
+                        (unsigned long long)(stats->today_seconds / 60), (unsigned)stats->today_turns);
+    else snprintf(line, sizeof(line), "今日阅读 —  ·  日期未同步");
+    ticket_stat(fb, 368, 380, 44, 27, 488, line);
+    snprintf(line, sizeof(line), "累计阅读 %llu 小时 %llu 分钟  ·  翻页 %u 次",
+             (unsigned long long)(stats->total_seconds / 3600),
+             (unsigned long long)((stats->total_seconds / 60) % 60), (unsigned)stats->total_turns);
+    ticket_stat(fb, 368, 428, 44, 27, 488, line);
+    // 存根用竖虚线分列；右列不参与左列的文字截短逻辑。
+    // The stub is split off with a dashed vertical rule; its column never competes with the left copy.
+    for (int y = 148; y < 566; y += 18) ui_fill_rect_fast((EpdRect){904, y, 1, 10}, UI_GRAY_BLACK, fb);
+    ui_text(fb, 944, 168, 24, "今日阅读", EPD_DRAW_ALIGN_LEFT, false);
+    if (today) snprintf(line, sizeof(line), "%llu", (unsigned long long)(stats->today_seconds / 60));
+    else snprintf(line, sizeof(line), "%s", "—");
+    ui_text_fixed(fb, 944, 204, 60, line, EPD_DRAW_ALIGN_LEFT, false);
+    ui_text(fb, 944, 282, 22, "分钟", EPD_DRAW_ALIGN_LEFT, false);
+    ui_hairline(fb, 322, 944, 160, UI_GRAY_BLACK);
+    if (today) snprintf(line, sizeof(line), "翻页 %u 次", (unsigned)stats->today_turns);
+    else snprintf(line, sizeof(line), "翻页 — 次");
+    ui_text(fb, 944, 344, 24, line, EPD_DRAW_ALIGN_LEFT, false);
+    ui_text(fb, 944, 402, 22, "累计", EPD_DRAW_ALIGN_LEFT, false);
+    snprintf(line, sizeof(line), "%llu 小时 %llu 分",
+             (unsigned long long)(stats->total_seconds / 3600),
+             (unsigned long long)((stats->total_seconds / 60) % 60));
+    ui_text(fb, 944, 430, 24, line, EPD_DRAW_ALIGN_LEFT, false);
+    ticket_date_text(line, sizeof(line));
+    ui_text(fb, 944, 560, 24, line, EPD_DRAW_ALIGN_LEFT, false);
+    ui_text(fb, 96, 588, 24, "在每一页里，留下时间的凭证", EPD_DRAW_ALIGN_LEFT, false);
+    return true;
 }
 bool book_ticket_draw(uint8_t *fb, bool reader_background) {
     (void)reader_background;
@@ -284,20 +354,28 @@ bool book_ticket_draw(uint8_t *fb, bool reader_background) {
     uint32_t day = local_day();
     uint8_t *gray = cover_load(path, title, author);
     cover_background_draw(fb, gray);
-    ticket_shadow_draw(fb);
-    ticket_paper_draw(fb);
+    // 横屏画布（正文横屏锁屏）走横版构图；竖屏保持原来的票面。
+    // A landscape canvas (locking from a landscape body) takes the landscape composition; portrait
+    // keeps the original face.
+    if (ui_canvas_landscape()) {
+        bool drawn = ticket_draw_landscape(fb, gray, title, author, progress_valid, &progress, &stats, day);
+        free(gray);
+        return drawn;
+    }
+    ticket_shadow_draw(fb, 48, 636, 58, 1158);
+    ticket_paper_draw(fb, 48, 636, 58, 1158);
     ui_text(fb, 82, 98, 28, "kiikoread  /  阅读票根", EPD_DRAW_ALIGN_LEFT, false);
     ui_hairline(fb, 156, 82, 520, UI_GRAY_BLACK);
-    ticket_heading(fb,202,64,50,title);
-    if (author[0]) ticket_heading(fb,274,44,28,author);
-    cover_draw(fb, gray, title);
+    ticket_heading(fb,82,202,64,50,520,title);
+    if (author[0]) ticket_heading(fb,82,274,44,28,520,author);
+    cover_draw(fb, gray, title, (EpdRect){216, 378, 252, 344});
     free(gray);
     ui_hairline(fb, 768, 82, 520, UI_GRAY_BLACK);
     char line[96];
     if (progress_valid) snprintf(line, sizeof(line), "已读 %u%%  ·  第 %u 章", progress.pct,
                                  (unsigned)progress.chapter + 1);
     else snprintf(line, sizeof(line), "已读 —  ·  章节 —");
-    ticket_stat(fb, 802, 54, 34, line);
+    ticket_stat(fb, 82, 802, 54, 34, 520, line);
     EpdRect track = {82, 868, 520, 10};
     ui_fill_rect_fast(track, UI_GRAY_LIGHT, fb);
     track.width = progress_valid ? track.width * progress.pct / 100 : 0;
@@ -305,11 +383,11 @@ bool book_ticket_draw(uint8_t *fb, bool reader_background) {
     if (day && stats.day == day) snprintf(line, sizeof(line), "今日阅读 %llu 分钟  ·  翻页 %u 次",
         (unsigned long long)(stats.today_seconds / 60), (unsigned)stats.today_turns);
     else snprintf(line, sizeof(line), "今日阅读 —  ·  日期未同步");
-    ticket_stat(fb, 914, 48, 28, line);
+    ticket_stat(fb, 82, 914, 48, 28, 520, line);
     snprintf(line, sizeof(line), "累计阅读 %llu 小时 %llu 分钟  ·  翻页 %u 次",
              (unsigned long long)(stats.total_seconds / 3600),
              (unsigned long long)((stats.total_seconds / 60) % 60), (unsigned)stats.total_turns);
-    ticket_stat(fb, 969, 74, 28, line);
+    ticket_stat(fb, 82, 969, 74, 28, 520, line);
     ui_hairline(fb, 1050, 82, 520, UI_GRAY_BLACK);
     ui_text(fb, 82, 1080, 26, "在每一页里，留下时间的凭证", EPD_DRAW_ALIGN_LEFT, false);
     return true;

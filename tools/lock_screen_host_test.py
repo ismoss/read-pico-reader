@@ -84,6 +84,11 @@ static bool lock_pin_enabled(void){return valid_storage&&enabled_storage;}
 static bool lock_pin_verify(const char pin[5]){++verified;return valid_storage&&!strcmp(pin,"7391");}
 static uint8_t *epd_hl_get_framebuffer(EpdiyHighlevelState *h){(void)h;return framebuffer;}
 enum EpdRotation epd_get_rotation(void){return 1;}
+// 锁屏清白改用旋转感知的画布尺寸（横版锁屏是 1216×684），这里给竖屏真机尺寸。
+// The lock white-out now uses the rotation-aware canvas size (1216×684 in landscape); portrait
+// hardware figures here.
+int epd_rotated_display_width(void){return 684;}int epd_rotated_display_height(void){return 1216;}
+int epd_width(void){return 1216;}int epd_height(void){return 684;}
 static void epd_poweron(void){}
 static void epd_poweroff(void){}
 static void ui_lock_fallback_draw(uint8_t *fb){memset(fb,255,FRAME_BYTES);fb[FRAME_BYTES/2]=0;}
@@ -114,9 +119,9 @@ static void guard_draw_result(void *h,enum EpdDrawError result){(void)h;(void)re
 '''.replace('FOLDER',str(p))
  # Declarations precede the backdrop stub; state/hit logic comes from the production pad.
  unit=unit.replace('static void ui_pinpad_paint_input(', 'void ui_pinpad_paint_input(').replace('static void ui_pinpad_begin(', 'void ui_pinpad_begin(').replace('static void ui_pinpad_paint(', 'void ui_pinpad_paint(')
- for n in ('ui_pinpad_full','ui_pinpad_entry_area','ui_pinpad_end','ui_pinpad_reset','key_rect','joined','hit_test','ui_pinpad_handle'):
+ for n in ('ui_pinpad_full','ui_pinpad_entry_area','ui_pinpad_end','ui_pinpad_reset','pad_w','pad_h','key_rect','joined','hit_test','ui_pinpad_handle'):
   unit+=function(n,ROOT/'main/ui/ui_pinpad.c')+'\n'
- for n in ('checksum','wallpaper_key','lock_screen_restore','lock_screen_save','restore_art','present','present_input','lock_screen_authenticate'):
+ for n in ('checksum','wallpaper_key','lock_screen_restore','lock_screen_save','restore_art','present','present_input','blank_canvas','lock_screen_authenticate'):
   unit+=function(n,ROOT/'main/lock_screen.c')+'\n'
  unit+=r'''
 static void start(void){idx=sample_count=waits=verified=ready=held=pushes=fulls=entries=settles=0;now=0;power_pending=0;memset(framebuffer,0x37,sizeof(framebuffer));add(0,0,0,0);lock_screen_save(framebuffer);}

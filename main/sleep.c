@@ -598,6 +598,12 @@ void enter_lock_and_sleep(
     // 主动拼贴在白底圆锁上准备最终画面；其他入口仍保留旧页面，只改RAM。
     // Prepare manual collages behind the white lock badge; other entries keep their prior page while drawing RAM.
     uint8_t lock_style = app_settings_lock_style();
+    // 横版阅读票根：正文横屏锁屏时保留旋转，票根按 1216×684 排版；其他样式与竖屏入口一律先回竖屏。
+    // Landscape reading ticket: keep the body rotation when locking from landscape and lay the ticket
+    // out on the 1216×684 canvas; every other style and every portrait entry returns to portrait first.
+    enum EpdRotation prior_rotation = epd_get_rotation();
+    bool landscape_lock = lock_style == 0 && prior_rotation != EPD_ROT_INVERTED_PORTRAIT;
+    if (!landscape_lock) epd_set_rotation(EPD_ROT_INVERTED_PORTRAIT);
     // 透明书封保留当前页面作为底图，不清白、不重排阅读页，也不读取旧阅读快照。
     // Keep the current page beneath the PNG; no white reset, reader reflow or old reader snapshot.
     if (lock_style != 3) epd_hl_set_all_white(hl);
@@ -667,6 +673,10 @@ void enter_lock_and_sleep(
 
     // 参考帧和屏幕都归零，回到主循环后由当前页自己画一遍，不必知道是哪一页。
     // Zero the reference frame and the panel; the current page redraws after the loop resumes, without knowing which page it is.
+    // 横版锁屏结束后先把旋转交还竖屏：当前页重画时，阅读页的 present() 会按设置自己再切回横屏。
+    // Hand portrait back after a landscape lock: when the page redraws, the reader's present()
+    // re-enters landscape from the saved setting on its own.
+    if (landscape_lock) epd_set_rotation(EPD_ROT_INVERTED_PORTRAIT);
     read_pico_pmu_drain_events();
     epd_poweron();
     epd_clear();
