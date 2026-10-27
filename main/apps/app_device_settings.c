@@ -506,7 +506,10 @@ static bool preview_cache_load(const char *path, EpdRect box) {
     size_t pixels = (size_t)box.width * box.height;
     uint8_t *px = heap_caps_malloc(pixels, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!px) return false;
-    // 横屏槽：横图转 90° 显示在这块竖屏区域里（就像横屏看书，范围更大）。\n            // Landscape slot: a wide image is shown sideways inside the tall area, like landscape reading.\n            const bool sideways = box.width < box.height && ui_wallpaper_source_is_landscape(path);\n            if (!ui_wallpaper_fit_pixels(path, box, px, &s_preview_rect, sideways)) { free(px); return false; }
+    // 横屏槽：横图转 90° 显示在这块竖屏区域里（就像横屏看书，范围更大）。
+    // Landscape slot: a wide image is shown sideways inside the tall area, like landscape reading.
+    const bool sideways = box.width < box.height && ui_wallpaper_source_is_landscape(path);
+    if (!ui_wallpaper_fit_pixels(path, box, px, &s_preview_rect, sideways)) { free(px); return false; }
     s_preview_px = px;
     snprintf(s_preview_key, sizeof(s_preview_key), "%s", key);
     return true;
@@ -843,7 +846,9 @@ static ble_scan_layout_t ble_scan_layout(void) {
 }
 static void back_header(uint8_t *fb, const char *title) {
     ui_nav_back(fb, 36, 79);
-    ui_text_vc(fb, 342, 107, 34, title, EPD_DRAW_ALIGN_CENTER, false);
+    // 返回图标圆心在 (x+22, y+35) = y 114；标题与它同心，差 7px 就会看着发飘。
+    // The back icon centres at (x+22, y+35) = y 114; the title shares that centre.
+    ui_text_vc(fb, 342, 114, 34, title, EPD_DRAW_ALIGN_CENTER, false);
     settings_divider(fb, 174, 36, 612);
 }
 
@@ -1319,6 +1324,11 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
             else if (preview_cache_load(s_wallpapers[s_wallpaper_selected].path, image)) {
                 ui_wallpaper_blit(fb, s_preview_rect, s_preview_px);
                 s_wallpaper_preview_ok = true;
+            } else {
+                // 缓存拿不到（PSRAM 紧或解码失败）就退回直接画：慢一次，但画面绝不空白。
+                // If the cache cannot be had (tight PSRAM or a failed decode) paint directly: one slow
+                // frame beats an empty box.
+                s_wallpaper_preview_ok = ui_wallpaper_draw(fb, s_wallpapers[s_wallpaper_selected].path, image);
             }
         }
         if(s_bookmark_picker && s_bookmark_preview)book_lock_bookmark_preview_paint(fb,s_bookmark_preview,image);
