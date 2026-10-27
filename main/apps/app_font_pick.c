@@ -16,6 +16,7 @@
 #include <string.h>
 
 #include "app.h"
+#include "app_font_context.h"
 #include "display.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -430,11 +431,17 @@ static app_redraw_t bench_run(app_ctx_t* ctx, bool cold) {
     return APP_REDRAW_PAGE;
 }
 
+// 这里是字体测试台：本页面只临时切换"当前字体"用来量光栅速度，**不写任何用户设置**。
+// 以前它调用 app_settings_set_font_path()，等于在演示页里改掉了"阅读字体"（选内建那张卡还会把它
+// 清空），退出后正文就换成了别的字体——这是"改字体却完全变样"的另一条来源。
+// This is a bench page: it only swaps the active face to measure raster speed and must not write
+// any user setting. It used to call app_settings_set_font_path(), i.e. a demo page silently changed
+// the *reader* face (picking the built-in card even cleared it), which is one more way to end up
+// with a body face nobody chose.
 static app_redraw_t pick(int index) {
     if (font_is_current(index)) return APP_REDRAW_NONE;
     bench_reset();
     if (index == 0) {
-        app_settings_set_font_path("");
         ttf_font_open_builtin();
     } else {
         const ttf_font_item_t* item = ttf_font_item(index - 1);
@@ -442,13 +449,12 @@ static app_redraw_t pick(int index) {
         read_pico_sd_info_t sd = {0};
         read_pico_sd_get_info(&sd);
         if (!sd.present || !sd.mounted) return APP_REDRAW_FULL;
-        app_settings_set_font_path(item->path);
         esp_err_t err = ttf_font_open(item->path);
         if (err != ESP_OK) {
             ESP_LOGW(TAG, "font switch %s: %s", item->path, esp_err_to_name(err));
         }
     }
-    ESP_LOGI(TAG, "font %s", ttf_font_path());
+    ESP_LOGI(TAG, "bench face %s (not persisted)", ttf_font_path());
     return APP_REDRAW_FULL;
 }
 
@@ -463,6 +469,11 @@ static void on_enter(app_ctx_t* ctx) {
 static void font_on_exit(app_ctx_t* ctx) {
     (void)ctx;
     ttf_set_weight(400);
+    // 离开测试台把字体交还给设置（系统字体按 system_font_path 重新激活），别让一次基准测试
+    // 的临时选择跟着用户离开这个页面。
+    // Hand the face back to the settings on the way out, so a benchmark's temporary choice does not
+    // follow the user out of the page.
+    app_font_activate_system();
 }
 
 static app_redraw_t on_touch(app_ctx_t* ctx, const cst836u_touch_t* touch) {

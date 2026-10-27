@@ -91,8 +91,13 @@
  * Lost media saves progress and closes reader resources before global font fallback; never auto-resume an invalid mount.
  * Latest user revision: the two retained shelf styles hold nine imported or read books; retired styles restore as acrylic, and removal hides until reread.
  * The fourth tab opens Settings directly.
- * User revision: book details lead to an on-device Pinyin title editor; measured reading time and turns feed the ticket lock face.
- * Latest user revision: the title editor can place and move an insertion caret for edits in the middle of text.
+ * User revision: book details hand renaming over to the file manager; measured reading time and turns feed the ticket lock face.
+ * 注（2026-10-27 核对代码）：书架这一侧的书名编辑器从来没接过入口（详情窗只给「前往文件管理重命名」），
+ * 已在 mod30 按死代码删除；书名编辑统一走文件管理里的那份。
+ * Note (verified against the code on 2026-10-27): the shelf-side title editor was never wired to any
+ * entry point (the details sheet only offers "前往文件管理重命名") and was deleted as dead code in
+ * mod30; renaming lives in the file manager.
+ * Latest user revision: that editor places and moves an insertion caret for edits in the middle of text.
  * 用户统一修订：书名与搜索采用共用常亮光标；点文字或箭头定位，按系统字体测量。
  * User-wide revision: title/search share a steady caret, text/arrow positioning and system-font measurement.
  * User revision: home, shelf, files and settings have four-tab navigation; view changes use GL16 and chapter starts have a title lead.
