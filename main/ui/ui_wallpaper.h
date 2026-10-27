@@ -12,6 +12,8 @@ bool ui_wallpaper_draw(uint8_t *framebuffer, const char *path, EpdRect area);
 /// 把图片"完整放进 box"（不裁切）解码成 8bit 灰阶，并回报实际占用的矩形；设置页预览用。
 /// Decode the image fitted (never cropped) into box as 8-bit grays and report the rect it occupies;
 /// used by the settings preview so a landscape wallpaper previews as landscape.
+/// 源图是横图吗（宽 > 高）。/ Is the source wider than tall?
+bool ui_wallpaper_source_is_landscape(const char *path);
 bool ui_wallpaper_fit_pixels(const char *path, EpdRect box, uint8_t *pixels, EpdRect *fitted, bool rotate);
 /// 直接画一张旋转过的图（竖图当横屏壁纸）。/ Draw the image rotated 90° (portrait source as landscape art).
 bool ui_wallpaper_draw_rotated(uint8_t *framebuffer, const char *path, EpdRect area);

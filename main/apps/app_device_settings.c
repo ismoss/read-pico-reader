@@ -347,25 +347,27 @@ static bool upgrade_note_line(const char **cursor, char *line, size_t capacity) 
     *cursor = p;
     return used != 0;
 }
-static void draw_upgrade_notes(uint8_t *fb) {
+static void draw_upgrade_notes_at(uint8_t *fb, int top, int px, int rows) {
     const char *cursor = s_update.release.notes;
     char line[sizeof(s_update.release.notes)];
     if (!*cursor) {
-        ui_text_fixed(fb, 60, 530, 26, "本次更新暂无说明", EPD_DRAW_ALIGN_LEFT, false);
+        ui_text_fixed(fb, 60, top, px, "本次更新暂无说明", EPD_DRAW_ALIGN_LEFT, false);
         return;
     }
-    for (int row = 0; row < 6 && upgrade_note_line(&cursor, line, sizeof(line)); ++row) {
+    for (int row = 0; row < rows && upgrade_note_line(&cursor, line, sizeof(line)); ++row) {
         if (row == 5 && *cursor) {
             size_t used = strlen(line);
-            while (used && (used + 4 > sizeof(line) || ui_text_fixed_width_px(26, line) > 514)) {
+            while (used && (used + 4 > sizeof(line) || ui_text_fixed_width_px(px, line) > 514)) {
                 do { --used; } while (used && ((unsigned char)line[used] & 0xc0) == 0x80);
                 line[used] = 0;
             }
             memcpy(line + used, "…", 4);
         }
-        ui_text_fixed(fb, 60, 530 + row * 38, 26, line, EPD_DRAW_ALIGN_LEFT, false);
+        ui_text_fixed(fb, 60, top + row * 38, px, line, EPD_DRAW_ALIGN_LEFT, false);
     }
 }
+// 确认弹窗里的那六行（位置不变）。/ The six rows inside the confirm dialog (unchanged position).
+static void draw_upgrade_notes(uint8_t *fb) { draw_upgrade_notes_at(fb, 530, 26, 6); }
 static EpdRect upgrade_confirm_button(bool online, bool accept) {
     return (EpdRect){accept ? 364 : 60, online ? 842 : 613, 260, 64};
 }
@@ -504,7 +506,7 @@ static bool preview_cache_load(const char *path, EpdRect box) {
     size_t pixels = (size_t)box.width * box.height;
     uint8_t *px = heap_caps_malloc(pixels, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!px) return false;
-    if (!ui_wallpaper_fit_pixels(path, box, px, &s_preview_rect, box.width > box.height)) { free(px); return false; }
+    // 横屏槽：横图转 90° 显示在这块竖屏区域里（就像横屏看书，范围更大）。\n            // Landscape slot: a wide image is shown sideways inside the tall area, like landscape reading.\n            const bool sideways = box.width < box.height && ui_wallpaper_source_is_landscape(path);\n            if (!ui_wallpaper_fit_pixels(path, box, px, &s_preview_rect, sideways)) { free(px); return false; }
     s_preview_px = px;
     snprintf(s_preview_key, sizeof(s_preview_key), "%s", key);
     return true;
@@ -1305,7 +1307,7 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
         // 横屏槽用横版取景框：预览的是 1216×684 那张，按原比例放进框里，不再被竖框裁成中间一条。
         // The landscape slot previews in a landscape frame: the 1216x684 image is fitted into it
         // instead of being cropped to a vertical strip.
-        EpdRect image = s_wallpaper_land ? (EpdRect){166, 236, 352, 198} : (EpdRect){166, 194, 352, 626};
+        EpdRect image = {166, 194, 352, 626};
         ui_fill_round_rect(fb, image, 8, UI_GRAY_WHITE);
         s_wallpaper_preview_ok = false;
         // 解码放到下一拍做：先让"正在加载预览…"这一帧上屏，用户不会以为死机。
@@ -1321,7 +1323,7 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
         }
         if(s_bookmark_picker && s_bookmark_preview)book_lock_bookmark_preview_paint(fb,s_bookmark_preview,image);
         ui_draw_round_rect(fb, image, 8, 0x70);
-        if (!s_wallpaper_preview_ok)
+        if (!s_wallpaper_preview_ok && !s_preview_loading)
             ui_text_vc(fb, 342, 507, 23, s_bookmark_picker?"PNG无法加载，请更换图片":"图片无法预览", EPD_DRAW_ALIGN_CENTER, false);
         if (s_wallpaper_selected >= 0 && s_wallpaper_selected < s_wallpaper_count) {
             char name[96]; snprintf(name, sizeof(name), "%s", s_wallpapers[s_wallpaper_selected].name);
@@ -1505,12 +1507,23 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
             if (s_update.state == PICO_UPDATE_DOWNLOADING) draw_upgrade_progress(fb);
             ui_draw_button(fb, (EpdRect){60, 550, 564, 62}, s_update.busy ? "取消联网更新" :
                 s_update.state == PICO_UPDATE_AVAILABLE ? "开始更新" : "检查更新", s_update.state == PICO_UPDATE_AVAILABLE);
+            // 联网更新在场（发现有新版或正在下载）时：下面这块改成"本次更新"，和进度同屏显示；
+            // TF 卡升级那一栏此时没有意义，直接隐藏。
+            // While an online update is in play (available or downloading) this block shows the
+            // changelog next to the progress, and the TF card section is hidden.
+            const bool online_art = s_update.state == PICO_UPDATE_AVAILABLE ||
+                                    s_update.state == PICO_UPDATE_DOWNLOADING;
             settings_card(fb, (EpdRect){36, 662, 612, 262}, 22, UI_GRAY_WHITE, 0x70);
-            ui_text(fb, 60, 689, 29, "TF 卡升级", EPD_DRAW_ALIGN_LEFT, false);
-            ui_text(fb, 60, 739, 23, "升级包放在 TF 卡根目录", EPD_DRAW_ALIGN_LEFT, false);
-            ui_text(fb, 60, 786, 21, s_local_update.ready ? s_local_update.candidate_version : "把官网升级包放入 TF 卡根目录", EPD_DRAW_ALIGN_LEFT, false);
-            ui_draw_button(fb, (EpdRect){60, 840, 564, 62}, s_local_pending ? "正在安装，请勿断电" :
-                s_local_update.ready ? "安装 TF 卡升级包" : "重新检查 TF 卡", s_local_update.ready);
+            if (online_art) {
+                ui_text(fb, 60, 689, 26, "本次更新", EPD_DRAW_ALIGN_LEFT, false);
+                draw_upgrade_notes_at(fb, 733, 22, 5);
+            } else {
+                ui_text(fb, 60, 689, 29, "TF 卡升级", EPD_DRAW_ALIGN_LEFT, false);
+                ui_text(fb, 60, 739, 23, "升级包放在 TF 卡根目录", EPD_DRAW_ALIGN_LEFT, false);
+                ui_text(fb, 60, 786, 21, s_local_update.ready ? s_local_update.candidate_version : "把官网升级包放入 TF 卡根目录", EPD_DRAW_ALIGN_LEFT, false);
+                ui_draw_button(fb, (EpdRect){60, 840, 564, 62}, s_local_pending ? "正在安装，请勿断电" :
+                    s_local_update.ready ? "安装 TF 卡升级包" : "重新检查 TF 卡", s_local_update.ready);
+            }
         }
         if (s_upgrade_notice[0]) ui_text(fb, 48, 957, 21, s_upgrade_notice, EPD_DRAW_ALIGN_LEFT, false);
         ui_text(fb, 48, 1010, 20, "首次安装或修复，请通过官网完整刷机", EPD_DRAW_ALIGN_LEFT, false);
@@ -1822,7 +1835,7 @@ static app_redraw_t on_tick(app_ctx_t *ctx) {
     // 预览解码放在这里：上一拍已经把"正在加载预览…"推上屏，这一拍才做那次慢解码。
     // The preview decode runs here: the previous redraw already put the loading frame on the panel.
     if (s_page == SETTINGS_WALLPAPER_PREVIEW && s_preview_loading) {
-        EpdRect image = s_wallpaper_land ? (EpdRect){166, 236, 352, 198} : (EpdRect){166, 194, 352, 626};
+        EpdRect image = {166, 194, 352, 626};
         if (!s_bookmark_picker && s_wallpaper_selected >= 0 && s_wallpaper_selected < s_wallpaper_count)
             (void)preview_cache_load(s_wallpapers[s_wallpaper_selected].path, image);
         s_preview_loading = false;

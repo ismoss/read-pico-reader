@@ -160,6 +160,14 @@ bool ui_wallpaper_draw_rotated(uint8_t *fb, const char *path, EpdRect area) {
     return image_pixels_rot(fb, NULL, path, area, 0, true);
 }
 
+bool ui_wallpaper_source_is_landscape(const char *path) {
+    const char *ext = path ? strrchr(path, '.') : NULL;
+    if (!ext) return false;
+    unsigned sw = 0, sh = 0;
+    if (!book_image_file_dimensions(path, !strcasecmp(ext, ".png"), &sw, &sh) || !sw || !sh) return false;
+    return sw > sh;
+}
+
 bool ui_wallpaper_fit_pixels(const char *path, EpdRect box, uint8_t *pixels, EpdRect *fitted, bool rotate) {
     if (!path || !pixels || !fitted || box.width <= 0 || box.height <= 0) return false;
     const char *ext = strrchr(path, '.');
@@ -208,7 +216,7 @@ void ui_wallpaper_draw_avatar(uint8_t *fb, const uint8_t *pixels, EpdRect area, 
 #define WALL_LOCK_CACHE UI_WALLPAPER_CACHE_PARENT "/locks/wallpaper.bin"
 #define WALL_LOCK_BYTES (684u*1216u/2u)
 #define WALL_LOCK_MAGIC UINT32_C(0x574c4b31)
-#define WALL_LOCK_VERSION 2u
+#define WALL_LOCK_VERSION 3u
 // 只缓存最终16级抖动画布到卡；借用锁屏画布，不常驻第二份整帧。
 // Persist final 16-level dithered art on SD, borrowing the lock canvas instead of retaining another frame.
 typedef struct {
@@ -246,17 +254,8 @@ bool ui_wallpaper_prepare_lock(uint8_t *fb,const char *path) {
         fclose(file);
         if (good) return true;
     }
-    // 横屏画布配竖图：转 90° 贴上去，和预览一致（预览也按这个规则画）。
-    // A portrait source on the landscape canvas is rotated 90°, matching exactly what the preview shows.
-    bool rotate = false;
-    if (epd_rotated_display_width() > epd_rotated_display_height()) {
-        const char *ext = strrchr(path, '.');
-        unsigned sw = 0, sh = 0;
-        if (ext && book_image_file_dimensions(path, !strcasecmp(ext, ".png"), &sw, &sh) && sw && sh && sh > sw)
-            rotate = true;
-    }
     EpdRect full = {0, 0, epd_rotated_display_width(), epd_rotated_display_height()};
-    if (!image_pixels_rot(fb, NULL, path, full, 0, rotate)) return false;
+    if (!image_pixels(fb, NULL, path, full, 0)) return false;
     struct stat after;
     if (!stat(path,&after) && after.st_size==st.st_size && after.st_mtime==st.st_mtime) {
         s_wall_pending=wanted; s_wall_pending_fb=fb;
