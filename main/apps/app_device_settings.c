@@ -1388,7 +1388,16 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
             ui_text_fixed_vc(fb, 342, 702, 20, "扫码打开，或在地址后加 #k=密钥；每秒刷新。",
                              EPD_DRAW_ALIGN_CENTER, false);
         } else if (mod_monitor_enabled()) {
-            ui_text_fixed_vc(fb, 342, 440, 22, "已开启；设备联网后，地址和二维码显示在这里。",
+            // 没联网时别留一片空白：明确说是网络没连上，而不是监看坏了。
+            // Never leave a blank area: say the network is not connected rather than looking broken.
+            ui_text_fixed_vc(fb, 342, 430, 26, "网络未连接",
+                             EPD_DRAW_ALIGN_CENTER, false);
+            ui_text_fixed_vc(fb, 342, 480, 22, "请先在「连接与时间 → WiFi」连上网络，",
+                             EPD_DRAW_ALIGN_CENTER, false);
+            ui_text_fixed_vc(fb, 342, 516, 22, "再回到这里查看地址和二维码。",
+                             EPD_DRAW_ALIGN_CENTER, false);
+        } else {
+            ui_text_fixed_vc(fb, 342, 440, 24, "远程监看已关闭；打开后显示访问地址。",
                              EPD_DRAW_ALIGN_CENTER, false);
         }
         ui_text_fixed_vc(fb, 342, 746, 21, "密钥仅本次开机有效；重启即关闭，十分钟无人访问也会关闭。",
@@ -1403,7 +1412,7 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
             else snprintf(pin_value, sizeof(pin_value), "%s", app_settings_monitor_pin_on() ? "开启中" : "已关闭");
             row(fb, 800, "进入密码（四位数字）", pin_value);
         }
-        ui_text_fixed_vc(fb, 342, 900, 20, "开启后在电脑上打开 http://设备IP:8123/#k=四位密码",
+        ui_text_fixed_vc(fb, 342, 898, 23, "开启后在电脑上打开 http://设备IP:8123/#k=四位密码",
                          EPD_DRAW_ALIGN_CENTER, false);
         if (s_notice[0]) ui_text_fixed_vc(fb, 342, 788, 22, s_notice, EPD_DRAW_ALIGN_CENTER, false);
         settings_navigation(fb);
@@ -2224,11 +2233,11 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
             s_upgrade_job = UPGRADE_JOB_NONE;
             s_upgrade_offer_pending = false;
             if (s_upgrade_confirm) s_upgrade_confirm = false;
-            else { pico_online_cancel_join(); s_page = SETTINGS_MAIN; }
+            else { pico_online_cancel(); s_page = SETTINGS_MAIN; }
             return APP_REDRAW_PAGE;
         }
         int tab = settings_nav_hit(ev->x0, y);
-        if (tab >= 0) { s_upgrade_job = UPGRADE_JOB_NONE; pico_online_cancel_join(); ui_nav_request(ctx, tab); return APP_REDRAW_NONE; }
+        if (tab >= 0) { s_upgrade_job = UPGRADE_JOB_NONE; pico_online_cancel(); ui_nav_request(ctx, tab); return APP_REDRAW_NONE; }
         if (s_upgrade_confirm) {
             bool accept = ui_rect_hit(upgrade_confirm_button(s_upgrade_online, true), ev->x0, y);
             if (accept || ui_rect_hit(upgrade_confirm_button(s_upgrade_online, false), ev->x0, y)) {
@@ -2246,7 +2255,7 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         if (ev->x0 < 60 || ev->x0 >= 624) return APP_REDRAW_NONE;
         if (y >= 550 && y < 612) {
             s_upgrade_notice[0] = 0;
-            if (s_update.busy) { s_upgrade_job = UPGRADE_JOB_NONE; s_upgrade_offer_pending = false; pico_online_cancel_join(); }
+            if (s_update.busy) { s_upgrade_job = UPGRADE_JOB_NONE; s_upgrade_offer_pending = false; pico_online_cancel(); }
             else if (s_update.state == PICO_UPDATE_AVAILABLE) { s_upgrade_confirm = true; s_upgrade_online = true; }
             else {
                 upgrade_schedule(false, esp_timer_get_time() / 1000);
@@ -2256,7 +2265,9 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
             upgrade_remember(esp_timer_get_time() / 1000);
             return APP_REDRAW_PAGE;
         }
-        if (y >= 840 && y < 902 && !s_update.busy) {
+        // TF 卡安装和联网检查互不相干，不能被联网任务挡着。
+        // A TF install is independent of the network job and must not be blocked by it.
+        if (y >= 840 && y < 902) {
             (void)pico_ota_inspect(PICO_OTA_UPDATE_PATH, &s_local_update);
             if (s_local_update.ready) { s_upgrade_confirm = true; s_upgrade_online = false; }
             else snprintf(s_upgrade_notice, sizeof(s_upgrade_notice), "%s", s_local_update.message);

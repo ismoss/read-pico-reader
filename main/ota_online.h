@@ -52,6 +52,8 @@ esp_err_t pico_online_download(void);
 bool pico_online_busy(void);
 void pico_online_get_status(pico_update_status_t *status);
 void pico_online_cancel_join(void);
+/// 只置取消标志，不等后台线程结束（界面立刻可用）。/ Set the cancel flag only; never wait for the worker.
+void pico_online_cancel(void);
 /// 刷屏与 OTA 擦写共用递归锁；未初始化 OTA 时不分配内存。/ Recursive display/OTA exclusion; no allocation before OTA initialization.
 bool pico_online_display_begin(void);
 void pico_online_display_end(bool held);

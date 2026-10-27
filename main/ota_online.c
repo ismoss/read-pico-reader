@@ -468,6 +468,8 @@ static esp_err_t start(bool downloading) {
 }
 esp_err_t pico_online_check(void) { return start(false); }
 esp_err_t pico_online_download(void) { return start(true); }
+void pico_online_cancel(void) { atomic_store(&s_cancel, true); }
+
 void pico_online_cancel_join(void) {
     if (s_joinable) {
         atomic_store(&s_cancel, true);

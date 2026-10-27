@@ -1173,11 +1173,14 @@ static void transfer_on_exit(app_ctx_t* ctx) {
     stop_session();
     // 用户规则：离开这一页就该回到"原来连着的那个网"，和自己有没有开自动连接无关。
     // User rule: leaving this page restores the network that was connected, whatever the auto-connect setting says.
-    if (keep_sta && !s_media_lost) {
+    // 只要有已保存的凭据就把网络接回来：刚才那个网还在就接它，不在场就挑当前能连的第一个。
+    // Restore the network whenever credentials exist: the same network when it is still there,
+    // otherwise the first known one actually in range.
+    if (!s_media_lost) {
         char ssid[33]; bool configured = false;
         if (read_pico_transfer_get_saved_wifi(ssid, &configured) == ESP_OK && configured) {
             read_pico_transfer_cfg_t cfg = {.mode = READ_PICO_TRANSFER_MODE_STA, .network_only = true,
-                                            .prefer_known = false};
+                                            .prefer_known = !keep_sta};
             (void)read_pico_transfer_start(&cfg);
         }
     }
