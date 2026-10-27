@@ -1245,8 +1245,11 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
                   s_wallpaper_land?"横屏 1216 × 684 · 不选就跟随竖版":"TF 卡图片 · JPG / PNG · 不超过 50 MB");
         if (!s_wallpaper_count)
             ui_text(fb, 54, 325, 25, "未找到图片，请放入 TF 卡的 pictures 文件夹", EPD_DRAW_ALIGN_LEFT, false);
-        for (int i = 0; i < 8; ++i) {
-            int index = s_wallpaper_page * 8 + i;
+        // 一页六张：列表只到 292+6*92=844，下面空出整行放模式按钮，按钮不再被底栏切一半。
+        // Six per page: the list ends at 844 and one whole row is left for the mode slot, which no
+        // longer gets clipped by the bottom bar.
+        for (int i = 0; i < 6; ++i) {
+            int index = s_wallpaper_page * 6 + i;
             if (index >= s_wallpaper_count) break;
             EpdRect box = {36, 292 + i * 92, 612, 78};
             bool active = !strcmp(s_wallpapers[index].path,wallpaper_target_path());
@@ -1260,7 +1263,7 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
         // One mode slot at the bottom: the portrait list offers the landscape slot, the landscape list
         // offers the follow-portrait reset.
         if (!s_bookmark_picker) {
-            EpdRect box = {36, 1032, 612, 74};
+            EpdRect box = {36, 902, 612, 78};
             settings_card(fb, box, 18, UI_GRAY_WHITE, 0x70);
             ui_text_vc(fb, 60, box.y + 37, 24,
                        s_wallpaper_land ? "跟随竖版（清除横屏图）" : "设置横屏壁纸 ›",
@@ -2154,6 +2157,17 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         s_scroll_present_pending = true;
         return APP_REDRAW_AREA;
     }
+    if (s_page == SETTINGS_WALLPAPER && !s_bookmark_picker &&
+        (ev->type == UI_GESTURE_SWIPE_U || ev->type == UI_GESTURE_SWIPE_D)) {
+        // 一页六张，上下滑翻页；到边界不动，保持静止画面。
+        // Six per page; swipe to page and stop at the ends without repainting.
+        int pages = (s_wallpaper_count + 5) / 6;
+        int old = s_wallpaper_page;
+        if (ev->type == UI_GESTURE_SWIPE_U && s_wallpaper_page + 1 < pages) ++s_wallpaper_page;
+        if (ev->type == UI_GESTURE_SWIPE_D && s_wallpaper_page > 0) --s_wallpaper_page;
+        if (s_wallpaper_page == old) return APP_REDRAW_NONE;
+        return APP_REDRAW_PAGE;
+    }
     if (s_page == SETTINGS_WALLPAPER_PREVIEW && !s_wallpaper_confirm &&
         (ev->type == UI_GESTURE_SWIPE_U || ev->type == UI_GESTURE_SWIPE_D)) {
         int next = s_wallpaper_selected + (ev->type == UI_GESTURE_SWIPE_U ? 1 : -1);
@@ -2405,7 +2419,7 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         return APP_REDRAW_NONE;
     }
     if (s_page == SETTINGS_WALLPAPER) {
-        if (y >= 1032 && y < 1106) {
+        if (y >= 902 && y < 980) {
             // 普通壁纸页 → 切到横屏槽；横屏页 → 清除，回到跟随竖版。
             // Portrait list -> the landscape slot; landscape list -> clear it, back to follow-portrait.
             if (!s_bookmark_picker) {
@@ -2416,8 +2430,8 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
                 return APP_REDRAW_PAGE;
             }
         }
-        if (y < 292 || y >= 1028) return APP_REDRAW_NONE;
-        int index = s_wallpaper_page * 8 + (y - 292) / 92;
+        if (y < 292 || y >= 844) return APP_REDRAW_NONE;
+        int index = s_wallpaper_page * 6 + (y - 292) / 92;
         if (index >= s_wallpaper_count) return APP_REDRAW_NONE;
         s_wallpaper_selected = index;
         bookmark_preview_prepare(ctx->fb);

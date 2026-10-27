@@ -886,18 +886,28 @@ static void draw_status(uint8_t* fb) {
         snprintf(line, sizeof(line), "已连接 %u 台 · 已完成 %u 本", s_status.sta_count, s_status.done_count);
     else snprintf(line, sizeof(line), "同网浏览器上传 · 已完成 %u 本", s_status.done_count);
     ui_text(fb, area.x + 28, area.y + 68, 19, line, EPD_DRAW_ALIGN_LEFT, false);
-    snprintf(line, sizeof(line), "%s", s_status.cur_name);
-    while (*line && ttf_text_width_px(ui_text_effective_px(19), line) > area.width - 280) {
-        size_t n = strlen(line) - 1;
-        while (n && ((unsigned char)line[n] & 0xc0) == 0x80) --n;
-        line[n] = 0;
+    // 只有真的在接收时才显示文件名、字节和进度条；传完立刻回到"暂无正在传输的文件"，
+    // 否则上一份文件的名字和满进度条会一直挂在这一页上。
+    // Show the file, its bytes and the bar only while a file is actually being received; once it
+    // finishes the row returns to the idle copy instead of keeping the last name and a full bar.
+    const bool receiving = s_status.state == READ_PICO_TRANSFER_UPLOADING && s_status.cur_total;
+    line[0] = 0;
+    if (receiving) {
+        snprintf(line, sizeof(line), "%s", s_status.cur_name);
+        while (*line && ttf_text_width_px(ui_text_effective_px(19), line) > area.width - 280) {
+            size_t n = strlen(line) - 1;
+            while (n && ((unsigned char)line[n] & 0xc0) == 0x80) --n;
+            line[n] = 0;
+        }
     }
-    ui_text(fb, area.x + 28, area.y + 108, 19, line[0] ? line : "尚无正在传输的文件", EPD_DRAW_ALIGN_LEFT, false);
-    snprintf(line, sizeof(line), "%.1f / %.1f MB", s_status.cur_bytes / 1048576.0, s_status.cur_total / 1048576.0);
-    ui_text(fb, area.x + area.width - 28, area.y + 108, 19, line, EPD_DRAW_ALIGN_RIGHT, false);
+    ui_text(fb, area.x + 28, area.y + 108, 19, line[0] ? line : "暂无正在传输的文件", EPD_DRAW_ALIGN_LEFT, false);
+    if (receiving) {
+        snprintf(line, sizeof(line), "%.1f / %.1f MB", s_status.cur_bytes / 1048576.0, s_status.cur_total / 1048576.0);
+        ui_text(fb, area.x + area.width - 28, area.y + 108, 19, line, EPD_DRAW_ALIGN_RIGHT, false);
+    }
     EpdRect track = {area.x + 28, area.y + 150, area.width - 56, 10};
     ui_fill_round_rect(fb, track, 5, 0xc8);
-    if (s_status.cur_total) {
+    if (receiving) {
         uint64_t width = (uint64_t)s_status.cur_bytes * track.width / s_status.cur_total;
         track.width = width > (uint64_t)track.width ? track.width : (int)width;
         ui_fill_round_rect(fb, track, 5, UI_GRAY_BLACK);
@@ -1144,8 +1154,12 @@ static void transfer_on_exit(app_ctx_t* ctx) {
     s_scan_pending = s_network_connect_pending = false;
     read_pico_transfer_status_t latest = {0};
     read_pico_transfer_get_status(&latest);
-    bool keep_sta = s_wifi_settings_only && latest.network_ready &&
-                    latest.mode == READ_PICO_TRANSFER_MODE_STA;
+    // 传完/离开这一页不再把已连上的 WiFi 拆掉：STA 连着的网是用户本来就有的，只有热点(AP)才该停。
+    // 之前只有从"WiFi 设置"进来的流程保活，正常传书流一离开就把整栈停掉，用户会莫名掉网。
+    // Leaving the page no longer tears down a connected station: that network is the user's own, and
+    // only the hotspot (AP) belongs to the transfer session. Previously only the settings-only entry
+    // kept it, so a normal transfer session dropped the whole stack on exit.
+    bool keep_sta = latest.network_ready && latest.mode == READ_PICO_TRANSFER_MODE_STA;
     if (keep_sta) {
         clear_qr();
         s_session_started = false; // 全局循环接管保活；再次进页会从组件状态恢复。
