@@ -50,6 +50,7 @@ jobs:
           python3 tools/lock_pin_host_test.py
           python3 tools/lock_screen_host_test.py
           python3 tools/lock_landscape_slice_host_test.py
+          python3 tools/lock_collage_host_test.py
           python3 tools/settings_scroll_host_test.py
           python3 tools/pico_system_aa_host_test.py
           python3 tools/power_double_click_host_test.py

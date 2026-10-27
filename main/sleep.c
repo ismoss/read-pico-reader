@@ -598,11 +598,12 @@ void enter_lock_and_sleep(
     // 主动拼贴在白底圆锁上准备最终画面；其他入口仍保留旧页面，只改RAM。
     // Prepare manual collages behind the white lock badge; other entries keep their prior page while drawing RAM.
     uint8_t lock_style = app_settings_lock_style();
-    // 横版阅读票根：正文横屏锁屏时保留旋转，票根按 1216×684 排版；其他样式与竖屏入口一律先回竖屏。
-    // Landscape reading ticket: keep the body rotation when locking from landscape and lay the ticket
-    // out on the 1216×684 canvas; every other style and every portrait entry returns to portrait first.
+    // 横版锁屏：正文横屏锁屏时保留旋转，票根与书架拼贴按 1216×684 排版；其他样式与竖屏入口一律先回竖屏。
+    // Landscape lock: keep the body rotation when locking from landscape so the ticket and the shelf
+    // collage lay out on the 1216×684 canvas; every other style and every portrait entry returns to
+    // portrait first.
     enum EpdRotation prior_rotation = epd_get_rotation();
-    bool landscape_lock = lock_style == 0 && prior_rotation != EPD_ROT_INVERTED_PORTRAIT;
+    bool landscape_lock = (lock_style == 0 || lock_style == 2) && prior_rotation != EPD_ROT_INVERTED_PORTRAIT;
     if (!landscape_lock) epd_set_rotation(EPD_ROT_INVERTED_PORTRAIT);
     // 透明书封保留当前页面作为底图，不清白、不重排阅读页，也不读取旧阅读快照。
     // Keep the current page beneath the PNG; no white reset, reader reflow or old reader snapshot.
@@ -622,6 +623,13 @@ void enter_lock_and_sleep(
         : lock_style == 2 ? book_lock_collage_prepare(framebuffer) :
           lock_style == 3 ? book_lock_bookmark_draw(framebuffer,app_settings_bookmark_path()) : draw_wallpaper(framebuffer);
     if (!lock_drawn) {
+        // 兜底画面是竖屏构图的：横版票根画失败时先回竖屏再画，别把竖屏图案按横屏贴出去。
+        // The fallback badge is laid out for portrait: when a landscape ticket fails to draw, return
+        // to portrait first instead of pasting a portrait composition onto the landscape canvas.
+        if (landscape_lock) {
+            epd_set_rotation(EPD_ROT_INVERTED_PORTRAIT);
+            landscape_lock = false;
+        }
         ui_lock_fallback_draw(framebuffer);
     }
     enum EpdDrawError result = EPD_DRAW_SUCCESS;

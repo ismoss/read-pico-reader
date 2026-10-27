@@ -8233,12 +8233,13 @@ static app_redraw_t on_tick(app_ctx_t* ctx) {
 }
 static void before_lock(app_ctx_t* ctx) {
     reader_indent_hold_cancel();
-    // 横版锁屏（目前只有阅读票根）：正文在横屏时把旋转留给锁屏，锁住的那一帧不再先闪一下竖屏；
+    // 横版锁屏（阅读票根、书架拼贴）：正文在横屏时把旋转留给锁屏，锁住的那一帧不再先闪一下竖屏；
     // 其他样式仍先回竖屏，排版几何由唤醒后的 sync 按需重建。
-    // Landscape lock (reading ticket only for now): when the body is landscape, leave the rotation to
+    // Landscape lock (reading ticket, shelf collage): when the body is landscape, leave the rotation to
     // the lock frame so locking no longer flashes a portrait frame first; every other style still
     // returns to portrait, and sync rebuilds the geometry after waking as needed.
-    bool landscape_lock = reader_landscape_active() && app_settings_lock_style() == 0 &&
+    const uint8_t lock_style = app_settings_lock_style();
+    bool landscape_lock = reader_landscape_active() && (lock_style == 0 || lock_style == 2) &&
                           epd_get_rotation() != EPD_ROT_INVERTED_PORTRAIT;
     if (!landscape_lock) reader_rotation_leave();
     s_shelf_key_mode=s_shelf_key_paint_pending=false;s_shelf_key_delta=s_shelf_key_pressed=0;

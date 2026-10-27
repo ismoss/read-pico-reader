@@ -219,12 +219,6 @@ esp_err_t pico_boot_mark_frame_cached(void) {
 }
 bool pico_boot_resume_frame_cached(void) { return s_resume_frame && s_resume_pending && !s_recovery; }
 bool pico_boot_has_resume(void) { return s_resume_pending && !s_recovery; }
-bool pico_boot_resume_reader_peek(void) {
-    // 冷启动 splash 只在恢复检查点未准入时出现，但记录里的阅读上下文仍可作方向参考。
-    // The cold splash only appears when the checkpoint was not admitted, yet the record's
-    // reader context still serves as an orientation hint.
-    return s_record.resume.reader == 1;
-}
 bool pico_boot_take_resume(pico_resume_t *resume) {
     if (!resume || !s_resume_pending) return false;
     // 密码等待可能再次持久化；先消费再允许恢复，写入失败不能重试开书。

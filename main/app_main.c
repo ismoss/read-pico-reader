@@ -132,22 +132,17 @@ static bool prepare_startup_frame(EpdiyHighlevelState *hl,uint8_t *framebuffer,b
     epd_hl_set_all_white(hl);
     // 样式4关闭锁屏画面：续启无缓存时只留白底，不画兜底锁面。
     // Style 4 disables the lock face: a cache-less resume keeps plain white without the fallback badge.
-    // 冷启动 splash 与即将恢复的阅读同向：上次锁屏上下文在书内且阅读横屏时按横屏绘制，
-    // 呈现后即交还竖屏，锁屏 boot gate 与各页面仍按竖屏走，互不冲突。
-    // The cold splash shares the reading orientation: when the last lock context sat in a book
-    // with landscape reading enabled it draws landscape, and the rotation is handed straight back
-    // after the output, so the boot gate and every page stay portrait without conflict.
-    bool splash_landscape = false;
+    // 冷启动 splash 一律按竖屏画：它只在这台机器"不会恢复进书"时出现（有恢复检查点就走锁屏续帧），
+    // 也就是说落地界面一定是竖屏。以前按"上次锁屏在书内"猜横屏，于是出现"竖屏主页面配一张横屏开机图"。
+    // The cold splash is always portrait: it only appears when this boot will not resume into a book
+    // (a pending checkpoint goes through the retained lock frame), so the UI it hands over to is
+    // portrait. It used to guess landscape from "the last lock was inside a book", which produced a
+    // landscape splash in front of a portrait UI.
     if(resuming && app_settings_lock_style()!=4)ui_lock_fallback_draw(framebuffer);
     else if(!resuming) {
-        splash_landscape = pico_boot_resume_reader_peek() && app_settings_reader_landscape() > 0;
-        if (splash_landscape)
-            epd_set_rotation(app_settings_reader_landscape() == 1
-                                 ? EPD_ROT_INVERTED_LANDSCAPE : EPD_ROT_LANDSCAPE);
         draw_startup_frame(framebuffer);
     }
     update_display_from_white(hl);
-    if (splash_landscape) epd_set_rotation(EPD_ROT_INVERTED_PORTRAIT);
     return false;
 }
 

@@ -49,13 +49,23 @@
 #endif
 #define LOCK_CACHE_DIR BOOK_LOCK_CACHE_PARENT "/locks"
 #define LOCK_CACHE_VERSION 1u
-#define LOCK_RENDER_REVISION 4u
+#define LOCK_RENDER_REVISION 5u
 #define LOCK_CACHE_MAGIC UINT32_C(0x4c434431)
 #define LOCK_COVER_HEIGHT 334.f
 #define LOCK_GAP 18.f
 #define LOCK_RADIUS 14.f
 #define LOCK_COS 0.9659258263f
 #define LOCK_SIN 0.2588190451f
+// 画布查询：拼贴铺满当前画布。横屏时中心、边界与说明贴纸都跟着换，不再写死竖屏常量。
+// Canvas queries: the collage fills the live canvas, so centre, clamps and stickers follow the
+// landscape canvas instead of the portrait constants.
+static int collage_w(void) { return epd_rotated_display_width(); }
+static int collage_h(void) { return epd_rotated_display_height(); }
+static bool collage_landscape(void) { return collage_w() > collage_h(); }
+#define COLLAGE_W ((float)collage_w())
+#define COLLAGE_H ((float)collage_h())
+#define COLLAGE_CX (COLLAGE_W * .5f)
+#define COLLAGE_CY (COLLAGE_H * .5f)
 
 typedef struct {
     char path[BOOK_STORE_PATH_MAX], title[256];
@@ -452,6 +462,29 @@ bool book_lock_collage_warm_cover(const char *path) {
 
 static unsigned make_placements(const lock_library_t *library, lock_placement_t out[30]) {
     if (!library->used) return 0;
+    if (collage_landscape()) {
+        // 横屏铺满 1216×684：4 排 × 8 张，每排错开，上下各留一排出画，边缘不留白。
+        // 封面高度沿用竖屏那档，靠"行距 352 > 屏高 684/2"的裁切换来满屏质感。
+        // Fill 1216×684: four rows of eight, each nudged, with the outer rows bleeding past the
+        // edges. The cover height stays at the portrait value and the 352 px row pitch crops it.
+        static const float row_shift[4] = {26.f, -34.f, 18.f, -22.f};
+        unsigned count = 0;
+        for (unsigned row = 0; row < 4; ++row) {
+            float width = LOCK_GAP * 7;
+            for (unsigned col = 0; col < 8; ++col) {
+                const lock_book_t *b = &library->books[(row * 8 + col) % library->used];
+                width += LOCK_COVER_HEIGHT * b->source_w / b->source_h;
+            }
+            float x = -width / 2.f + row_shift[row];
+            for (unsigned col = 0; col < 8; ++col) {
+                unsigned i = (row * 8 + col) % library->used;
+                float w = LOCK_COVER_HEIGHT * library->books[i].source_w / library->books[i].source_h;
+                out[count++] = (lock_placement_t){x, -240.f + row * (LOCK_COVER_HEIGHT + LOCK_GAP), w, i};
+                x += w + LOCK_GAP;
+            }
+        }
+        return count;
+    }
     static const unsigned starts[6] = {10, 5, 0, 10, 5, 0};
     unsigned count = 0;
     for (unsigned row = 0; row < 6; ++row) {
@@ -516,12 +549,12 @@ static bool cover_edge(float x, float y, float width) {
 // A small shadow follows the rotated rounded cover, without a second frame or pixel workspace.
 static void cover_shadow_draw(uint8_t *fb, lock_placement_t p) {
     const float offset_x = 3.f, offset_y = 6.f, spread = 11.f;
-    float x0 = 342.f + LOCK_COS * p.x - LOCK_SIN * p.y + offset_x;
-    float y0 = 608.f + LOCK_SIN * p.x + LOCK_COS * p.y + offset_y;
-    int left = (int)fminf(684.f, fmaxf(0.f, floorf(x0 - LOCK_SIN * LOCK_COVER_HEIGHT - spread)));
-    int right = (int)fminf(684.f, fmaxf(0.f, ceilf(x0 + LOCK_COS * p.w + spread)));
-    int top = (int)fminf(1216.f, fmaxf(0.f, floorf(y0 - spread)));
-    int bottom = (int)fminf(1216.f, fmaxf(0.f, ceilf(y0 + LOCK_SIN * p.w + LOCK_COS * LOCK_COVER_HEIGHT + spread)));
+    float x0 = COLLAGE_CX + LOCK_COS * p.x - LOCK_SIN * p.y + offset_x;
+    float y0 = COLLAGE_CY + LOCK_SIN * p.x + LOCK_COS * p.y + offset_y;
+    int left = (int)fminf(COLLAGE_W, fmaxf(0.f, floorf(x0 - LOCK_SIN * LOCK_COVER_HEIGHT - spread)));
+    int right = (int)fminf(COLLAGE_W, fmaxf(0.f, ceilf(x0 + LOCK_COS * p.w + spread)));
+    int top = (int)fminf(COLLAGE_H, fmaxf(0.f, floorf(y0 - spread)));
+    int bottom = (int)fminf(COLLAGE_H, fmaxf(0.f, ceilf(y0 + LOCK_SIN * p.w + LOCK_COS * LOCK_COVER_HEIGHT + spread)));
     float half = p.w / 2.f, radius = LOCK_RADIUS < half ? LOCK_RADIUS : half;
     for (int y = top; y < bottom; ++y) {
         for (int x = left; x < right; ++x) {
@@ -543,24 +576,24 @@ static void cover_shadow_draw(uint8_t *fb, lock_placement_t p) {
     }
 }
 static bool cover_visible(lock_placement_t p) {
-    float x0 = 342.f + LOCK_COS * p.x - LOCK_SIN * p.y;
-    float y0 = 608.f + LOCK_SIN * p.x + LOCK_COS * p.y;
-    int left = (int)fminf(684.f, fmaxf(0.f, floorf(x0 - LOCK_SIN * LOCK_COVER_HEIGHT)));
-    int right = (int)fminf(684.f, fmaxf(0.f, ceilf(x0 + LOCK_COS * p.w)));
-    int top = (int)fminf(1216.f, fmaxf(0.f, floorf(y0)));
-    int bottom = (int)fminf(1216.f, fmaxf(0.f, ceilf(y0 + LOCK_SIN * p.w + LOCK_COS * LOCK_COVER_HEIGHT)));
+    float x0 = COLLAGE_CX + LOCK_COS * p.x - LOCK_SIN * p.y;
+    float y0 = COLLAGE_CY + LOCK_SIN * p.x + LOCK_COS * p.y;
+    int left = (int)fminf(COLLAGE_W, fmaxf(0.f, floorf(x0 - LOCK_SIN * LOCK_COVER_HEIGHT)));
+    int right = (int)fminf(COLLAGE_W, fmaxf(0.f, ceilf(x0 + LOCK_COS * p.w)));
+    int top = (int)fminf(COLLAGE_H, fmaxf(0.f, floorf(y0)));
+    int bottom = (int)fminf(COLLAGE_H, fmaxf(0.f, ceilf(y0 + LOCK_SIN * p.w + LOCK_COS * LOCK_COVER_HEIGHT)));
     return left < right && top < bottom;
 }
 static void cover_draw(uint8_t *fb, const uint8_t *gray, const lock_book_t *book, lock_placement_t p) {
     bool outline = pale_cover(gray, book);
-    float x0 = 342.f + LOCK_COS * p.x - LOCK_SIN * p.y;
-    float y0 = 608.f + LOCK_SIN * p.x + LOCK_COS * p.y;
+    float x0 = COLLAGE_CX + LOCK_COS * p.x - LOCK_SIN * p.y;
+    float y0 = COLLAGE_CY + LOCK_SIN * p.x + LOCK_COS * p.y;
     // 转为整数前先裁到屏幕，极宽封面和损坏的缓存不能使坐标溢出。
     // Clip before integer conversion so extreme aspect ratios cannot overflow coordinates.
-    int left = (int)fminf(684.f, fmaxf(0.f, floorf(x0 - LOCK_SIN * LOCK_COVER_HEIGHT)));
-    int right = (int)fminf(684.f, fmaxf(0.f, ceilf(x0 + LOCK_COS * p.w)));
-    int top = (int)fminf(1216.f, fmaxf(0.f, floorf(y0)));
-    int bottom = (int)fminf(1216.f, fmaxf(0.f, ceilf(y0 + LOCK_SIN * p.w + LOCK_COS * LOCK_COVER_HEIGHT)));
+    int left = (int)fminf(COLLAGE_W, fmaxf(0.f, floorf(x0 - LOCK_SIN * LOCK_COVER_HEIGHT)));
+    int right = (int)fminf(COLLAGE_W, fmaxf(0.f, ceilf(x0 + LOCK_COS * p.w)));
+    int top = (int)fminf(COLLAGE_H, fmaxf(0.f, floorf(y0)));
+    int bottom = (int)fminf(COLLAGE_H, fmaxf(0.f, ceilf(y0 + LOCK_SIN * p.w + LOCK_COS * LOCK_COVER_HEIGHT)));
     for (int y = top; y < bottom; ++y) {
         for (int x = left; x < right; ++x) {
             float dx = x + .5f - x0, dy = y + .5f - y0;
@@ -592,7 +625,7 @@ static bool sticker_draw(uint8_t *fb, const char *text, int px, const char *unit
     if (unit) { ttf_measure_line_px(unit_px, unit, &ua, &ub); uw = ttf_text_width_px(unit_px, unit) + 10; }
     int a = above > ua ? above : ua, b = below > ub ? below : ub;
     unsigned width = (unsigned)(w + uw + padding * 2), height = (unsigned)(a + b + padding * 2);
-    if (!w || width > 684u || height > 180u) return false;
+    if (!w || width > (unsigned)collage_w() || height > 180u) return false;
     uint8_t *mask = lock_alloc((size_t)width * height), *dilated = lock_alloc((size_t)width * height);
     if (!mask || !dilated) { free(mask); free(dilated); return false; }
     bool ok = ttf_text_mask_px(mask, width, height, padding, padding + a, px, text);
@@ -634,18 +667,27 @@ static bool sticker_draw(uint8_t *fb, const char *text, int px, const char *unit
 }
 static bool captions_draw(uint8_t *fb, unsigned count) {
     char name[64], title[96], number[16];
+    // 文字预算 = 画布宽 - 两侧各 42 的留白：横屏比竖屏更宽，标题可以写全。
+    // The text budget is the canvas width minus 42 px on each side, so landscape fits more of the
+    // title instead of the portrait 600 px cap.
+    const int budget = collage_w() - 84;
     const int title_px = ttf_em_height_px(48), unit_px = ttf_em_height_px(27);
     snprintf(name, sizeof(name), "%s", app_settings_device_name());
     do {
         snprintf(title, sizeof(title), "%s 的书架", name);
-        if (ttf_text_width_px(title_px, title) <= 600) break;
+        if (ttf_text_width_px(title_px, title) <= budget) break;
         truncate_name(name);
     } while (name[0]);
     snprintf(number, sizeof(number), "%u", count);
     int px = ttf_em_height_px(91);
-    while (px > title_px && ttf_text_width_px(px, number) + ttf_text_width_px(unit_px, "本") + 44 > 600) --px;
-    return sticker_draw(fb, title, title_px, NULL, 0, 42, 70, false) &&
-           sticker_draw(fb, number, px, "本", unit_px, 642, 1170, true);
+    while (px > title_px && ttf_text_width_px(px, number) + ttf_text_width_px(unit_px, "本") + 44 > budget) --px;
+    // 贴纸随画布角：左上书名、右下本数；横屏贴边更紧，竖屏保持原位。
+    // Stickers ride the canvas corners: title top-left, count bottom-right. Landscape tucks them
+    // closer to the edges; portrait keeps the original spots.
+    const bool wide = collage_landscape();
+    return sticker_draw(fb, title, title_px, NULL, 0, 42, wide ? 56 : 70, false) &&
+           sticker_draw(fb, number, px, "本", unit_px, collage_w() - 42,
+                        collage_h() - (wide ? 40 : 46), true);
 }
 static bool collage_draw(uint8_t *fb, bool defer_cache) {
     s_pending_frame = NULL;
@@ -670,7 +712,8 @@ static bool collage_draw(uint8_t *fb, bool defer_cache) {
     if (cached) {
         lock_cache_t header;
         bool ok = library->cache_complete && cache_header(cached, &header, key) &&
-            header.bytes == LOCK_FRAME_BYTES && header.width == 684 && header.height == 1216 &&
+            header.bytes == LOCK_FRAME_BYTES && header.width == (uint32_t)collage_w() &&
+            header.height == (uint32_t)collage_h() &&
             header.rotation == (unsigned)rotation && fread(fb, 1, LOCK_FRAME_BYTES, cached) == LOCK_FRAME_BYTES &&
             fgetc(cached) == EOF && hash_bytes(UINT64_C(14695981039346656037), fb, LOCK_FRAME_BYTES) == header.checksum;
         fclose(cached);
@@ -690,7 +733,7 @@ static bool collage_draw(uint8_t *fb, bool defer_cache) {
             }
         }
         memset(fb, 255, LOCK_FRAME_BYTES);
-        lock_placement_t placements[30];
+        lock_placement_t placements[40];
         unsigned n = make_placements(library, placements);
         for (unsigned p = 0; p < n; ++p) cover_shadow_draw(fb, placements[p]);
         painted = true;
@@ -714,7 +757,8 @@ static bool collage_draw(uint8_t *fb, bool defer_cache) {
     bool ok = captions_draw(fb, library->count);
     if (ok && library->cache_complete) {
         lock_cache_t header = {.magic = LOCK_CACHE_MAGIC, .version = LOCK_CACHE_VERSION,
-            .key = key, .width = 684, .height = 1216, .rotation = rotation, .bytes = LOCK_FRAME_BYTES};
+            .key = key, .width = (uint32_t)collage_w(), .height = (uint32_t)collage_h(),
+            .rotation = rotation, .bytes = LOCK_FRAME_BYTES};
         if (defer_cache) { s_pending_cache = header; s_pending_frame = fb; }
         else cache_write(LOCK_CACHE_DIR "/collage.bin", header, fb);
     }
