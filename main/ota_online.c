@@ -213,7 +213,7 @@ static int read_chunk(esp_http_client_handle_t client, uint8_t *buffer, int cap,
     }
     return -1;
 }
-// 发现新版本后探一下下载通道：首包时延 + 前 32KB 速率，让"检查更新"本身就能回答
+// 发现新版本后探一下下载通道：首包时延 + 前 8KB 速率（2 秒上限，别拖长检查），让"检查更新"本身就能回答
 // "是网慢还是根本连不上"，不必先跑一次完整下载。
 // After finding a release, probe the download path (first-byte latency plus the rate of the first
 // 32 KB) so a check answers "slow link vs unreachable" without a full download.
@@ -224,16 +224,16 @@ static bool probe_downlink(const char *url, uint32_t *kbps, uint32_t *first_ms) 
     if (!client) return false;
     uint8_t buf[1024];
     const int64_t start = esp_timer_get_time();
-    int64_t first = 0, idle = start + 8000000;
+    int64_t first = 0, idle = start + 3000000;
     size_t got = 0;
-    while (got < 32768u && esp_timer_get_time() < start + 6000000) {
+    while (got < 8192u && esp_timer_get_time() < start + 2000000) {
         int n = read_chunk(client, buf, sizeof(buf), &idle);
         if (n <= 0) break;
         if (!first) first = esp_timer_get_time();
         got += (size_t)n;
     }
     esp_http_client_cleanup(client);
-    if (got < 4096u) return false;
+    if (got < 2048u) return false;
     int64_t span = esp_timer_get_time() - first;
     if (span <= 0) span = 1;
     *kbps = (uint32_t)(((uint64_t)got * 1000u / (uint64_t)span) / 1024u);

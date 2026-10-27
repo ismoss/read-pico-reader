@@ -386,15 +386,9 @@ static void upgrade_open(void) {
     upgrade_remember(esp_timer_get_time() / 1000);
     s_upgrade_notice[0] = 0;
     s_page = SETTINGS_UPGRADE;
-    // 已联网且空闲就自动检查一次更新：进入页面即见结果，省一次点按。
-    // With the network up and the stack idle, check for updates on entry: the result is on
-    // screen without an extra tap.
-    read_pico_transfer_status_t network;
-    read_pico_transfer_get_status(&network);
-    if (network.network_ready && !s_update.busy &&
-        s_update.state != PICO_UPDATE_CHECKING && s_update.state != PICO_UPDATE_DOWNLOADING) {
-        upgrade_schedule(false, esp_timer_get_time() / 1000);
-    }
+    // 进入这一页不再自动联网检查：用户想用 TF 卡就直接装，想联网就自己点「检查更新」。
+    // Entering the page no longer starts a network check: install from the card at once,
+    // or press 检查更新 deliberately.
 }
 static const char *const TAG = "device_settings";
 // 主设置始终单行；大字号只改变字形，字体预览单独保留足够空间。
@@ -1550,7 +1544,9 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
                 else if (s_upgrade_speed)
                     snprintf(rate, sizeof(rate), "%u KB/s", (unsigned)(s_upgrade_speed / 1024u));
                 else snprintf(rate, sizeof(rate), "等待数据…");
-                ui_text(fb, 624, 477, 20, rate, EPD_DRAW_ALIGN_RIGHT, false);
+                // 百分比占着 477 行右端，速率单独放一行，别再压上去。
+                // The percentage owns the right end of row 477; the rate gets its own row.
+                ui_text(fb, 60, 499, 20, rate, EPD_DRAW_ALIGN_LEFT, false);
             }
             ui_draw_button(fb, (EpdRect){60, 550, 564, 62}, s_update.busy ? "取消联网更新" :
                 s_update.state == PICO_UPDATE_AVAILABLE ? "开始更新" : "检查更新", s_update.state == PICO_UPDATE_AVAILABLE);
