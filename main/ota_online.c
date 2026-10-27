@@ -162,7 +162,7 @@ static esp_http_client_handle_t open_http_range(const char *url, uint32_t offset
     if (range) memset(range, 0, sizeof(*range));
     esp_http_client_config_t cfg = {.url = url, .timeout_ms = 15000, .buffer_size = 2048,
         .buffer_size_tx = 1024, .crt_bundle_attach = esp_crt_bundle_attach,
-        .disable_auto_redirect = true, .keep_alive_enable = true,
+        .disable_auto_redirect = false, .keep_alive_enable = true,
         .event_handler = range_header, .user_data = range};
     esp_http_client_handle_t client = esp_http_client_init(&cfg);
     if (!client) return NULL;
@@ -212,6 +212,33 @@ static int read_chunk(esp_http_client_handle_t client, uint8_t *buffer, int cap,
         vTaskDelay(pdMS_TO_TICKS(20));
     }
     return -1;
+}
+// 发现新版本后探一下下载通道：首包时延 + 前 32KB 速率，让"检查更新"本身就能回答
+// "是网慢还是根本连不上"，不必先跑一次完整下载。
+// After finding a release, probe the download path (first-byte latency plus the rate of the first
+// 32 KB) so a check answers "slow link vs unreachable" without a full download.
+static bool probe_downlink(const char *url, uint32_t *kbps, uint32_t *first_ms) {
+    int code = -1; int64_t length = -1;
+    download_range_t range;
+    esp_http_client_handle_t client = open_http_range(url, 0, &range, &code, &length);
+    if (!client) return false;
+    uint8_t buf[1024];
+    const int64_t start = esp_timer_get_time();
+    int64_t first = 0, idle = start + 8000000;
+    size_t got = 0;
+    while (got < 32768u && esp_timer_get_time() < start + 6000000) {
+        int n = read_chunk(client, buf, sizeof(buf), &idle);
+        if (n <= 0) break;
+        if (!first) first = esp_timer_get_time();
+        got += (size_t)n;
+    }
+    esp_http_client_cleanup(client);
+    if (got < 4096u) return false;
+    int64_t span = esp_timer_get_time() - first;
+    if (span <= 0) span = 1;
+    *kbps = (uint32_t)(((uint64_t)got * 1000u / (uint64_t)span) / 1024u);
+    if (first_ms) *first_ms = (uint32_t)((first - start) / 1000);
+    return true;
 }
 static bool check_feed(void) {
     char *json = heap_caps_malloc(8193, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
@@ -274,8 +301,15 @@ static bool check_feed(void) {
     xSemaphoreTake(s_mutex, portMAX_DELAY);
     memcpy(&s_status->release, release, sizeof(*release));
     xSemaphoreGive(s_mutex);
-    state(pico_version_compare(release->version, running->version) > 0 ? PICO_UPDATE_AVAILABLE : PICO_UPDATE_LATEST,
-          pico_version_compare(release->version, running->version) > 0 ? "发现新版本，可下载安装" : "当前已是最新版本");
+    if (pico_version_compare(release->version, running->version) > 0) {
+        uint32_t kbps = 0, first_ms = 0;
+        char message[96];
+        if (probe_downlink(release->url, &kbps, &first_ms))
+            snprintf(message, sizeof(message), "发现新版本 · 下载通道 %u KB/s · 首包 %u ms",
+                     (unsigned)kbps, (unsigned)first_ms);
+        else snprintf(message, sizeof(message), "发现新版本，但下载通道没有数据（稍后重试）");
+        state(PICO_UPDATE_AVAILABLE, message);
+    } else state(PICO_UPDATE_LATEST, "当前已是最新版本");
     heap_caps_free(json); heap_caps_free(release);
     return true;
 failed:
@@ -328,7 +362,7 @@ static bool download(void) {
             if (!response_ok || (length > 0 && (uint64_t)length != release->size - total)) {
                 error = ESP_ERR_INVALID_RESPONSE; break;
             }
-            idle = esp_timer_get_time() + 30000000;
+            idle = esp_timer_get_time() + 90000000;
         }
         n = read_chunk(client, buffer, 4096, &idle);
         if (n <= 0) {
