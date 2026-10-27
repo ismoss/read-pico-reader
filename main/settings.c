@@ -61,6 +61,8 @@
 #define NVS_KEY_LOCK_STYLE "lock_ui"
 #define NVS_KEY_WALLPAPER "wallpaper"
 #define NVS_KEY_WALLPAPER_LAND "wallpaper_land"
+#define NVS_KEY_MON_PIN_ON "mon_pin_on"
+#define NVS_KEY_MON_PIN "mon_pin"
 #define NVS_KEY_BOOKMARK "lock_png"
 #define NVS_KEY_WAKE "lwake"
 #define NVS_KEY_BOOT "lboot"
@@ -123,6 +125,7 @@ static char s_system_font[FONT_PATH_MAX];
 static uint8_t s_system_size = 120;
 static uint8_t s_system_contrast = 100;
 static uint8_t s_lock_style;
+static uint16_t s_mon_pin;
 static char s_wallpaper[288];
 static char s_wallpaper_land[288];
 static char s_bookmark[288];
@@ -312,6 +315,9 @@ void app_settings_init(void) {
     // 4 = lock face off (blank sleep), kept in the same enum as ticket/wallpaper/collage/bookmark.
     if (nvs_get_u8(h, NVS_KEY_LOCK_STYLE, &lock_style) == ESP_OK && lock_style <= 4)
         s_lock_style = lock_style;
+    uint16_t mon_pin = 0;
+    if (nvs_get_u16(h, NVS_KEY_MON_PIN, &mon_pin) == ESP_OK && mon_pin >= 1000 && mon_pin <= 9999)
+        s_mon_pin = mon_pin;
     size_t land_len = sizeof(s_wallpaper_land);
     if (nvs_get_str(h, NVS_KEY_WALLPAPER_LAND, s_wallpaper_land, &land_len) != ESP_OK ||
         strncmp(s_wallpaper_land, "/sdcard/", 8)) s_wallpaper_land[0] = 0;
@@ -651,6 +657,25 @@ void app_settings_set_bookmark_path(const char *path) {
     if(err==ESP_OK)strlcpy(s_bookmark,path,sizeof(s_bookmark));
 }
 const char* app_settings_wallpaper_path(void) { return s_wallpaper; }
+bool app_settings_monitor_pin_on(void) {
+    nvs_handle_t h;
+    uint8_t raw = 0;
+    if (nvs_open(NVS_NS, NVS_READONLY, &h) != ESP_OK) return false;
+    bool on = nvs_get_u8(h, NVS_KEY_MON_PIN_ON, &raw) == ESP_OK && raw == 1;
+    nvs_close(h);
+    return on;
+}
+void app_settings_set_monitor_pin_on(bool on) { nvs_put_u8(NVS_KEY_MON_PIN_ON, on ? 1 : 0); }
+uint16_t app_settings_monitor_pin(void) { return s_mon_pin; }
+void app_settings_set_monitor_pin(uint16_t pin) {
+    if (pin < 1000 || pin > 9999) return;
+    s_mon_pin = pin;
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS, NVS_READWRITE, &h) != ESP_OK) return;
+    nvs_set_u16(h, NVS_KEY_MON_PIN, pin);
+    nvs_commit(h);
+    nvs_close(h);
+}
 const char* app_settings_wallpaper_landscape_path(void) { return s_wallpaper_land; }
 void app_settings_set_wallpaper_landscape_path(const char* path) {
     if (!path || (path[0] && strncmp(path, "/sdcard/", 8)) ||

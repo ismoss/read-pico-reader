@@ -109,6 +109,12 @@ void app_settings_set_bookmark_path(const char *path);
 const char* app_settings_wallpaper_path(void);
 void app_settings_set_wallpaper_path(const char* path);
 /// 可选的横屏壁纸；空 = 跟随竖版壁纸（按画布居中裁切）。Only for the landscape canvas; empty follows the portrait image with a centre crop.
+/// 远程监看的四位数进入密码；与监看开关互不影响，掉电保留。
+/// Four-digit entry PIN for the remote monitor; independent of the monitor switch and kept across power loss.
+bool app_settings_monitor_pin_on(void);
+void app_settings_set_monitor_pin_on(bool on);
+uint16_t app_settings_monitor_pin(void);
+void app_settings_set_monitor_pin(uint16_t pin);
 const char* app_settings_wallpaper_landscape_path(void);
 void app_settings_set_wallpaper_landscape_path(const char* path);
 /// 上次浅睡唤醒源（app_wake_source_t），掉电也保留。/ Last light-sleep wake source (app_wake_source_t); kept across power loss.

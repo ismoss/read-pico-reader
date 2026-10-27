@@ -73,6 +73,7 @@
 #include "esp_app_desc.h"
 #include "esp_attr.h"
 #include "esp_system.h"
+#include "esp_random.h"
 #include "esp_timer.h"
 #include "display.h"
 #include "display_main_waveform.h"
@@ -1388,6 +1389,18 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
         }
         ui_text_fixed_vc(fb, 342, 746, 21, "密钥仅本次开机有效；重启即关闭，十分钟无人访问也会关闭。",
                          EPD_DRAW_ALIGN_CENTER, false);
+        // 四位数进入密码：持久选项，和上面的监看开关互不影响；打开后电脑上直接输 URL 即可。
+        // The four-digit entry PIN is a persistent option independent of the monitor switch; once on,
+        // a desktop can open the page by typing the URL.
+        {
+            char pin_value[16];
+            if (app_settings_monitor_pin_on() && app_settings_monitor_pin() >= 1000)
+                snprintf(pin_value, sizeof(pin_value), "%04u", (unsigned)app_settings_monitor_pin());
+            else snprintf(pin_value, sizeof(pin_value), "%s", app_settings_monitor_pin_on() ? "开启中" : "已关闭");
+            row(fb, 800, "进入密码（四位数字）", pin_value);
+        }
+        ui_text_fixed_vc(fb, 342, 900, 20, "开启后在电脑上打开 http://设备IP:8123/#k=四位密码",
+                         EPD_DRAW_ALIGN_CENTER, false);
         if (s_notice[0]) ui_text_fixed_vc(fb, 342, 788, 22, s_notice, EPD_DRAW_ALIGN_CENTER, false);
         settings_navigation(fb);
         return;
@@ -2443,6 +2456,18 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         return APP_REDRAW_PAGE;
     }
     if (s_page == SETTINGS_MONITOR) {
+        if (y >= 800 && y < 874) {
+            const bool on = !app_settings_monitor_pin_on();
+            app_settings_set_monitor_pin_on(on);
+            if (on) {
+                // 每次打开都换一枚新四位密码；关掉再打开就是"改密码"。
+                // Every enable generates a fresh four-digit PIN; off then on is how you change it.
+                uint16_t pin = (uint16_t)(1000u + esp_random() % 9000u);
+                app_settings_set_monitor_pin(pin);
+                snprintf(s_notice, sizeof(s_notice), "进入密码已开启");
+            } else snprintf(s_notice, sizeof(s_notice), "进入密码已关闭");
+            return APP_REDRAW_PAGE;
+        }
         if (y >= 292 && y < 380) {
             const bool on = !mod_monitor_enabled();
             mod_monitor_set_enabled(on);
