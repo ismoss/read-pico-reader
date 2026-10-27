@@ -486,6 +486,7 @@ static bool s_wallpaper_confirm, s_wallpaper_preview_ok;
 // Decode the preview once and keep it in PSRAM; repaints only blit. A three-megabyte image used to
 // be decoded again on every frame, which showed up as a long white screen. The fitted rect is kept
 // too, so the landscape mode previews the landscape version (fitted, never cropped).
+static bool s_preview_loading;
 static uint8_t *s_preview_px;
 static EpdRect s_preview_rect;
 static char s_preview_key[320];
@@ -503,7 +504,7 @@ static bool preview_cache_load(const char *path, EpdRect box) {
     size_t pixels = (size_t)box.width * box.height;
     uint8_t *px = heap_caps_malloc(pixels, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!px) return false;
-    if (!ui_wallpaper_fit_pixels(path, box, px, &s_preview_rect)) { free(px); return false; }
+    if (!ui_wallpaper_fit_pixels(path, box, px, &s_preview_rect, box.width > box.height)) { free(px); return false; }
     s_preview_px = px;
     snprintf(s_preview_key, sizeof(s_preview_key), "%s", key);
     return true;
@@ -1307,7 +1308,11 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
         EpdRect image = s_wallpaper_land ? (EpdRect){166, 236, 352, 198} : (EpdRect){166, 194, 352, 626};
         ui_fill_round_rect(fb, image, 8, UI_GRAY_WHITE);
         s_wallpaper_preview_ok = false;
-        if (s_wallpaper_selected >= 0 && s_wallpaper_selected < s_wallpaper_count) {
+        // 解码放到下一拍做：先让"正在加载预览…"这一帧上屏，用户不会以为死机。
+        // Decode on the next tick so the loading frame reaches the panel first; nobody mistakes it for a hang.
+        if (s_preview_loading) {
+            ui_text_vc(fb, 342, image.y + image.height / 2, 23, "正在加载预览…", EPD_DRAW_ALIGN_CENTER, false);
+        } else if (s_wallpaper_selected >= 0 && s_wallpaper_selected < s_wallpaper_count) {
             if (s_bookmark_picker) s_wallpaper_preview_ok = s_bookmark_preview != NULL;
             else if (preview_cache_load(s_wallpapers[s_wallpaper_selected].path, image)) {
                 ui_wallpaper_blit(fb, s_preview_rect, s_preview_px);
@@ -1814,6 +1819,15 @@ static app_redraw_t reset_tick(void) {
 }
 
 static app_redraw_t on_tick(app_ctx_t *ctx) {
+    // 预览解码放在这里：上一拍已经把"正在加载预览…"推上屏，这一拍才做那次慢解码。
+    // The preview decode runs here: the previous redraw already put the loading frame on the panel.
+    if (s_page == SETTINGS_WALLPAPER_PREVIEW && s_preview_loading) {
+        EpdRect image = s_wallpaper_land ? (EpdRect){166, 236, 352, 198} : (EpdRect){166, 194, 352, 626};
+        if (!s_bookmark_picker && s_wallpaper_selected >= 0 && s_wallpaper_selected < s_wallpaper_count)
+            (void)preview_cache_load(s_wallpapers[s_wallpaper_selected].path, image);
+        s_preview_loading = false;
+        return APP_REDRAW_PAGE;
+    }
     // 屏幕修复：先画最终结果，再在 tick 中整屏恢复；成功后不重复推页。
     // Paint the final notice before the tick's full restoration; do not push the page twice on success.
     if (s_panel_repair_pending) {
@@ -2210,14 +2224,16 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         if (next < 0 || next >= s_wallpaper_count) return APP_REDRAW_NONE;
         s_wallpaper_selected = next;
         bookmark_preview_prepare(ctx->fb);
-        s_wallpaper_page = next / 8;
+        s_wallpaper_page = next / 6;
+        s_preview_loading = !s_bookmark_picker;
+        preview_cache_drop();
         return APP_REDRAW_PAGE;
     }
     if ((s_page == SETTINGS_SYSTEM_FONT || s_page == SETTINGS_WALLPAPER) &&
         (ev->type == UI_GESTURE_SWIPE_U || ev->type == UI_GESTURE_SWIPE_D)) {
         int *page = s_page == SETTINGS_SYSTEM_FONT ? &s_font_page : &s_wallpaper_page;
         int count = s_page == SETTINGS_SYSTEM_FONT ? ttf_font_count() + 1 : s_wallpaper_count;
-        int slots=s_page==SETTINGS_SYSTEM_FONT?system_font_layout().slots:8;
+        int slots=s_page==SETTINGS_SYSTEM_FONT?system_font_layout().slots:6;
         int pages = count > 0 ? (count + slots - 1) / slots : 1;
         int old = *page;
         if (ev->type == UI_GESTURE_SWIPE_U && *page + 1 < pages) ++*page;
@@ -2472,6 +2488,8 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         s_wallpaper_selected = index;
         bookmark_preview_prepare(ctx->fb);
         s_wallpaper_confirm = false;
+        s_preview_loading = true;
+        preview_cache_drop();
         s_page = SETTINGS_WALLPAPER_PREVIEW;
         return APP_REDRAW_PAGE;
     }

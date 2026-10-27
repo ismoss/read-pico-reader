@@ -71,7 +71,7 @@ static bool avatar_content_crop(const uint8_t *gray, unsigned width, unsigned he
     return true;
 }
 
-static bool image_pixels(uint8_t *fb, uint8_t *pixels, const char *path, EpdRect area, int radius) {
+static bool image_pixels_rot(uint8_t *fb, uint8_t *pixels, const char *path, EpdRect area, int radius, bool rotate) {
     if ((!fb && !pixels) || !path || strncmp(path, "/sdcard/", 8) ||
         area.width <= 0 || area.height <= 0 ||
         area.x < 0 || area.y < 0 ||
@@ -85,7 +85,11 @@ static bool image_pixels(uint8_t *fb, uint8_t *pixels, const char *path, EpdRect
     if (stat(path, &st) || st.st_size <= 0 || (uint64_t)st.st_size > BOOK_IMAGE_FILE_MAX) return false;
     unsigned source_w = 0, source_h = 0;
     bool ok = book_image_file_dimensions(path, png, &source_w, &source_h);
-    unsigned width = (unsigned)area.width, height = (unsigned)area.height;
+    // 竖图当横屏壁纸用时先转 90°，所以按"交换后的画框"算解码尺寸，解码后旋转贴上去。
+    // A portrait image used as landscape art is rotated 90°, so the decode size follows the swapped
+    // frame and the pixels are rotated while blitting.
+    unsigned width = (unsigned)(rotate ? area.height : area.width);
+    unsigned height = (unsigned)(rotate ? area.width : area.height);
     bool source_wider = ok && (uint64_t)source_w * height > (uint64_t)source_h * width;
     if (source_wider) width = (unsigned)(((uint64_t)height * source_w + source_h - 1) / source_h);
     else if (ok) height = (unsigned)(((uint64_t)width * source_h + source_w - 1) / source_w);
@@ -123,21 +127,40 @@ static bool image_pixels(uint8_t *fb, uint8_t *pixels, const char *path, EpdRect
     for (int y = area.y; y < area.y + area.height; ++y)
         for (int x = area.x; x < area.x + area.width; ++x) {
             if (!pixels && !inside_rounded(area, radius, x, y)) continue;
-            int source_x = crop_x + (int)((int64_t)(x - area.x) * crop_w / area.width);
-            int source_y = crop_y + (int)((int64_t)(y - area.y) * crop_h / area.height);
+            int dx = x - area.x, dy = y - area.y;
+            int source_x, source_y;
+            if (rotate) {
+                // 顺时针 90°：目标 (dx,dy) 取源 (dy, height-1-dx)。
+                // Clockwise 90°: destination (dx,dy) samples source (dy, height-1-dx).
+                source_x = (int)((int64_t)dy * crop_h / area.height) + crop_x;
+                source_y = (int)((int64_t)(height - 1 - dx) * crop_w / area.width) + crop_y;
+                if (source_y < 0) source_y = 0;
+                if (source_y >= (int)height) source_y = (int)height - 1;
+            } else {
+                source_x = crop_x + (int)((int64_t)dx * crop_w / area.width);
+                source_y = crop_y + (int)((int64_t)dy * crop_h / area.height);
+            }
+            if (source_x < 0) source_x = 0;
+            if (source_x >= (int)width) source_x = (int)width - 1;
             uint8_t value = gray[(size_t)source_y * width + source_x];
-            if (pixels) pixels[(size_t)(y-area.y)*area.width + x-area.x] = value;
+            if (pixels) pixels[(size_t)dy*area.width + dx] = value;
             else epd_draw_pixel(x,y,ui_image_dither_gray(value,x,y),fb);
         }
     free(gray);
     return true;
 }
 
+static bool image_pixels(uint8_t *fb, uint8_t *pixels, const char *path, EpdRect area, int radius) {
+    return image_pixels_rot(fb, pixels, path, area, radius, false);
+}
 bool ui_wallpaper_draw(uint8_t *fb, const char *path, EpdRect area) {
     return image_pixels(fb, NULL, path, area, 0);
 }
+bool ui_wallpaper_draw_rotated(uint8_t *fb, const char *path, EpdRect area) {
+    return image_pixels_rot(fb, NULL, path, area, 0, true);
+}
 
-bool ui_wallpaper_fit_pixels(const char *path, EpdRect box, uint8_t *pixels, EpdRect *fitted) {
+bool ui_wallpaper_fit_pixels(const char *path, EpdRect box, uint8_t *pixels, EpdRect *fitted, bool rotate) {
     if (!path || !pixels || !fitted || box.width <= 0 || box.height <= 0) return false;
     const char *ext = strrchr(path, '.');
     if (!ext) return false;
@@ -151,7 +174,7 @@ bool ui_wallpaper_fit_pixels(const char *path, EpdRect box, uint8_t *pixels, Epd
     if (w < 1) w = 1;
     if (h < 1) h = 1;
     EpdRect area = {0, 0, w, h};
-    if (!image_pixels(NULL, pixels, path, area, 0)) return false;
+    if (!image_pixels_rot(NULL, pixels, path, area, 0, rotate)) return false;
     fitted->width = w; fitted->height = h;
     fitted->x = box.x + (box.width - w) / 2;
     fitted->y = box.y + (box.height - h) / 2;
@@ -185,7 +208,7 @@ void ui_wallpaper_draw_avatar(uint8_t *fb, const uint8_t *pixels, EpdRect area, 
 #define WALL_LOCK_CACHE UI_WALLPAPER_CACHE_PARENT "/locks/wallpaper.bin"
 #define WALL_LOCK_BYTES (684u*1216u/2u)
 #define WALL_LOCK_MAGIC UINT32_C(0x574c4b31)
-#define WALL_LOCK_VERSION 1u
+#define WALL_LOCK_VERSION 2u
 // 只缓存最终16级抖动画布到卡；借用锁屏画布，不常驻第二份整帧。
 // Persist final 16-level dithered art on SD, borrowing the lock canvas instead of retaining another frame.
 typedef struct {
@@ -223,7 +246,17 @@ bool ui_wallpaper_prepare_lock(uint8_t *fb,const char *path) {
         fclose(file);
         if (good) return true;
     }
-    if (!ui_wallpaper_draw(fb,path,(EpdRect){0,0,epd_rotated_display_width(),epd_rotated_display_height()})) return false;
+    // 横屏画布配竖图：转 90° 贴上去，和预览一致（预览也按这个规则画）。
+    // A portrait source on the landscape canvas is rotated 90°, matching exactly what the preview shows.
+    bool rotate = false;
+    if (epd_rotated_display_width() > epd_rotated_display_height()) {
+        const char *ext = strrchr(path, '.');
+        unsigned sw = 0, sh = 0;
+        if (ext && book_image_file_dimensions(path, !strcasecmp(ext, ".png"), &sw, &sh) && sw && sh && sh > sw)
+            rotate = true;
+    }
+    EpdRect full = {0, 0, epd_rotated_display_width(), epd_rotated_display_height()};
+    if (!image_pixels_rot(fb, NULL, path, full, 0, rotate)) return false;
     struct stat after;
     if (!stat(path,&after) && after.st_size==st.st_size && after.st_mtime==st.st_mtime) {
         s_wall_pending=wanted; s_wall_pending_fb=fb;

@@ -1165,11 +1165,13 @@ static void transfer_on_exit(app_ctx_t* ctx) {
     // hotspot) always stops; a station that was connected is brought back in network_only mode.
     bool keep_sta = latest.network_ready && latest.mode == READ_PICO_TRANSFER_MODE_STA;
     stop_session();
-    if (keep_sta && !s_media_lost && app_settings_wifi_auto_connect()) {
+    // 用户规则：离开这一页就该回到"原来连着的那个网"，和自己有没有开自动连接无关。
+    // User rule: leaving this page restores the network that was connected, whatever the auto-connect setting says.
+    if (keep_sta && !s_media_lost) {
         char ssid[33]; bool configured = false;
         if (read_pico_transfer_get_saved_wifi(ssid, &configured) == ESP_OK && configured) {
             read_pico_transfer_cfg_t cfg = {.mode = READ_PICO_TRANSFER_MODE_STA, .network_only = true,
-                                            .prefer_known = true};
+                                            .prefer_known = false};
             (void)read_pico_transfer_start(&cfg);
         }
     }
