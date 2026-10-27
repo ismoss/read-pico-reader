@@ -1159,11 +1159,20 @@ static void transfer_on_exit(app_ctx_t* ctx) {
     // Leaving the page no longer tears down a connected station: that network is the user's own, and
     // only the hotspot (AP) belongs to the transfer session. Previously only the settings-only entry
     // kept it, so a normal transfer session dropped the whole stack on exit.
+    // 用户定义：离开这一页 = 不再传书，但**不代表不想联网**。所以总是停掉传输会话（HTTP 服务、
+    // 热点），如果刚才连着的是 STA 网，再用 network_only 把这条网重新接回来。
+    // User rule: leaving this page stops transferring, not the network. The session (HTTP server,
+    // hotspot) always stops; a station that was connected is brought back in network_only mode.
     bool keep_sta = latest.network_ready && latest.mode == READ_PICO_TRANSFER_MODE_STA;
-    if (keep_sta) {
-        clear_qr();
-        s_session_started = false; // 全局循环接管保活；再次进页会从组件状态恢复。
-    } else stop_session();
+    stop_session();
+    if (keep_sta && !s_media_lost && app_settings_wifi_auto_connect()) {
+        char ssid[33]; bool configured = false;
+        if (read_pico_transfer_get_saved_wifi(ssid, &configured) == ESP_OK && configured) {
+            read_pico_transfer_cfg_t cfg = {.mode = READ_PICO_TRANSFER_MODE_STA, .network_only = true,
+                                            .prefer_known = true};
+            (void)read_pico_transfer_start(&cfg);
+        }
+    }
     s_wifi_settings_only = false;
     s_usb_entry = false;
     s_direct_entry = false;

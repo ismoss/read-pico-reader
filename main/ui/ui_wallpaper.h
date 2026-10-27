@@ -9,6 +9,14 @@
 /// Center-crop an SD image at its original aspect ratio to cover preview and lock screen.
 bool ui_wallpaper_draw(uint8_t *framebuffer, const char *path, EpdRect area);
 
+/// 把图片"完整放进 box"（不裁切）解码成 8bit 灰阶，并回报实际占用的矩形；设置页预览用。
+/// Decode the image fitted (never cropped) into box as 8-bit grays and report the rect it occupies;
+/// used by the settings preview so a landscape wallpaper previews as landscape.
+bool ui_wallpaper_fit_pixels(const char *path, EpdRect box, uint8_t *pixels, EpdRect *fitted);
+/// 把上面的灰阶像素按屏幕坐标抖动写回画布；重绘只走这一条，不再重复解码。
+/// Dither those grays back onto the canvas at screen coordinates; repaints never decode again.
+void ui_wallpaper_blit(uint8_t *framebuffer, EpdRect area, const uint8_t *pixels);
+
 /// 居中填满圆角区域并裁切四角，用于设置页头像。
 /// Center-crop into a rounded area for the settings avatar.
 bool ui_wallpaper_draw_rounded(uint8_t *framebuffer, const char *path, EpdRect area, int radius);

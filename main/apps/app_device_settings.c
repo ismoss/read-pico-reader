@@ -481,6 +481,33 @@ static bool wallpapers_alloc(void) {
 static int s_wallpaper_count;
 static int s_wallpaper_selected;
 static bool s_wallpaper_confirm, s_wallpaper_preview_ok;
+// 预览解码一次就留在 PSRAM 里，重绘只贴像素：三兆的图以前每画一帧都要重新解码一次，
+// 表现为"白屏很久"。矩形也一起记住，横屏模式预览的就是横版（按原比例放进框，不裁切）。
+// Decode the preview once and keep it in PSRAM; repaints only blit. A three-megabyte image used to
+// be decoded again on every frame, which showed up as a long white screen. The fitted rect is kept
+// too, so the landscape mode previews the landscape version (fitted, never cropped).
+static uint8_t *s_preview_px;
+static EpdRect s_preview_rect;
+static char s_preview_key[320];
+static void preview_cache_drop(void) {
+    free(s_preview_px); s_preview_px = NULL; s_preview_key[0] = 0;
+    s_preview_rect = (EpdRect){0};
+}
+static bool preview_cache_load(const char *path, EpdRect box) {
+    char key[320];
+    struct stat st = {0};
+    (void)stat(path, &st);
+    snprintf(key, sizeof(key), "%s|%lld|%d|%d", path, (long long)st.st_mtime, box.width, box.height);
+    if (s_preview_px && !strcmp(key, s_preview_key)) return true;
+    preview_cache_drop();
+    size_t pixels = (size_t)box.width * box.height;
+    uint8_t *px = heap_caps_malloc(pixels, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!px) return false;
+    if (!ui_wallpaper_fit_pixels(path, box, px, &s_preview_rect)) { free(px); return false; }
+    s_preview_px = px;
+    snprintf(s_preview_key, sizeof(s_preview_key), "%s", key);
+    return true;
+}
 static bool s_bookmark_picker;
 // 壁纸选择器还有第三个目标：横屏专用壁纸（可选）。三个模式共用同一张列表页。
 // The picker has a third target: an optional landscape-only wallpaper. All three share one list page.
@@ -1274,10 +1301,19 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
     }
     if (s_page == SETTINGS_WALLPAPER_PREVIEW) {
         back_header(fb,s_bookmark_picker?"预览透明书封":s_wallpaper_land?"预览横屏壁纸":"预览壁纸");
-        EpdRect image = {166, 194, 352, 626};
+        // 横屏槽用横版取景框：预览的是 1216×684 那张，按原比例放进框里，不再被竖框裁成中间一条。
+        // The landscape slot previews in a landscape frame: the 1216x684 image is fitted into it
+        // instead of being cropped to a vertical strip.
+        EpdRect image = s_wallpaper_land ? (EpdRect){166, 236, 352, 198} : (EpdRect){166, 194, 352, 626};
         ui_fill_round_rect(fb, image, 8, UI_GRAY_WHITE);
-        s_wallpaper_preview_ok = s_wallpaper_selected >= 0 && s_wallpaper_selected < s_wallpaper_count &&
-            (s_bookmark_picker ? s_bookmark_preview != NULL : ui_wallpaper_draw(fb, s_wallpapers[s_wallpaper_selected].path, image));
+        s_wallpaper_preview_ok = false;
+        if (s_wallpaper_selected >= 0 && s_wallpaper_selected < s_wallpaper_count) {
+            if (s_bookmark_picker) s_wallpaper_preview_ok = s_bookmark_preview != NULL;
+            else if (preview_cache_load(s_wallpapers[s_wallpaper_selected].path, image)) {
+                ui_wallpaper_blit(fb, s_preview_rect, s_preview_px);
+                s_wallpaper_preview_ok = true;
+            }
+        }
         if(s_bookmark_picker && s_bookmark_preview)book_lock_bookmark_preview_paint(fb,s_bookmark_preview,image);
         ui_draw_round_rect(fb, image, 8, 0x70);
         if (!s_wallpaper_preview_ok)
@@ -2696,6 +2732,8 @@ static app_redraw_t on_key(app_ctx_t *ctx, int key) {
 }
 static void settings_exit(app_ctx_t *ctx) {
     s_reset_confirm=s_reset_pending=false;
+    // 预览像素是 PSRAM 里的一块，离开设置就还回去。/ The cached preview lives in PSRAM; hand it back on exit.
+    preview_cache_drop();
     bookmark_preview_release();s_bookmark_picker=false;
     s_font_sync_confirm=false;s_font_sync_path[0]=0;
     pin_setup_close();

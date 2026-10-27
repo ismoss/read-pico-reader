@@ -137,6 +137,35 @@ bool ui_wallpaper_draw(uint8_t *fb, const char *path, EpdRect area) {
     return image_pixels(fb, NULL, path, area, 0);
 }
 
+bool ui_wallpaper_fit_pixels(const char *path, EpdRect box, uint8_t *pixels, EpdRect *fitted) {
+    if (!path || !pixels || !fitted || box.width <= 0 || box.height <= 0) return false;
+    const char *ext = strrchr(path, '.');
+    if (!ext) return false;
+    bool png = !strcasecmp(ext, ".png");
+    unsigned sw = 0, sh = 0;
+    if (!book_image_file_dimensions(path, png, &sw, &sh) || !sw || !sh) return false;
+    // 按原比例完整放进 box：横图取宽度、竖图取高度，都不裁切。
+    // Fit the whole image into the box: wide images take the width, tall ones the height; no crop.
+    int w = box.width, h = (int)((uint64_t)box.width * sh / sw);
+    if (h > box.height) { h = box.height; w = (int)((uint64_t)box.height * sw / sh); }
+    if (w < 1) w = 1;
+    if (h < 1) h = 1;
+    EpdRect area = {0, 0, w, h};
+    if (!image_pixels(NULL, pixels, path, area, 0)) return false;
+    fitted->width = w; fitted->height = h;
+    fitted->x = box.x + (box.width - w) / 2;
+    fitted->y = box.y + (box.height - h) / 2;
+    return true;
+}
+
+void ui_wallpaper_blit(uint8_t *fb, EpdRect area, const uint8_t *pixels) {
+    if (!fb || !pixels || area.width <= 0 || area.height <= 0) return;
+    for (int y = area.y; y < area.y + area.height; ++y)
+        for (int x = area.x; x < area.x + area.width; ++x)
+            epd_draw_pixel(x, y, ui_image_dither_gray(
+                pixels[(size_t)(y - area.y) * area.width + (x - area.x)], x, y), fb);
+}
+
 bool ui_wallpaper_draw_rounded(uint8_t *fb, const char *path, EpdRect area, int radius) {
     if (radius < 0 || radius > area.width / 2 || radius > area.height / 2) return false;
     return image_pixels(fb, NULL, path, area, radius);
