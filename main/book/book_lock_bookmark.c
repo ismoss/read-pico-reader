@@ -287,7 +287,7 @@ static bool seal_draw_rows(FILE *f,uint8_t *fb,unsigned w,unsigned h,uint8_t *wo
     const size_t row_bytes=(size_t)w*2;
     uint8_t *block=work+7*row_bytes;
     unsigned buffered=0,block_row=0;
-    const int ox=((int)epd_rotated_display_width()-(int)w)/2,oy=((int)epd_rotated_display_height()-(int)h)/2;
+    const int ox=(684-(int)w)/2,oy=(1216-(int)h)/2;
     int dx=1,dy=epd_width(),origin=0;
     switch(epd_get_rotation()) {
         case EPD_ROT_PORTRAIT:dx=epd_width();dy=-1;origin=epd_width()-1;break;
@@ -342,7 +342,7 @@ static bool seal_draw(uint8_t *fb,const char *path,unsigned w,unsigned h,bool *s
         bool ok=seal_draw_rows(f,fb,w,h,work,started);
         free(work);fclose(f);return ok;
     }
-    uint8_t row[684*2];bool ok=true;int ox=((int)epd_rotated_display_width()-(int)w)/2,oy=((int)epd_rotated_display_height()-(int)h)/2;
+    uint8_t row[684*2];bool ok=true;int ox=(684-(int)w)/2,oy=(1216-(int)h)/2;
     for(unsigned pass=0;pass<2&&ok;++pass) {
         ok=!fseek(f,sizeof(wanted),SEEK_SET);
         for(unsigned y=0;y<h&&ok;++y) {
@@ -365,13 +365,10 @@ bool book_lock_bookmark_draw(uint8_t *fb,const char *path) {
     unsigned sw,sh;
     const char *ext=path?strrchr(path,'.'):NULL;
     if(!fb||!ext||strcasecmp(ext,".png")||!book_image_file_dimensions(path,true,&sw,&sh)||!sw||!sh)return false;
-    // 以整个PNG画布居中等比缩放，按当前画布（竖屏 684×1216 / 横屏 1216×684）逐像素对齐，不识别或裁剪主体。
-    // Center-fit the entire PNG canvas against the live canvas (684x1216 or 1216x684), without subject
-    // detection or cropping; the portrait size maps pixel-for-pixel.
-    const unsigned cw=(unsigned)epd_rotated_display_width(),ch=(unsigned)epd_rotated_display_height();
-    if(!cw||!ch)return false;
-    unsigned w=cw,h=(uint64_t)sh*w/sw;
-    if(h>ch){h=ch;w=(uint64_t)sw*h/sh;}
+    // 以整个PNG画布居中等比缩放，684x1216时逐像素对齐，不识别或裁剪主体。
+    // Center-fit the entire PNG canvas; 684x1216 maps pixel-for-pixel, without subject detection or cropping.
+    unsigned w=684,h=(uint64_t)sh*w/sw;
+    if(h>1216){h=1216;w=(uint64_t)sw*h/sh;}
     if(!w||!h)return false;
     bool started=false;
     if(seal_draw(fb,path,w,h,&started))return true;
@@ -384,11 +381,11 @@ bool book_lock_bookmark_draw(uint8_t *fb,const char *path) {
     if(!layers)return false;
     uint8_t *alpha=layers+count;
     bool ok=book_png_file_layer(path,w,h,layers,alpha) && remove_white_background(layers,alpha,w,h);
-    int ox=((int)cw-(int)w)/2,oy=((int)ch-(int)h)/2;
+    int ox=(684-(int)w)/2,oy=(1216-(int)h)/2;
     if(ok) {
         // 小幅偏移的柔影只作用在非透明轮廓附近。/ A softly offset shadow affects only the nontransparent silhouette.
         for(unsigned y=0;y<h;++y)for(unsigned x=0;x<w;++x){
-            unsigned a=alpha[(size_t)y*w+x];if(!a||x+ox+4>=epd_rotated_display_width()||y+oy+6>=epd_rotated_display_height())continue;
+            unsigned a=alpha[(size_t)y*w+x];if(!a||x+ox+4>=684||y+oy+6>=1216)continue;
             int xx=ox+x+4,yy=oy+y+6;
             unsigned bg=pixel(fb,xx,yy);
             epd_draw_pixel(xx,yy,ui_image_dither_gray((bg*(255-a/5)+127)/255,xx,yy),fb);
