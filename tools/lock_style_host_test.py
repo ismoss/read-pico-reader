@@ -44,6 +44,7 @@ static bool pin,draw_ok=true,transfer_ok=true,timeout,reader,boot_cache,cache_ok
 static unsigned cached_style;
 static jmp_buf deep;
 static const char *app_settings_wallpaper_path(void){return "/sdcard/wallpaper.jpg";}
+static const char *app_settings_wallpaper_landscape_path(void){return "";}
 static uint8_t app_settings_lock_style(void){return style;}
 static bool lock_pin_enabled(void){return pin;}
 static bool draw(unsigned chosen,uint8_t *fb){assert(chosen==style&&panel[0]==(feedback_seen?0xff:current_background));if(chosen==3)assert(fb[0]==(boot_cache?0xff:current_background));++draws[chosen];memset(fb,0x10+chosen,FRAME_BYTES);frame_ready=draw_ok;return draw_ok;}

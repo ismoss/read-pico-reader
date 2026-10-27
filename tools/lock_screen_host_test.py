@@ -61,6 +61,7 @@ static uint8_t selected_style;
 static const char *wallpaper="";
 uint8_t app_settings_lock_style(void){return selected_style;}
 const char *app_settings_wallpaper_path(void){return wallpaper;}
+const char *app_settings_wallpaper_landscape_path(void){return "";}
 const char *app_settings_bookmark_path(void){return wallpaper;}
 
 static bool fat_semantics;static int rename_calls,rename_fail_at;
