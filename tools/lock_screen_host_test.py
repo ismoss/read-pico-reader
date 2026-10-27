@@ -116,6 +116,8 @@ enum EpdDrawError {EPD_GOOD=0,EPD_BAD=1};
 static enum EpdDrawError update_display_area_diff_with(void *h,const int *w,int m,EpdRect a){(void)h;(void)w;(void)a;assert(m==MODE_GL16||m==MODE_DU);++pushes;return display_failure?EPD_BAD:EPD_GOOD;}
 static enum EpdDrawError update_display_full(void *h){(void)h;++fulls;return EPD_GOOD;}
 static void guard_draw_result(void *h,enum EpdDrawError result){(void)h;(void)result;}
+// 密码验证通过会请求一次整屏定稿，清掉局部 DU 键盘残影。/ A verified PIN asks for one full settle to clear DU key ghosts.
+static void display_request_full_refresh(void){++fulls;}
 '''.replace('FOLDER',str(p))
  # Declarations precede the backdrop stub; state/hit logic comes from the production pad.
  unit=unit.replace('static void ui_pinpad_paint_input(', 'void ui_pinpad_paint_input(').replace('static void ui_pinpad_begin(', 'void ui_pinpad_begin(').replace('static void ui_pinpad_paint(', 'void ui_pinpad_paint(')
