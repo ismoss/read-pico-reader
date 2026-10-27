@@ -1521,8 +1521,9 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
             // TF 卡升级那一栏此时没有意义，直接隐藏。
             // While an online update is in play (available or downloading) this block shows the
             // changelog next to the progress, and the TF card section is hidden.
-            const bool online_art = s_update.state == PICO_UPDATE_AVAILABLE ||
-                                    s_update.state == PICO_UPDATE_DOWNLOADING;
+            // 只有真的在下载时才让位："发现新版本"仍然保留升级包那一栏（用户此刻还没开始更新）。
+            // Only a running download takes the space: merely finding a release keeps the TF section.
+            const bool online_art = s_update.state == PICO_UPDATE_DOWNLOADING;
             settings_card(fb, (EpdRect){36, 662, 612, 262}, 22, UI_GRAY_WHITE, 0x70);
             if (online_art) {
                 ui_text(fb, 60, 689, 26, "本次更新", EPD_DRAW_ALIGN_LEFT, false);
@@ -1842,6 +1843,15 @@ static app_redraw_t reset_tick(void) {
 }
 
 static app_redraw_t on_tick(app_ctx_t *ctx) {
+    // 每次换页（主列表 ↔ 子页）请求一次整屏 GC16：页模式是 GL16，白底不压黑，
+    // 旧列表的灰线会留在最下面一条，看着像残影。
+    // Every page switch asks for one full GC16: the page mode is GL16, which keeps white and would
+    // leave the tail of the previous list visible as a ghost line.
+    static settings_page_t s_last_page;
+    static bool s_page_seen;
+    if (s_page_seen && s_page != s_last_page) display_request_full_refresh();
+    s_last_page = s_page;
+    s_page_seen = true;
     // 预览解码放在这里：上一拍已经把"正在加载预览…"推上屏，这一拍才做那次慢解码。
     // The preview decode runs here: the previous redraw already put the loading frame on the panel.
     if (s_page == SETTINGS_WALLPAPER_PREVIEW && s_preview_loading) {
