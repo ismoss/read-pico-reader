@@ -132,6 +132,12 @@ static void transfer_file_moved(const char *old_path, const char *new_path, uint
     if (!strcmp(app_settings_wallpaper_landscape_path(), old_path)) app_settings_set_wallpaper_landscape_path(new_path);
 }
 
+static bool transfer_set_wallpaper_land(const char *path) {
+    if (strncmp(path, "/sdcard/pictures/", 17)) return false;
+    app_settings_set_wallpaper_landscape_path(path);
+    return !strcmp(app_settings_wallpaper_landscape_path(), path);
+}
+
 static bool transfer_set_wallpaper(const char *path) {
     if (strncmp(path, "/sdcard/pictures/", 17)) return false;
     app_settings_set_wallpaper_path(path);
@@ -1233,7 +1239,7 @@ static app_redraw_t on_tick(app_ctx_t* ctx) {
                 .file_limit = book_store_file_limit(&s_root), .free_bytes_cb = free_bytes, .free_bytes_ctx = &s_root,
                 .file_changed_cb = book_progress_forget, .file_deleted_cb = transfer_file_deleted,
                 .file_moved_cb = transfer_file_moved,
-                .wallpaper_set_cb = transfer_set_wallpaper,
+                .wallpaper_set_cb = transfer_set_wallpaper, .wallpaper_land_set_cb = transfer_set_wallpaper_land,
                 .signature_get_cb = transfer_signature_get, .signature_set_cb = transfer_signature_set,
                 .title_get_cb = NULL, .title_set_cb = NULL};
             err = read_pico_transfer_start(&cfg);

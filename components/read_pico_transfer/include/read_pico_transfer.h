@@ -55,6 +55,7 @@ typedef struct {
     bool (*signature_get_cb)(char *out, size_t cap); ///< 复制当前签名，不依赖页面 / Copy current signature without page dependencies
     esp_err_t (*signature_set_cb)(const char *text); ///< 持久保存签名，空串清除 / Persist a signature; empty clears it
     bool (*wallpaper_set_cb)(const char *path); ///< 图片上传完成后设为锁屏壁纸 / Select an uploaded image as lock wallpaper
+    bool (*wallpaper_land_set_cb)(const char *path); ///< 同上，但写进横屏壁纸槽 / Same, for the landscape wallpaper slot
 } read_pico_transfer_cfg_t;
 
 typedef struct {

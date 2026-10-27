@@ -1609,9 +1609,16 @@ static esp_err_t media_upload_handler(httpd_req_t *req, const char *root, unsign
     snprintf(part, sizeof(part), "%s.part", path);
     bool overwrite = httpd_query_key_value(query, "overwrite", replace, sizeof(replace)) == ESP_OK && !strcmp(replace, "1");
     char wallpaper[8] = {0};
-    bool set_wallpaper = kind == 1 && httpd_query_key_value(query, "wallpaper", wallpaper, sizeof(wallpaper)) == ESP_OK && !strcmp(wallpaper, "1");
+    const bool want_wallpaper = kind == 1 &&
+        httpd_query_key_value(query, "wallpaper", wallpaper, sizeof(wallpaper)) == ESP_OK;
+    // 1 = 竖屏壁纸槽，2 = 横屏壁纸槽；两个槽位是两张独立的图。
+    // 1 is the portrait wallpaper slot and 2 the landscape one; they are two independent images.
+    const bool set_wallpaper = want_wallpaper && !strcmp(wallpaper, "1");
+    const bool set_wallpaper_land = want_wallpaper && !strcmp(wallpaper, "2");
     if (set_wallpaper && !s_cfg.wallpaper_set_cb)
         return wifi_response(req, "503 Service Unavailable", "{\"error\":\"锁屏壁纸设置不可用\"}");
+    if (set_wallpaper_land && !s_cfg.wallpaper_land_set_cb)
+        return wifi_response(req, "503 Service Unavailable", "{\"error\":\"横屏壁纸设置不可用\"}");
     portENTER_CRITICAL(&s_lock);
     if (!admission_begin(s_stopping, &s_upload_active)) {
         portEXIT_CRITICAL(&s_lock);
@@ -1624,13 +1631,17 @@ static esp_err_t media_upload_handler(httpd_req_t *req, const char *root, unsign
     file_result_t result = upload_managed(path, part, req->content_len,
         set_wallpaper && limit > 2u * 1024u * 1024u ? 2u * 1024u * 1024u : limit,
         s_cfg.free_bytes_cb(s_cfg.free_bytes_ctx), overwrite, s_buffer, 16384, receive_http, req, upload_progress, NULL);
-    bool wallpaper_failed = set_wallpaper && result.status == 200 && result.changed && !s_cfg.wallpaper_set_cb(path);
+    bool wallpaper_failed = result.status == 200 && result.changed &&
+        ((set_wallpaper && !s_cfg.wallpaper_set_cb(path)) ||
+         (set_wallpaper_land && !s_cfg.wallpaper_land_set_cb(path)));
     portENTER_CRITICAL(&s_lock);
     s_upload_active = false;
     if (result.changed) { s_status.done_count++; s_status.changed_count++; }
     portEXIT_CRITICAL(&s_lock);
     if (wallpaper_failed)
-        return wifi_response(req, "500 Internal Server Error", "{\"error\":\"图片已上传，但设置锁屏壁纸失败\"}");
+        return wifi_response(req, "500 Internal Server Error",
+            set_wallpaper_land ? "{\"error\":\"图片已上传，但设置横屏壁纸失败\"}"
+                               : "{\"error\":\"图片已上传，但设置锁屏壁纸失败\"}");
     return file_response(req, result, false, path);
 }
 
