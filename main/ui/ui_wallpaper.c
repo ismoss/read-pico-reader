@@ -123,6 +123,12 @@ static bool image_pixels_rot(uint8_t *fb, uint8_t *pixels, const char *path, Epd
     int crop_w = (int)center.width, crop_h = (int)center.height;
     if (radius > 0) avatar_content_crop(gray, width, height, area,
                                         &crop_x, &crop_y, &crop_w, &crop_h);
+    // 旋转路径永远是"整图装进等比例的框"：上面那次居中等比裁切是按未旋转的解码尺寸算的，
+    // 拿它去索引旋转后的图只会越界错位（预览图会莫名其妙偏到右边）。这里强制整图。
+    // The rotated path always places the whole image into an aspect-matched box: the centre-crop
+    // above was computed against the unrotated decode, and indexing the turned image with it lands
+    // out of bounds (that is why the preview drifted to the right). Force the full frame here.
+    if (rotate) { crop_x = 0; crop_y = 0; crop_w = (int)width; crop_h = (int)height; }
 
     for (int y = area.y; y < area.y + area.height; ++y)
         for (int x = area.x; x < area.x + area.width; ++x) {
