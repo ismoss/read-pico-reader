@@ -206,7 +206,7 @@ static int read_chunk(esp_http_client_handle_t client, uint8_t *buffer, int cap,
     while (!atomic_load(&s_cancel) && esp_timer_get_time() < *idle) {
         read_pico_transfer_service_poll();
         int n = esp_http_client_read(client, (char *)buffer, cap);
-        if (n > 0) { *idle = esp_timer_get_time() + 30000000; return n; }
+        if (n > 0) { *idle = esp_timer_get_time() + 90000000; return n; }
         if (!n && esp_http_client_is_complete_data_received(client)) return 0;
         if (n < 0 && n != -ESP_ERR_HTTP_EAGAIN) return -1;
         vTaskDelay(pdMS_TO_TICKS(20));
@@ -310,7 +310,7 @@ static bool download(void) {
     esp_err_t error = ESP_OK;
     if (psa_crypto_init() != PSA_SUCCESS || psa_hash_setup(&hash, PSA_ALG_SHA_256) != PSA_SUCCESS) error = ESP_FAIL;
     size_t total = 0, header_size = 0;
-    int64_t idle = esp_timer_get_time() + 30000000;
+    int64_t idle = esp_timer_get_time() + 90000000;
     int n = -1;
     unsigned retries = 0;
     bool complete = false;

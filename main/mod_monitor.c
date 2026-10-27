@@ -70,6 +70,7 @@ static struct {
     SemaphoreHandle_t lock;
     bool active, down_pending, up_pending;
     uint16_t x, y;
+    int64_t last_ms;      // 最近一次注入请求的 tick_ms；超时即放弃会话
 } s_inject;
 
 bool mod_monitor_enabled(void) { return s_enabled; }
@@ -360,6 +361,7 @@ static esp_err_t touch_handler(httpd_req_t *req) {
     if (!s_inject.lock) goto bad;
     note_seen();
     xSemaphoreTake(s_inject.lock, portMAX_DELAY);
+    s_inject.last_ms = esp_timer_get_time() / 1000;
     if (type == 1) {
         s_inject.active = true;
         s_inject.down_pending = true;
@@ -468,6 +470,13 @@ void mod_monitor_tick(const uint8_t *framebuffer) {
 bool mod_monitor_inject(cst836u_touch_t *touch) {
     if (!s_inject.lock) return false;
     xSemaphoreTake(s_inject.lock, portMAX_DELAY);
+    // 会话必须有后续请求推进；网页中途关掉时不能一直盖住本机报点（否则设备像被锁住）。
+    // A session must be advanced by further requests; a closed page must not keep overriding the
+    // local report, which is what made the device feel locked after remote control.
+    if (s_inject.active && esp_timer_get_time() / 1000 - s_inject.last_ms > 1500) {
+        s_inject.active = s_inject.down_pending = s_inject.up_pending = false;
+        ESP_LOGW("monitor", "inject session expired");
+    }
     if (!s_inject.active) {
         xSemaphoreGive(s_inject.lock);
         return false;

@@ -257,6 +257,10 @@ static const EpdRect s_upgrade_notice_area = {52, 424, 572, 42};
 static const int s_upgrade_dots_left = 564;
 static const int s_upgrade_tail_right = 624;
 static const int s_upgrade_notice_text_max = 460;
+// 下载速度：每秒用 status.received 的增量算，再做个平滑；只在下载中有效。
+// Download speed from the per-second delta of status.received, smoothed; only while downloading.
+static uint32_t s_upgrade_speed, s_upgrade_prev_bytes;
+static int64_t s_upgrade_prev_ms;
 static int64_t s_upgrade_beat_ms;
 static int s_upgrade_beat_second = -1;
 static void upgrade_beat_paint(app_ctx_t *ctx, int64_t elapsed_ms) {
@@ -1527,7 +1531,18 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
             ui_text(fb, 60, 436, 21, detail, EPD_DRAW_ALIGN_LEFT, false);
             if (s_update.state == PICO_UPDATE_AVAILABLE)
                 ui_text(fb, 60, 477, 24, s_update.release.version, EPD_DRAW_ALIGN_LEFT, false);
-            if (s_update.state == PICO_UPDATE_DOWNLOADING) draw_upgrade_progress(fb);
+            if (s_update.state == PICO_UPDATE_DOWNLOADING) {
+                draw_upgrade_progress(fb);
+                // 进度条旁边给出现速，慢的时候能分清是网络慢还是卡住了。
+                // Show the current rate next to the progress so a slow link is distinguishable from a stall.
+                char rate[40];
+                if (s_upgrade_speed >= 1024u * 1024u)
+                    snprintf(rate, sizeof(rate), "%.1f MB/s", s_upgrade_speed / 1048576.0);
+                else if (s_upgrade_speed)
+                    snprintf(rate, sizeof(rate), "%u KB/s", (unsigned)(s_upgrade_speed / 1024u));
+                else snprintf(rate, sizeof(rate), "等待数据…");
+                ui_text(fb, 624, 477, 20, rate, EPD_DRAW_ALIGN_RIGHT, false);
+            }
             ui_draw_button(fb, (EpdRect){60, 550, 564, 62}, s_update.busy ? "取消联网更新" :
                 s_update.state == PICO_UPDATE_AVAILABLE ? "开始更新" : "检查更新", s_update.state == PICO_UPDATE_AVAILABLE);
             // 联网更新在场（发现有新版或正在下载）时：下面这块改成"本次更新"，和进度同屏显示；
@@ -1855,7 +1870,27 @@ static app_redraw_t reset_tick(void) {
     return APP_REDRAW_PAGE;
 }
 
+static void upgrade_speed_sample(void) {
+    static pico_update_status_t status;
+    pico_online_get_status(&status);
+    const int64_t now = esp_timer_get_time() / 1000;
+    if (status.state != PICO_UPDATE_DOWNLOADING) {
+        s_upgrade_speed = s_upgrade_prev_bytes = 0;
+        s_upgrade_prev_ms = 0;
+        return;
+    }
+    if (!s_upgrade_prev_ms) { s_upgrade_prev_ms = now; s_upgrade_prev_bytes = status.received; return; }
+    const int64_t delta = now - s_upgrade_prev_ms;
+    if (delta < 900) return;
+    const uint32_t grew = status.received >= s_upgrade_prev_bytes ? status.received - s_upgrade_prev_bytes : 0;
+    const uint32_t instant = (uint32_t)((uint64_t)grew * 1000u / (uint64_t)delta);
+    s_upgrade_speed = s_upgrade_speed ? (s_upgrade_speed * 3u + instant) / 4u : instant;
+    s_upgrade_prev_ms = now;
+    s_upgrade_prev_bytes = status.received;
+}
+
 static app_redraw_t on_tick(app_ctx_t *ctx) {
+    if (s_page == SETTINGS_UPGRADE) upgrade_speed_sample();
     // 每次换页（主列表 ↔ 子页）请求一次整屏 GC16：页模式是 GL16，白底不压黑，
     // 旧列表的灰线会留在最下面一条，看着像残影。
     // Every page switch asks for one full GC16: the page mode is GL16, which keeps white and would
