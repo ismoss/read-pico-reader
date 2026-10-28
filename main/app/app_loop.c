@@ -1234,8 +1234,14 @@ void app_loop_run(const app_loop_config_t* config) {
         uint32_t ble_input = ble_pt_input_serial();
         if (ble_input != last_ble_input) { last_ble_input = ble_input; last_input_ms = ctx.now_ms; }
         unsigned requested_idle = app_settings_auto_lock_minutes();
-        bool idle_blocked = usb_storage_active() || wifi_busy || current == &app_transfer ||
-            current->holds_pmu || power_dialog_open || touch.touched ||
+        // 只有"真的在传/在升级"才阻止自动锁屏：后台保活的 network_only 会话（离开传输页后
+        // 为了不断网而保留的那条）不能算忙，否则自动锁屏永远不会触发。
+        // Only real traffic or an update blocks auto-lock: a background network_only session (kept
+        // alive so leaving the transfer page does not drop the network) must not count as busy, or
+        // auto-lock would never fire again.
+        const bool transfer_busy = transfer.state == READ_PICO_TRANSFER_UPLOADING;
+        bool idle_blocked = usb_storage_active() || transfer_busy || pico_online_busy() ||
+            current == &app_transfer || current->holds_pmu || power_dialog_open || touch.touched ||
             ctx.request_app || ctx.request_menu || ctx.request_return;
         if (idle_blocked || requested_idle != idle_minutes) last_input_ms = ctx.now_ms;
         idle_minutes = requested_idle;
