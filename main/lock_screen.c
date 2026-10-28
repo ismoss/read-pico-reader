@@ -31,7 +31,7 @@
 #define LOCK_ART_PATH LOCK_SCREEN_CACHE_PARENT "/locks/pin-background.bin"
 // 旧缓存可能保存了临时圆锁；新代号仅持久化成功显示的真实锁图。
 // Old caches may contain temporary badges; this generation persists only successfully displayed lock artwork.
-#define ART_MAGIC UINT32_C(0x50414434)
+#define ART_MAGIC UINT32_C(0x50414435)
 typedef struct {uint32_t magic,rotation,style,checksum;uint64_t wallpaper;} art_header_t;
 static uint32_t checksum(const uint8_t *bytes){uint32_t h=2166136261u;for(unsigned i=0;i<FRAME_BYTES;++i)h=(h^bytes[i])*16777619u;return h;}
 static uint64_t wallpaper_key(void){
@@ -152,9 +152,12 @@ void lock_screen_authenticate(EpdiyHighlevelState *hl,cst836u_handle_t touch,sc7
             epd_poweroff();
             if(app_light_sleep_wait_timed(NULL,10u*60u*1000u)==APP_WAKE_TIMEOUT){
                 ui_pinpad_end(&pad);free(original);
-                // 深睡前整屏清白定稿：面板按上一帧显示，残影会跟着一起"熄屏"。
-                // Whiten and settle before deep sleep: the panel keeps its last frame.
-                blank_canvas(fb);(void)update_display_full(hl);
+                // 深睡前把锁屏画面整屏定稿一次：面板会一直是最后一帧，所以既不要白屏，也别带残影。
+                // Settle the lock art once before deep sleep: the panel keeps this last frame, so it
+                // should neither go blank nor keep key ghosts.
+                restore_art(fb, NULL);
+                (void)update_display_full(hl);
+                s_art_settle = false;
                 app_enter_host_sleep(APP_SLEEP_DEEP);
                 // 防御性处理：电源交接意外返回也继续验证。/ Defensive: a returning power handoff still requires verification.
                 // 深睡回来 fb 是锁屏画面：先刷白让玻璃圆键重新采样，再由等待阶段的 restore_art 恢复样式。
@@ -203,6 +206,9 @@ void lock_screen_authenticate(EpdiyHighlevelState *hl,cst836u_handle_t touch,sc7
                         // The pad is presented with partial DU updates, so releasing straight away leaves
                         // key ghosts in the first frame after unlock; the next full GC16 settles it.
                         display_request_full_refresh();
+                        // 解锁成功即作废锁屏图缓存：哪怕历史上有过把键盘画进去的帧，也不会再被复用。
+                        // Drop the cached art on a successful unlock so a polluted frame can never return.
+                        (void)remove(LOCK_ART_PATH);
                         ui_pinpad_end(&pad);free(original);read_pico_pmu_drain_events();ble_pt_event_t e;while(ble_pt_pop_key(&e)){}ble_pt_raw_t raw;while(ble_pt_pop_raw(&raw)){}return;
                     }
                     ui_pinpad_reset(&pad,NULL,"密码不正确，请重试");
