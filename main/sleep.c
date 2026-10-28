@@ -713,7 +713,10 @@ void enter_lock_and_sleep(
     if (landscape_lock) epd_set_rotation(EPD_ROT_INVERTED_PORTRAIT);
     read_pico_pmu_drain_events();
     epd_poweron();
-    epd_clear();
+    // 不再先清白整屏：那一步就是"解锁后白屏几秒"的来源。锁屏画面留在面板上，
+    // 由当前页的第一帧整屏 GC16 直接顶掉它。
+    // Do not whiten the panel first: that step was the white gap after unlocking. The lock face
+    // stays on screen until the page's first full GC16 replaces it.
     epd_hl_set_all_white(hl);
     read_pico_pmu_drain_events();
     if (ignore_until_ms) {

@@ -95,24 +95,27 @@ static void draw_startup_frame(uint8_t *framebuffer) {
     const int cy = epd_rotated_display_height() / 2;
     static const char *const wordmark[] = {"m", "o", "s", "s", "r", "e", "a", "d"};
     static const char *const caption[] = {"正", "在", "唤", "醒"};
-    // 星图：确定性伪随机撒点（同一个种子每次开机都一样）+ 一段星座连线。全部用内建图元画，
-    // 不读卡、不占 flash 位图，冷启动阶段也安全。
-    // Star chart: deterministic scatter from a fixed seed plus one constellation, drawn with built-in
-    // primitives so the cold boot needs no card and no flashed bitmap.
+    // 星图：确定性伪随机撒点（同一个种子每次开机都一样）+ 上半区一段星座连线。撒点避开中间
+    // 的文字带，连线只走上半区，保证字标周围是干净的。全部用内建图元画，不读卡、不占 flash。
+    // Star chart: deterministic scatter from a fixed seed plus one constellation line in the upper
+    // band. Dots avoid the text band and lines stay high, so the wordmark sits on clean paper. Drawn
+    // with built-in primitives only: no card access and no flashed bitmap.
     {
         const int w = epd_rotated_display_width(), h = epd_rotated_display_height();
+        const int text_top = cy - 110, text_bottom = cy + 70;
         uint32_t seed = UINT32_C(0x6d6f7373); // "moss"
-        int cx0[6], cy0[6];
-        for (int i = 0; i < 120; ++i) {
+        int px_[6], py_[6], stars = 0;
+        for (int i = 0; i < 150; ++i) {
             seed = seed * UINT32_C(1664525) + UINT32_C(1013904223);
             const int sx = (int)(seed % (uint32_t)w);
             seed = seed * UINT32_C(1664525) + UINT32_C(1013904223);
             const int sy = (int)(seed % (uint32_t)h);
-            epd_fill_circle(sx, sy, (i % 11 == 0) ? 2 : 1, (i % 11 == 0) ? 0xc0 : 0xd8, framebuffer);
-            if (i < 6) { cx0[i] = sx; cy0[i] = sy; }
+            if (sy > text_top && sy < text_bottom) continue;   // 文字带留白 / keep the wordmark band clean
+            epd_fill_circle(sx, sy, (i % 9 == 0) ? 2 : 1, (i % 9 == 0) ? 0x98 : 0xc8, framebuffer);
+            if (stars < 6 && sy < h / 3) { px_[stars] = sx; py_[stars] = sy; ++stars; }
         }
-        for (int i = 0; i + 1 < 6; ++i)
-            epd_draw_line(cx0[i], cy0[i], cx0[i + 1], cy0[i + 1], 0xc8, framebuffer);
+        for (int i = 0; i + 1 < stars; ++i)
+            epd_draw_line(px_[i], py_[i], px_[i + 1], py_[i + 1], 0xb0, framebuffer);
     }
     const struct {
         const char *text;

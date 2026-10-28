@@ -146,11 +146,24 @@ void lock_screen_authenticate(EpdiyHighlevelState *hl,cst836u_handle_t touch,sc7
     bool waiting=true;
     unsigned failures=0;int64_t retry_at=0;
     for(;;){
+        // 只有需要重画时才刷锁屏面：取消/超时后要重画，亮屏唤醒时面板本来就还是锁屏图。
+        // Repaint the lock face only when needed: after cancel/timeout it must come back, but a wake
+        // already shows it, so repainting just produced a pointless flash.
+        static bool need_paint;
+        if (!waiting) need_paint = true;
         if(waiting){
-            restore_art(fb,original);present(hl,ui_pinpad_full());
+            if(need_paint){ restore_art(fb,original);present(hl,ui_pinpad_full()); need_paint=false; }
             if(!boot)app_lock_wait_key_idle(800);
             epd_poweroff();
-            if(app_light_sleep_wait_timed(NULL,10u*60u*1000u)==APP_WAKE_TIMEOUT){
+            const int woke = (int)app_light_sleep_wait_timed(NULL,10u*60u*1000u);
+            if(woke!=APP_WAKE_TIMEOUT){
+                // 亮屏就是"我要解锁"：直接进密码界面，不再多吃一次按键、不再闪一下。
+                // Waking is the unlock request: go straight to the passcode screen without eating a
+                // second press or flashing the wallpaper.
+                waiting=false;
+                need_paint=true;
+            }
+            if(woke==APP_WAKE_TIMEOUT){
                 ui_pinpad_end(&pad);free(original);
                 // 深睡前把锁屏画面整屏定稿一次：面板会一直是最后一帧，所以既不要白屏，也别带残影。
                 // Settle the lock art once before deep sleep: the panel keeps this last frame, so it
@@ -168,7 +181,6 @@ void lock_screen_authenticate(EpdiyHighlevelState *hl,cst836u_handle_t touch,sc7
                 continue;
             }
         }
-        app_lock_wait_key_idle(800);
         ui_pinpad_reset(&pad,"输入密码","");
         if(esp_timer_get_time()/1000<retry_at){pad.blocked=true;snprintf(pad.notice,sizeof(pad.notice),"请等待 10 秒后重试");}
         // 弹出提示才刷白：等待阶段 fb 是锁屏画面，这里整屏置白再画键盘；取消由 restore_art 恢复。

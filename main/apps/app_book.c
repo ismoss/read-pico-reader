@@ -1624,7 +1624,7 @@ static void draw_import(uint8_t* fb) {
     ui_text_vc(fb, 342, 107, 34, "导入图书", EPD_DRAW_ALIGN_CENTER, false);
     ui_text(fb, 36, 166, 20, "选择导入方式", EPD_DRAW_ALIGN_LEFT, false);
     ui_hairline(fb, 207, 36, 612, UI_GRAY_LIGHT);
-    static const char *titles[] = {"浏览 TF 卡", "WiFi 传书", "热点传书", "USB 读卡"};
+    static const char *titles[] = {"浏览 TF 卡", "WiFi 传输", "热点传输", "USB 读卡"};
     static const char *details[] = {
         "查看目录，打开或管理已有图书", "手机与墨水屏连接同一网络",
         "连接 mossread 热点后上传图书", "连接电脑，把图书放入 books 文件夹"
