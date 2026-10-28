@@ -4,7 +4,7 @@
 
 > **License note.** Upstream code through rc93 is Apache-2.0; upstream original material from rc94 and explicitly marked carries a [personal-study license](licenses/kiikoread-Personal-Study-1.0.txt) (no commercial use). New files in this fork are Apache-2.0, but the combined firmware still contains upstream noncommercial material — personal use only, no selling or commercial distribution. See [LICENSE](LICENSE).
 
-**Current mod build:** `0.3.3-rc100-mod52` · **Feed:** [update.json](https://ismoss.github.io/read-pico-reader/update.json) · **Full mod README:** [English](https://github.com/ismoss/read-pico-reader/blob/mod/glass-dock-lockoff/README.md) · [简体中文](https://github.com/ismoss/read-pico-reader/blob/mod/glass-dock-lockoff/README.zh-CN.md)
+**Current mod build:** `0.3.3-rc100-mod54` · **Feed:** [update.json](https://ismoss.github.io/read-pico-reader/update.json) · **Full mod README:** [English](https://github.com/ismoss/read-pico-reader/blob/mod/glass-dock-lockoff/README.md) · [简体中文](https://github.com/ismoss/read-pico-reader/blob/mod/glass-dock-lockoff/README.zh-CN.md)
 
 **The default `main` branch mirrors upstream source.** The mod itself lives on **`mod/glass-dock-lockoff`**; the summaries below describe that branch, not the code in `main`.
 
@@ -27,7 +27,7 @@ It keeps kiikoread's foundation and fixes the parts that make you frown: reading
 | Shelf | Chunked scan keeps the UI responsive; persisted index paints the full shelf instantly on cold boot and deep wake |
 | Network | Real automatic network switching (the old path was dead code), auto-connect switch, real link display, router-following DNS + online list |
 | Updates | Self-hosted OTA feed, live download rate, redirects, 90 s slow-link tolerance, non-blocking cancel, no auto-check on entry |
-| Transfer | Leaving stops the session but reconnects WiFi; “N files transferred” counter; portrait/landscape wallpaper upload with a single decode |
+| Transfer | Leaving stops the session but reconnects WiFi; “N files transferred” counter; portrait/landscape wallpaper upload; the preview decodes once and the cache is keyed on mtime |
 | Remote monitor | LAN screen mirror + touch injection; off every boot; one-time RAM token; optional four-digit PIN; 1.5 s touch expiry; ten-minute idle auto-off |
 | Engineering | CI host regressions, board-timing build, post-deploy feed verification, changelog + roadmap per release |
 
@@ -38,8 +38,16 @@ It keeps kiikoread's foundation and fixes the parts that make you frown: reading
 | Office device keeps retrying the home hotspot | Active credential wiped before the picker ran; the picker returned immediately (dead code) | Pick on reconnection paths; switch only when the active network is absent |
 | Monitor page stuck on “waiting” with a broken image | BMP `biPlanes`/`biBitCount` are 16-bit fields but only the low bytes were written | Zero the whole 54-byte header before writing fields; golden-header host test |
 | Font change flashes back to Source Han Sans | Restoring the body face after drawing the picker could fail silently | Drawing never changes the body face; every pick persisted |
-| Passcode dots stay on the lock wallpaper | `present()` hard-coded GL16 and ignored the settle request | Return to the lock face with GC16; settle before deep sleep |
+| Passcode dots stay on the lock wallpaper | Two layers: the cached lock art on SD could hold a frame saved while the pad was up, so the dots came back from the cache; the lock presenter also used GL16 and ignored the settle request | Invalidate the art cache (magic bump) and delete it on a successful unlock; return to the lock face with a full GC16 and settle before deep sleep |
 | Wallpaper preview shows white for a long time | Every frame re-decoded the large image | Decode once into PSRAM; key the cache on mtime |
+
+## Known limitations
+
+| Topic | State |
+| :--- | :--- |
+| On-device acceptance | Every release from mod27 on is verified by build + CI + feed checks only; a single device walk-through is still pending |
+| OTA throughput | The feed lives on GitHub Pages, which can stall on some routes; the update screen shows the live rate, and the TF-card path is the reliable fallback |
+| Deep sleep | After the idle timeout the host powers off and the panel keeps the lock face; waking is a cold boot, so the splash appears first |
 
 ## Branches
 
@@ -66,7 +74,7 @@ A TF-card app update keeps internal settings and reading records and leaves the 
 | Build | GitHub Actions, ESP-IDF v6.1, board timing | Passing; zero warnings since mod30 |
 | Host regressions | Display/reader/lock/shelf/EPUB/settings/OTA TLS/DNS/monitor suites | Passing on every push |
 | Published feed | Post-deploy version, size, SHA-256 and live-fetch check | Passing on every dispatch |
-| On-device walk-through | Manual acceptance of mod1–mod52 | **In progress** |
+| On-device walk-through | Manual acceptance of mod1–mod54 | **In progress** |
 
 Green CI is not a hardware acceptance for every item; the changelog marks which fixes have hardware evidence.
 
