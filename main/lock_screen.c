@@ -81,15 +81,24 @@ bool lock_screen_save(const uint8_t *frame){
     }
     (void)remove(LOCK_ART_PATH ".tmp");return false;
 }
+// 回到锁屏面要整屏 GC16 定稿（见 present）。/ A return to the lock face settles with a full GC16 (see present).
+static bool s_art_settle;
 static void restore_art(uint8_t *fb,const uint8_t *original){
     if(original)memcpy(fb,original,FRAME_BYTES);
     else if(!lock_screen_restore(fb))ui_lock_fallback_draw(fb);
     // 回到锁屏面必须整屏定稿，否则密码键盘留下的圈圈会印在壁纸上。
     // Returning to the lock face needs a full settle or the keypad dots stay burned into the art.
-    display_request_full_refresh();
+    s_art_settle = true;
 }
+// 从密码界面回到锁屏面时要整屏定稿（GC16）：GL16 保留白底，键盘的圈圈会作为旧像素留在壁纸上。
+// Returning to the lock face from the passcode screen needs a full GC16: GL16 keeps the white
+// ground and would leave the keypad dots as stale pixels on the art.
 static void present(EpdiyHighlevelState *hl,EpdRect area){
-    epd_poweron();enum EpdDrawError result=update_display_area_diff_with(hl,&E0470_WAVEFORM,MODE_GL16,area);
+    epd_poweron();
+    const bool settle = s_art_settle;
+    s_art_settle = false;
+    enum EpdDrawError result=update_display_area_diff_with(hl,&E0470_WAVEFORM,
+        settle ? MODE_GC16 : MODE_GL16, area);
     guard_draw_result(hl,result);
     // 灰阶差分失败只重建同一密码画面，绝不进入未验证的页面。
     // On a display failure rebuild this same protected screen, never an unauthenticated page.
@@ -138,7 +147,11 @@ void lock_screen_authenticate(EpdiyHighlevelState *hl,cst836u_handle_t touch,sc7
             if(!boot)app_lock_wait_key_idle(800);
             epd_poweroff();
             if(app_light_sleep_wait_timed(NULL,10u*60u*1000u)==APP_WAKE_TIMEOUT){
-                ui_pinpad_end(&pad);free(original);app_enter_host_sleep(APP_SLEEP_DEEP);
+                ui_pinpad_end(&pad);free(original);
+                // 深睡前整屏清白定稿：面板按上一帧显示，残影会跟着一起"熄屏"。
+                // Whiten and settle before deep sleep: the panel keeps its last frame.
+                blank_canvas(fb);(void)update_display_full(hl);
+                app_enter_host_sleep(APP_SLEEP_DEEP);
                 // 防御性处理：电源交接意外返回也继续验证。/ Defensive: a returning power handoff still requires verification.
                 // 深睡回来 fb 是锁屏画面：先刷白让玻璃圆键重新采样，再由等待阶段的 restore_art 恢复样式。
                 // After deep sleep fb holds the lock art: white it so the glass keys resample,

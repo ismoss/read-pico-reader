@@ -8239,7 +8239,7 @@ static void before_lock(app_ctx_t* ctx) {
     // the lock frame so locking no longer flashes a portrait frame first; every other style still
     // returns to portrait, and sync rebuilds the geometry after waking as needed.
     const uint8_t lock_style = app_settings_lock_style();
-    bool landscape_lock = reader_landscape_active() && (lock_style == 0 || lock_style == 1 || lock_style == 2) &&
+    bool landscape_lock = reader_landscape_active() && (lock_style == 0 || lock_style == 1 || lock_style == 2 || lock_style == 3) &&
                           epd_get_rotation() != EPD_ROT_INVERTED_PORTRAIT;
     if (!landscape_lock) reader_rotation_leave();
     s_shelf_key_mode=s_shelf_key_paint_pending=false;s_shelf_key_delta=s_shelf_key_pressed=0;

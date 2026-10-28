@@ -30,6 +30,8 @@ static void *heap_caps_malloc(size_t n,unsigned flags){(void)flags;return budget
 static int epd_get_rotation(void){return 0;}
 static int epd_width(void){return 684;}
 static int epd_height(void){return 1216;}
+static int epd_rotated_display_width(void){return 684;}
+static int epd_rotated_display_height(void){return 1216;}
 static uint8_t epd_get_pixel(int x,int y,int w,int h,const uint8_t *fb){assert(x>=0&&y>=0&&x<w&&y<h);int i=y*w+x;return ((fb[i/2]>>(i%2?4:0))&15)<<4;}
 static void epd_draw_pixel(int x,int y,uint8_t gray,uint8_t *fb){assert(x>=0&&y>=0&&x<684&&y<1216);int i=y*684+x;fb[i/2]=(fb[i/2]& (i%2?15:240))|((gray>>4)<<(i%2?4:0));}
 
