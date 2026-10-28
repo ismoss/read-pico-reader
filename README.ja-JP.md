@@ -1,5 +1,7 @@
 # kiikoread
 
+> **このページは上流の日本語 README（rc100 時点）を引き継いだ参考資料です。現在の二改の機能、インストール手順、変更点は [English](README.md) / [简体中文](README.zh-CN.md) を参照してください。**
+
 > **独立した下流 mod：** このリポジトリは `ismoss` が維持する [`wegooo-cell/read-pico-reader`](https://github.com/wegooo-cell/read-pico-reader) の下流 mod であり、MindReset または上流プロジェクトの公式リリースではなく、提携・承認・サポート関係もありません。上流のリリースノート、ストア、サポート窓口、issue はこの mod を対象にしません。この mod を実行する端末は `https://ismoss.github.io/read-pico-reader/update.json` を使用し、上流 Release の添付ファイルをこの mod の更新として使用しないでください。
 
 > **利用条件：** 今後、新たな独自制作物に[個人学習ライセンス](licenses/kiikoread-Personal-Study-1.0.txt)を明示した場合、個人学習を許可し、別途書面による許諾のない商用利用を禁止します。**rc93 以前のコード・配布物、既存の Apache-2.0 の権利、第三者ライセンスは変更しません。** 適用範囲は [LICENSE](LICENSE) を参照してください。
