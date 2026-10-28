@@ -218,6 +218,13 @@ void lock_screen_authenticate(EpdiyHighlevelState *hl,cst836u_handle_t touch,sc7
             }
             was_down=down;vTaskDelay(pdMS_TO_TICKS(5));
         }
-        ui_pinpad_reset(&pad,NULL,"");waiting=true;
+        ui_pinpad_reset(&pad,NULL,"");
+        // 取消/超时回到锁屏前，先把整屏刷成纯白并定稿一次：密码键盘是用局部 DU 画的，
+        // 部分面板上单次 GC16 仍会留下浅痕，两面白底 + 定稿能彻底抹掉。
+        // Before going back to the lock face, push one whole white frame: the pad is drawn with
+        // partial DU updates and a single GC16 leaves faint traces on some panels.
+        ui_clear_page(fb);
+        (void)update_display_full(hl);
+        waiting=true;
     }
 }
