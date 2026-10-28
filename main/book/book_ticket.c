@@ -283,7 +283,7 @@ static bool ticket_draw_landscape(uint8_t *fb, const uint8_t *gray, const char *
     const int left = 64, right = 1152, top = 44, bottom = 640;
     ticket_shadow_draw(fb, left, right, top, bottom);
     ticket_paper_draw(fb, left, right, top, bottom);
-    ui_text(fb, 96, 84, 24, "kiikoread  /  阅读票根", EPD_DRAW_ALIGN_LEFT, false);
+    ui_text(fb, 96, 84, 24, "mossread  /  阅读票根", EPD_DRAW_ALIGN_LEFT, false);
     ui_hairline(fb, 118, 96, 1024, UI_GRAY_BLACK);
     cover_draw(fb, gray, title, (EpdRect){96, 148, 240, 328});
     char text[256];
@@ -364,7 +364,7 @@ bool book_ticket_draw(uint8_t *fb, bool reader_background) {
     }
     ticket_shadow_draw(fb, 48, 636, 58, 1158);
     ticket_paper_draw(fb, 48, 636, 58, 1158);
-    ui_text(fb, 82, 98, 28, "kiikoread  /  阅读票根", EPD_DRAW_ALIGN_LEFT, false);
+    ui_text(fb, 82, 98, 28, "mossread  /  阅读票根", EPD_DRAW_ALIGN_LEFT, false);
     ui_hairline(fb, 156, 82, 520, UI_GRAY_BLACK);
     ticket_heading(fb,82,202,64,50,520,title);
     if (author[0]) ticket_heading(fb,82,274,44,28,520,author);

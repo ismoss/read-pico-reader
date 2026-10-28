@@ -1010,7 +1010,7 @@ static void render_content(app_ctx_t* ctx, uint8_t* fb) {
             ui_fill_round_rect(fb, tab, 18, (s_qr_url == (i == 1)) ? 0x42 : UI_GRAY_WHITE);
             ui_draw_round_rect(fb, tab, 18, 0x92);
             ui_text_vc(fb, tab.x + tab.width / 2, tab.y + tab.height / 2, 21,
-                       i ? "打开传书网页" : "连接 kiikoread 热点", EPD_DRAW_ALIGN_CENTER, s_qr_url == (i == 1));
+                       i ? "打开传书网页" : "连接 mossread 热点", EPD_DRAW_ALIGN_CENTER, s_qr_url == (i == 1));
         }
     } else {
         ui_text_vc(fb, 342, 602, url_px,

@@ -8,7 +8,7 @@ Frozen: upload raw files one by one; the device confines all edits to the SD car
 -->
 <html lang="zh-CN">
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>kiikoread · TF 卡传输</title>
+<title>mossread · TF 卡传输</title>
 <style>
 :root{color-scheme:light;font-family:-apple-system,BlinkMacSystemFont,"Noto Sans SC",system-ui,sans-serif;color:#202221;background:#ededeb}
 *{box-sizing:border-box}body{max-width:760px;margin:0 auto;padding:26px 20px 68px;font-size:16px;line-height:1.55}
@@ -38,8 +38,8 @@ dialog::backdrop{background:#20222175}dialog h2{margin-bottom:10px}dialog p{marg
 .crop-controls{flex:1;min-width:220px}.crop-controls label{display:block;margin:14px 0 5px;font-weight:600}.crop-controls input[type=range]{width:100%;accent-color:#303331}.crop-controls .primary{margin-top:16px}
 @media(max-width:540px){body{padding:18px 12px 48px;font-size:15px}header{align-items:start}h1{font-size:31px}section{padding:17px;border-radius:19px}.entry-actions{width:100%;justify-content:start}li{flex-wrap:wrap}}
 </style>
-<header><div><p class="eyebrow">kiikoread / TRANSFER</p><h1>TF 卡传输</h1></div><span class="muted">一次连接一台设备</span></header>
-<section><h2>存储状态</h2><p id="storage" role="status">正在读取设备状态…</p><p class="hint">保持 kiikoread 停留在传输页面。上传后会保存到对应文件夹。</p></section>
+<header><div><p class="eyebrow">mossread / TRANSFER</p><h1>TF 卡传输</h1></div><span class="muted">一次连接一台设备</span></header>
+<section><h2>存储状态</h2><p id="storage" role="status">正在读取设备状态…</p><p class="hint">保持 mossoread 停留在传输页面。上传后会保存到对应文件夹。</p></section>
 <section id="browser"><div class="line"><h2>浏览 TF 卡</h2><button id="refresh" class="tiny" type="button">刷新目录</button></div>
 <div class="toolbar"><button id="up" class="tiny" type="button">上一级</button><span id="path">/</span><button id="newFolder" class="tiny" type="button">新建文件夹</button></div>
 <div class="upload" data-kind="file"><p class="hint">先打开目标文件夹，再添加文件。支持任意格式，保留原文件名；同名文件会先询问。</p><input type="file" multiple aria-label="选择任意文件"><button class="primary send" type="button">添加文件到当前目录</button><p class="result" role="status"></p></div>
