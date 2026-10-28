@@ -247,16 +247,16 @@ static EpdRect method_control_rect(int id) {
 static void draw_methods(uint8_t *fb) {
     ui_clear_page(fb);
     ui_fill_rect_fast((EpdRect){0, 0, UI_LOCK_WIDTH, transfer_content_end()}, 0xe0, fb);
-    transfer_header(fb, "Wifi/热点传书", NULL);
+    transfer_header(fb, "WiFi/热点传输", NULL);
     ui_text(fb, 42, 180, 21, "选择方式", EPD_DRAW_ALIGN_LEFT, false);
     EpdRect card = {36, 224, 612, 224};
     ui_fill_round_rect(fb, card, 24, UI_GRAY_WHITE);
     ui_draw_round_rect(fb, card, 24, 0x60);
     ui_draw_round_rect(fb, (EpdRect){37, 225, 610, 222}, 23, 0x60);
-    static const char *titles[] = {"WiFi传书", "热点传书"};
+    static const char *titles[] = {"WiFi 传输", "热点传输"};
     static const char *details[] = {
         "与手机或电脑连接同一个无线网络",
-        "由墨水屏创建临时网络，离线也能传书"
+        "由墨水屏创建临时网络，离线也能传文件"
     };
     for (int i = 0; i < 2; ++i) {
         EpdRect row = method_control_rect(i);
@@ -273,7 +273,7 @@ static void draw_methods(uint8_t *fb) {
         ui_fill_round_rect(fb, (EpdRect){36, 478, 612, 76}, 20, 0xd8);
         ui_text_vc(fb, 342, 516, 20, s_method_message, EPD_DRAW_ALIGN_CENTER, false);
     }
-    ui_text(fb, 42, 594, 19, "浏览器传书支持 EPUB、TXT、字体和图片文件。", EPD_DRAW_ALIGN_LEFT, false);
+    ui_text(fb, 42, 594, 19, "浏览器传输支持 EPUB、TXT、字体和图片文件。", EPD_DRAW_ALIGN_LEFT, false);
     ui_text(fb, 42, 634, 18, "传输完成后，新内容会自动出现在书架或字体列表。", EPD_DRAW_ALIGN_LEFT, false);
     transfer_navigation(fb,2);
 }
@@ -881,7 +881,7 @@ static void draw_status(uint8_t* fb) {
     else if (s_status.state == READ_PICO_TRANSFER_READY) state = "等待上传";
     else if (s_status.state == READ_PICO_TRANSFER_UPLOADING) state = "正在接收";
     else if (s_status.state == READ_PICO_TRANSFER_ERROR) state = s_status.network_ready ? "上传失败，请重试" :
-        s_mode == READ_PICO_TRANSFER_MODE_AP ? "热点传书未启动" : "WiFi 传书未启动";
+        s_mode == READ_PICO_TRANSFER_MODE_AP ? "热点传输未启动" : "WiFi 传书未启动";
     if (s_media_lost) state = "存储已移除，传书已停止";
     ui_text(fb, area.x + 28, area.y + 24, 26, state, EPD_DRAW_ALIGN_LEFT, false);
     char line[256];
@@ -889,8 +889,8 @@ static void draw_status(uint8_t* fb) {
     else if (s_status.state == READ_PICO_TRANSFER_ERROR && !s_status.network_ready)
         snprintf(line, sizeof(line), "原因：%s", esp_err_to_name(s_status.last_error));
     else if (s_mode == READ_PICO_TRANSFER_MODE_AP)
-        snprintf(line, sizeof(line), "已连接 %u 台 · 已完成 %u 本", s_status.sta_count, s_status.done_count);
-    else snprintf(line, sizeof(line), "同网浏览器上传 · 已完成 %u 本", s_status.done_count);
+        snprintf(line, sizeof(line), "已连接 %u 台 · 已传输 %u 个文件", s_status.sta_count, s_status.done_count);
+    else snprintf(line, sizeof(line), "同网浏览器上传 · 已传输 %u 个文件", s_status.done_count);
     ui_text(fb, area.x + 28, area.y + 68, 19, line, EPD_DRAW_ALIGN_LEFT, false);
     // 只有真的在接收时才显示文件名、字节和进度条；传完立刻回到"暂无正在传输的文件"，
     // 否则上一份文件的名字和满进度条会一直挂在这一页上。
@@ -977,7 +977,7 @@ static void render_content(app_ctx_t* ctx, uint8_t* fb) {
     if (s_view == TRANSFER_NETWORKS) { draw_networks(fb); return; }
     if (s_view == TRANSFER_PASSWORD) { draw_password(fb); return; }
     ui_clear_page(fb);
-    transfer_header(fb, s_mode == READ_PICO_TRANSFER_MODE_AP ? "热点传书" : "WiFi 传书", NULL);
+    transfer_header(fb, s_mode == READ_PICO_TRANSFER_MODE_AP ? "热点传输" : "WiFi 传书", NULL);
     EpdRect connection = {36, 168, 612, 132};
     ui_fill_round_rect(fb, connection, 24, UI_GRAY_WHITE);
     ui_draw_round_rect(fb, connection, 24, 0x98);
@@ -1022,7 +1022,7 @@ static void render_content(app_ctx_t* ctx, uint8_t* fb) {
     if (s_pressed == 2) ui_draw_pressed_round_rect(fb, back, UI_BTN_RADIUS);
     ui_draw_button(fb, back,
                    s_mode == READ_PICO_TRANSFER_MODE_AP && s_status.state == READ_PICO_TRANSFER_ERROR && !s_status.network_ready
-                       ? "重试热点传书" : "停止传输服务", false);
+                       ? "重试热点传输" : "停止传输服务", false);
     transfer_navigation(fb,2);
 }
 static void render(app_ctx_t *ctx,uint8_t *fb) {

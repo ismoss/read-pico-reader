@@ -1895,6 +1895,21 @@ static void upgrade_speed_sample(void) {
 }
 
 static app_redraw_t on_tick(app_ctx_t *ctx) {
+    // 网络状态随时可能在后台变成已连接/断开；主页面上的那一行和状态栏必须跟着变，
+    // 否则会出现"返回后显示未连接、再进一次页面又是已连接"的循环错觉。
+    // The network can come up or drop in the background; the row and the status bar have to follow,
+    // otherwise leaving and re-entering the page shows two different states.
+    {
+        static char s_seen_ssid[33];
+        static bool s_seen_ready;
+        read_pico_transfer_status_t live = {0};
+        read_pico_transfer_get_status(&live);
+        if (live.network_ready != s_seen_ready || strcmp(live.connected_ssid, s_seen_ssid)) {
+            strlcpy(s_seen_ssid, live.connected_ssid, sizeof(s_seen_ssid));
+            s_seen_ready = live.network_ready;
+            if (s_page == SETTINGS_MAIN) return APP_REDRAW_PAGE;
+        }
+    }
     if (s_page == SETTINGS_UPGRADE) upgrade_speed_sample();
     // 每次换页（主列表 ↔ 子页）请求一次整屏 GC16：页模式是 GL16，白底不压黑，
     // 旧列表的灰线会留在最下面一条，看着像残影。
