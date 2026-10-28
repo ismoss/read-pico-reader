@@ -223,7 +223,7 @@ void lock_screen_authenticate(EpdiyHighlevelState *hl,cst836u_handle_t touch,sc7
         // 部分面板上单次 GC16 仍会留下浅痕，两面白底 + 定稿能彻底抹掉。
         // Before going back to the lock face, push one whole white frame: the pad is drawn with
         // partial DU updates and a single GC16 leaves faint traces on some panels.
-        ui_clear_page(fb);
+        blank_canvas(fb);
         (void)update_display_full(hl);
         waiting=true;
     }
