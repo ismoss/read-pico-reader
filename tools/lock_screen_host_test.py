@@ -71,6 +71,8 @@ static int fat_rename(const char *a,const char *b){
 }
 #define rename fat_rename
 static unsigned stage,idx,waits,verified,ready,held,pushes,fulls,wiped,stops,entries,settles;
+// 锁屏面定稿标记（切片只带函数，文件级静态要宿主自己声明）。
+static bool s_art_settle;
 static bool enabled_storage=true,valid_storage=true,low_memory,boot_scenario,timeout_scenario,display_failure;
 static uint64_t now;
 static int power_pending;

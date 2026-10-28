@@ -95,10 +95,14 @@ static void restore_art(uint8_t *fb,const uint8_t *original){
 // ground and would leave the keypad dots as stale pixels on the art.
 static void present(EpdiyHighlevelState *hl,EpdRect area){
     epd_poweron();
-    const bool settle = s_art_settle;
-    s_art_settle = false;
-    enum EpdDrawError result=update_display_area_diff_with(hl,&E0470_WAVEFORM,
-        settle ? MODE_GC16 : MODE_GL16, area);
+    if (s_art_settle) {
+        // 定稿走整屏 GC16（update_display_full），不走区域 GL16。
+        // The settle goes through a whole-frame GC16 (update_display_full), not an area GL16.
+        s_art_settle = false;
+        guard_draw_result(hl, update_display_full(hl));
+        return;
+    }
+    enum EpdDrawError result=update_display_area_diff_with(hl,&E0470_WAVEFORM,MODE_GL16,area);
     guard_draw_result(hl,result);
     // 灰阶差分失败只重建同一密码画面，绝不进入未验证的页面。
     // On a display failure rebuild this same protected screen, never an unauthenticated page.
