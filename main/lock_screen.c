@@ -84,6 +84,9 @@ bool lock_screen_save(const uint8_t *frame){
 static void restore_art(uint8_t *fb,const uint8_t *original){
     if(original)memcpy(fb,original,FRAME_BYTES);
     else if(!lock_screen_restore(fb))ui_lock_fallback_draw(fb);
+    // 回到锁屏面必须整屏定稿，否则密码键盘留下的圈圈会印在壁纸上。
+    // Returning to the lock face needs a full settle or the keypad dots stay burned into the art.
+    display_request_full_refresh();
 }
 static void present(EpdiyHighlevelState *hl,EpdRect area){
     epd_poweron();enum EpdDrawError result=update_display_area_diff_with(hl,&E0470_WAVEFORM,MODE_GL16,area);

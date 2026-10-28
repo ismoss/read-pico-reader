@@ -231,17 +231,17 @@ static void draw_upgrade_percent(uint8_t *fb) {
 static void draw_upgrade_progress(uint8_t *fb) {
     ui_fill_rect_fast(upgrade_progress_area(), UI_GRAY_WHITE, fb);
     draw_upgrade_percent(fb);
-    ui_fill_rect_fast((EpdRect){60, 518, 564, 10}, UI_GRAY_BLACK, fb);
-    ui_fill_rect_fast((EpdRect){61, 519, 562, 8}, UI_GRAY_WHITE, fb);
-    s_upgrade_bar_width = (int)(562 * upgrade_percent() / 100);
+    ui_fill_rect_fast((EpdRect){212, 518, 412, 10}, UI_GRAY_BLACK, fb);
+    ui_fill_rect_fast((EpdRect){213, 519, 410, 8}, UI_GRAY_WHITE, fb);
+    s_upgrade_bar_width = (int)(410 * upgrade_percent() / 100);
     if (s_upgrade_bar_width)
-        ui_fill_rect_fast((EpdRect){61, 519, s_upgrade_bar_width, 8}, UI_GRAY_BLACK, fb);
+        ui_fill_rect_fast((EpdRect){213, 519, s_upgrade_bar_width, 8}, UI_GRAY_BLACK, fb);
 }
 static void draw_upgrade_progress_delta(uint8_t *fb) {
-    int width = (int)(562 * upgrade_percent() / 100);
+    int width = (int)(410 * upgrade_percent() / 100);
     if (width <= s_upgrade_bar_width) return;
     draw_upgrade_percent(fb);
-    ui_fill_rect_fast((EpdRect){61 + s_upgrade_bar_width, 519, width - s_upgrade_bar_width, 8}, UI_GRAY_BLACK, fb);
+    ui_fill_rect_fast((EpdRect){213 + s_upgrade_bar_width, 519, width - s_upgrade_bar_width, 8}, UI_GRAY_BLACK, fb);
     s_upgrade_bar_width = width;
 }
 // 进行中提示行（联网 OTA 卡片的详情行）：活体指示贴在本行的**最后**（右端 x=624，与上方
@@ -1546,7 +1546,7 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
                 else snprintf(rate, sizeof(rate), "等待数据…");
                 // 百分比占着 477 行右端，速率单独放一行，别再压上去。
                 // The percentage owns the right end of row 477; the rate gets its own row.
-                ui_text(fb, 60, 499, 20, rate, EPD_DRAW_ALIGN_LEFT, false);
+                ui_text(fb, 60, 506, 22, rate, EPD_DRAW_ALIGN_LEFT, false);
             }
             ui_draw_button(fb, (EpdRect){60, 550, 564, 62}, s_update.busy ? "取消联网更新" :
                 s_update.state == PICO_UPDATE_AVAILABLE ? "开始更新" : "检查更新", s_update.state == PICO_UPDATE_AVAILABLE);
