@@ -1,10 +1,10 @@
-# kiikoread mod · 小纸 Pico (RDP-G01-W)
+# mossread · 小纸 Pico (RDP-G01-W)
 
 > **This is a downstream fork, not an official kiikoread release.** Maintained by **ismoss**, based on upstream [kiikoread](https://github.com/wegooo-cell/read-pico-reader) **0.3.3-rc100**, which in turn is built on [MindReset's demo firmware](https://github.com/MindReset/read_pico_firmware). It is not affiliated with, endorsed by, or supported by MindReset or the kiikoread maintainers. Upstream release notes, sites, stores, support channels and issue trackers do not cover this fork.
 
 > **License note.** Upstream code through rc93 is Apache-2.0; upstream original material from rc94 and explicitly marked carries a [personal-study license](licenses/kiikoread-Personal-Study-1.0.txt) (no commercial use). New files in this fork are Apache-2.0, but the combined firmware still contains upstream noncommercial material — personal use only, no selling or commercial distribution. See [LICENSE](LICENSE).
 
-**Current mod build:** `0.3.3-rc100-mod54` · **Feed:** [update.json](https://ismoss.github.io/read-pico-reader/update.json) · **Full mod README:** [English](https://github.com/ismoss/read-pico-reader/blob/mod/glass-dock-lockoff/README.md) · [简体中文](https://github.com/ismoss/read-pico-reader/blob/mod/glass-dock-lockoff/README.zh-CN.md)
+**Current mod build:** `0.3.3-rc100-mod55` · **Feed:** [update.json](https://ismoss.github.io/read-pico-reader/update.json) · **Full mod README:** [English](https://github.com/ismoss/read-pico-reader/blob/mod/glass-dock-lockoff/README.md) · [简体中文](https://github.com/ismoss/read-pico-reader/blob/mod/glass-dock-lockoff/README.zh-CN.md)
 
 **The default `main` branch mirrors upstream source.** The mod itself lives on **`mod/glass-dock-lockoff`**; the summaries below describe that branch, not the code in `main`.
 
@@ -29,6 +29,7 @@ It keeps kiikoread's foundation and fixes the parts that make you frown: reading
 | Updates | Self-hosted OTA feed, live download rate, redirects, 90 s slow-link tolerance, non-blocking cancel, no auto-check on entry |
 | Transfer | Leaving stops the session but reconnects WiFi; “N files transferred” counter; portrait/landscape wallpaper upload; the preview decodes once and the cache is keyed on mtime |
 | Remote monitor | LAN screen mirror + touch injection; off every boot; one-time RAM token; optional four-digit PIN; 1.5 s touch expiry; ten-minute idle auto-off |
+| Branding | Visible system name **mossread**; cold-boot splash draws the wordmark over a star chart with built-in primitives (no flashed bitmap, no card access) |
 | Engineering | CI host regressions, board-timing build, post-deploy feed verification, changelog + roadmap per release |
 
 ### Selected root causes fixed
@@ -74,7 +75,7 @@ A TF-card app update keeps internal settings and reading records and leaves the 
 | Build | GitHub Actions, ESP-IDF v6.1, board timing | Passing; zero warnings since mod30 |
 | Host regressions | Display/reader/lock/shelf/EPUB/settings/OTA TLS/DNS/monitor suites | Passing on every push |
 | Published feed | Post-deploy version, size, SHA-256 and live-fetch check | Passing on every dispatch |
-| On-device walk-through | Manual acceptance of mod1–mod54 | **In progress** |
+| On-device walk-through | Manual acceptance of mod1–mod55 | **In progress** |
 
 Green CI is not a hardware acceptance for every item; the changelog marks which fixes have hardware evidence.
 
