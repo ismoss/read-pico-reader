@@ -163,7 +163,10 @@ static bool s_boot_lock_active, s_boot_lock_known, s_boot_lock_draw;
 // user locked with.
 static bool boot_lock_landscape(void) {
     uint8_t style = app_settings_lock_style();
-    return (style == 0 || style == 2) && pico_boot_has_resume() &&
+    // 四种画面都跟随画布：漏掉壁纸/透明书封就会出现"深睡唤醒变竖屏、缓存失效只剩印章"。
+    // All four faces follow the canvas; leaving wallpaper or the cover out is what made a deep-sleep
+    // wake portrait and dropped the cached frame, leaving only the seal.
+    return (style == 0 || style == 1 || style == 2 || style == 3) && pico_boot_has_resume() &&
            pico_boot_resume_in_reader() && app_settings_reader_landscape() > 0;
 }
 static enum EpdRotation boot_lock_rotation(void) {
