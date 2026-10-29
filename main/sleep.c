@@ -208,7 +208,7 @@ static void lock_resume_service(void) {
         // 否则下一次锁屏会从缓存里恢复出这张没有书底的图。
         // The cover composites over the page that was on screen; at boot there is none, so never
         // persist "white + seal" as the lock art or the next lock would restore exactly that.
-        if(boot_style != 3 && lock_screen_save(fb))(void)pico_boot_mark_frame_cached();
+        if(app_settings_lock_style() != 3 && lock_screen_save(fb))(void)pico_boot_mark_frame_cached();
     }
     s_boot_lock_known=true;s_lock_hint_hl=hl;
 }
