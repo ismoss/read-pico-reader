@@ -167,7 +167,7 @@ Defined in [`main/app/app.h`](main/app/app.h). The loop presents via `app_presen
 
 ## 硬约束 / Hard rules
 
-- 用户 2026-10-09 确认项目品牌为小写 `kiikoread`，网页设备称「墨水屏」，页面底色采用明亮纯白。保留 `wegooo-cell/read-pico-reader` 仓库网址与已发布下载/OTA地址、备份文件名和内部协议标识。用户最新要求固件界面也统一命名，主站 OTA 使用 kiikoread.com，并保留 GitHub 回退源。/ Per the user’s 2026-10-09 decision, use lowercase `kiikoread` for the project and “墨水屏” for devices on the bright-white website. Preserve repository/download/OTA URLs, backup filenames and protocol identifiers. The latest instruction also rebrands the firmware UI, with kiikoread.com as the primary OTA host and GitHub retained as fallback.
+- 用户 2026-10-09 确认上游项目品牌为小写 `kiikoread`，网页设备称「墨水屏」，页面底色采用明亮纯白。保留 `wegooo-cell/read-pico-reader` 仓库网址与已发布下载/OTA地址、备份文件名和内部协议标识。用户 2026-10-28 决定二改固件的用户可见品牌统一为 `mossread`；主站 OTA 继续使用 kiikoread.com，并保留 GitHub 回退源。/ The upstream project brand remains lowercase `kiikoread`, with “墨水屏” for devices on the bright-white website. Preserve the upstream repository/download/OTA URLs, backup filenames and internal protocol identifiers. On 2026-10-28 the user chose `mossread` as the mod firmware's user-visible brand; keep kiikoread.com as the primary OTA host and retain the GitHub fallback.
 
 `冻结 / Frozen:` 段落是产品决策，不是建议。改行为前必须先改这段，并说明为什么决策变了。
 

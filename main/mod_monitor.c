@@ -211,7 +211,7 @@ static esp_err_t page_handler(httpd_req_t *req) {
     static const char page[] =
         "<!doctype html><html><head><meta charset=utf-8>"
         "<meta name=viewport content=\"width=device-width,initial-scale=1\">"
-        "<title>Pico</title><style>body{margin:0;background:#1c1c1c;color:#ddd;"
+        "<title>mossread</title><style>body{margin:0;background:#1c1c1c;color:#ddd;"
         "font-family:sans-serif;text-align:center}#s{display:block;margin:0 auto;"
         "max-width:100vw;max-height:calc(100vh - 34px);width:auto;height:auto;"
         "touch-action:none;image-rendering:pixelated}#t{font-size:13px;padding:6px}"

@@ -983,7 +983,7 @@ static void render_content(app_ctx_t* ctx, uint8_t* fb) {
     ui_draw_round_rect(fb, connection, 24, 0x98);
     char name[64];
     snprintf(name, sizeof(name), "%s", s_mode == READ_PICO_TRANSFER_MODE_AP ? s_status.ssid : s_status.wifi_ssid);
-    if (!name[0]) snprintf(name, sizeof(name), "%s", s_mode == READ_PICO_TRANSFER_MODE_AP ? "kiikoread 热点" : "已保存的 WiFi");
+    if (!name[0]) snprintf(name, sizeof(name), "%s", s_mode == READ_PICO_TRANSFER_MODE_AP ? "mossread 热点" : "已保存的 WiFi");
     fit_label(name, 26, 420);
     ui_text(fb, 66, 190, 26, name, EPD_DRAW_ALIGN_LEFT, false);
     ui_text(fb, 66, 236, 19,

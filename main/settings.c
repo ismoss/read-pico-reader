@@ -180,6 +180,7 @@ static char s_books_dir[MEDIA_DIR_MAX] = "/sdcard/books";
 static char s_fonts_dir[MEDIA_DIR_MAX] = "/sdcard/fonts";
 static void nvs_put_u8(const char* key, uint8_t value);
 static void nvs_put_u32(const char* key, uint32_t value);
+static bool nvs_put_str(const char *key, const char *value);
 
 static bool valid_media_dir(const char* path) {
     if (!path || strncmp(path, "/sdcard/", 8) || !path[8] ||
@@ -281,8 +282,11 @@ void app_settings_init(void) {
     size_t value_len = sizeof(s_device_name);
     if (nvs_get_str(h, NVS_KEY_DEVICE_NAME, s_device_name, &value_len) != ESP_OK || !s_device_name[0])
         strlcpy(s_device_name, "mossread", sizeof(s_device_name));
-    // 仅迁移旧默认名字，保留用户填写的姓名。/ Migrate only the old default, preserving custom names.
-    if (!strcmp(s_device_name, "Pico")) strlcpy(s_device_name, "mossread", sizeof(s_device_name));
+    // 仅迁移旧默认名字，保留用户填写的姓名。/ Migrate only old default names, preserving custom names.
+    if (!strcmp(s_device_name, "Pico") || !strcmp(s_device_name, "kiikoread")) {
+        strlcpy(s_device_name, "mossread", sizeof(s_device_name));
+        nvs_put_str(NVS_KEY_DEVICE_NAME, s_device_name);
+    }
     value_len = sizeof(s_avatar);
     if (nvs_get_str(h, NVS_KEY_AVATAR, s_avatar, &value_len) != ESP_OK ||
         (s_avatar[0] && strncmp(s_avatar, "/sdcard/", 8))) s_avatar[0] = 0;
@@ -1448,6 +1452,10 @@ esp_err_t app_settings_backup_restore(void) {
         backup_erase_secret(&wifi, sizeof(wifi));
         return ESP_ERR_INVALID_RESPONSE;
     }
+    // 备份中的旧默认名也迁移，用户自定义姓名保持不变。
+    // Migrate old default names in backups while preserving custom names.
+    if (!strcmp(profile.device_name, "Pico") || !strcmp(profile.device_name, "kiikoread"))
+        strlcpy(profile.device_name, "mossread", sizeof(profile.device_name));
 
     if(version<20) {
         int px=version<19?(int)backup.flags[BK_TRACKING]*2-4:(int)backup.flags[BK_TRACKING]-4;

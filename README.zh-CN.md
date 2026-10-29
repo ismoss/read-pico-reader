@@ -1,10 +1,10 @@
-# kiikoread 二改 · 小纸 Pico（RDP-G01-W）
+# mossread · 小纸 Pico（RDP-G01-W）
 
 > **独立下游二改，非官方版本。** 本仓库由 **ismoss** 维护，是 [kiikoread（wegooo-cell/read-pico-reader）](https://github.com/wegooo-cell/read-pico-reader) 的下游分支，基线为上游 **0.3.3-rc100**；kiikoread 又基于 [MindReset 官方示例固件](https://github.com/MindReset/read_pico_firmware)。本二改与 MindReset、kiikoread 上游均无隶属或背书关系；上游的官网、更新日志、商店、支持渠道和 issue 区不覆盖本二改。
 
 > **许可提醒。** 上游 rc93 及以前为 Apache-2.0；上游 rc94 起明确标注的新增原创内容适用[个人学习许可](licenses/kiikoread-Personal-Study-1.0.txt)（禁止商用）。本二改新增文件按 Apache-2.0 发布，但**组合固件仍包含上游的非商用材料**，请仅用于个人学习与自用，不要商用或售卖。完整范围见 [LICENSE](LICENSE)。
 
-**当前版本**：`0.3.3-rc100-mod52`（2026-10-28） · **更新源**：[update.json](https://ismoss.github.io/read-pico-reader/update.json) · **设备**：小纸 Pico RDP-G01-W（ESP32-S3 / 16 MB Flash / 684×1216）
+**当前版本**：`0.3.3-rc100-mod55`（2026-10-28） · **更新源**：[update.json](https://ismoss.github.io/read-pico-reader/update.json) · **设备**：小纸 Pico RDP-G01-W（ESP32-S3 / 16 MB Flash / 684×1216）
 
 [安装](#三安装与回退) · [改了什么](#四二改做了什么) · [版本线](#五版本线) · [构建](#七从源码构建) · [许可与致谢](#九许可致谢与边界) · [English](README.md)
 
@@ -12,12 +12,12 @@
 
 ## 一、这是什么
 
-一句话：**保留 kiikoread 的界面、数据和分区，只把“用起来会皱眉”的地方改顺**。
+一句话：**以 kiikoread 为兼容底座，做成 mossread，把“用起来会皱眉”的地方改顺**。
 
 | 定位 | 说明 |
 | :--- | :--- |
-| 不是重写 | 首页、书架、文件、设置、阅读、传书、锁屏都还是 kiikoread 的骨架；书籍格式、配置备份、分区表、NVS 键值保持兼容 |
-| 不是官方 | 没有 MindReset 或 kiikoread 的背书；更新源是自建的，出问题请找本仓库，不要找上游 |
+| 不是重写 | 首页、书架、文件、设置、阅读、传书、锁屏仍以 kiikoread 为兼容骨架；书籍格式、配置备份、分区表、NVS 键值保持兼容 |
+| 不是官方 | 没有 MindReset 或 kiikoread 上游的背书；当前系统品牌为 mossread，更新源是自建的，出问题请找本仓库，不要找上游 |
 | 不是一次性魔改 | 有 CI（宿主回归 + 真机时序编译）、自建 OTA feed、按版本记录的 [更新日志](docs/CHANGELOG.md) 和 [路线图](docs/ROADMAP.md) |
 
 二改的重点不是“再加一个功能”，而是四件事：
@@ -32,7 +32,7 @@
 | 项 | 上游 kiikoread | 本二改 |
 | :--- | :--- | :--- |
 | 基线 | `0.3.3-rc100` | 同一份源码树 + 二改补丁 |
-| 版本号 | `X.Y.Z-rcN` | `X.Y.Z-rcN-modM`，例如 `0.3.3-rc100-mod52` |
+| 版本号 | `X.Y.Z-rcN` | `X.Y.Z-rcN-modM`，例如 `0.3.3-rc100-mod55` |
 | 更新源 | kiikoread.com / 上游 GitHub Pages | 自建 `ismoss.github.io/read-pico-reader`，不跟随上游 |
 | 支持 | 上游 issue / 官网 | 本仓库 issue；上游不负责二改 |
 | 许可 | Apache-2.0 + rc94 起个人学习许可 | 上游许可原样保留；二改新增文件 Apache-2.0 |
@@ -51,7 +51,7 @@
 
 - 分区表、双槽布局、OTA 数据分区：不动，TF 卡升级和配置备份继续兼容。
 - 书籍格式与解析规则：EPUB/TXT 的既有上限、字体缓存、阅读进度格式保持原样。
-- 界面文案与品牌：固件界面仍叫 kiikoread；二改不抢名字、不换 logo。
+- 界面品牌：固件当前显示为 mossread；数据、分区、协议和上游兼容标识保持不变。
 - 数据上报：没有账号、没有遥测、没有云端书架。
 
 ## 三、安装与回退
@@ -69,13 +69,13 @@
 
 ### 3.2 从 kiikoread 升级（推荐）
 
-1. 打开 [update.json](https://ismoss.github.io/read-pico-reader/update.json)，取 `version` 与 `url`；当前为 `0.3.3-rc100-mod52`。
+1. 打开 [update.json](https://ismoss.github.io/read-pico-reader/update.json)，取 `version` 与 `url`；当前为 `0.3.3-rc100-mod55`。
 2. 下载对应的 `Pico-update-*.bin`，**改名为 `Pico-update.bin`**，放到 TF 卡根目录。
 3. 设备上进入 **设置 → 升级和恢复 → 系统升级 → TF 卡升级**，确认后等待写入与重启。
 4. 重启后进入 **设置 → 升级和恢复 → 系统升级**，应能看到自建 feed 的版本信息；以后可直接联网检查更新。
 
 直接下载当前版本：
-<https://ismoss.github.io/read-pico-reader/Pico-update-0.3.3-rc100-mod52.bin>
+<https://ismoss.github.io/read-pico-reader/Pico-update-0.3.3-rc100-mod55.bin>
 
 > 文件名 `Pico-update.bin` 是上游固件约定的兼容名，不要改；每次升级覆盖同一路径即可。
 
@@ -221,7 +221,7 @@
 - 远程监看是局域网工具，默认关闭，无公网鉴权/加密方案；不要端口转发到公网。
 - TF 卡仅 FAT16/FAT32，未启用 exFAT；容量大不代表一定兼容。
 - 继承上游的 EPUB 限制：单个 XHTML 4 MB、单张解压图片 8 MB、ZIP 条目/章节各 8192 项。
-- 二改整条线（mod1–mod52）的真机走查仍在进行；CI 绿不等于每一项都在实机验收过。
+- 二改整条线（mod1–mod55）的真机走查仍在进行；CI 绿不等于每一项都在实机验收过。
 
 ## 五、版本线
 
@@ -229,7 +229,7 @@
 | :--- | :--- | :--- |
 | 起步 | mod1–mod19 | fork 发布线、版本号方案、自建 OTA、双仓与工程规范；书内横屏、书架分片扫描 + 索引、字体系统；DNS、WiFi 已知网络、远程监看初版、双模式传书 |
 | 网络与监看 | mod20–mod26 | 自动换网真修复、自动连接开关、升级页指示归位、远程监看破图/缩放/连接数修复 |
-| 横屏锁屏与更新链路 | mod27–mod52 | 监看入口搬家 + 一次性 RAM 密钥、DNS 默认跟随路由器、自动连接跨升级继承、编译告警清零；字体真因修复；横屏票根/键盘/拼贴/壁纸槽/透明书封；壁纸预览；传书语义；更新页速率/重定向/慢网；监看四位密码与触摸过期；GC16 锁屏定稿 |
+| 横屏锁屏、更新链路与改名 | mod27–mod55 | 监看入口搬家 + 一次性 RAM 密钥、DNS 默认跟随路由器、自动连接跨升级继承、编译告警清零；字体真因修复；横屏票根/键盘/拼贴/壁纸槽/透明书封；壁纸预览；传书语义；更新页速率/重定向/慢网；监看四位密码与触摸过期；GC16 锁屏定稿 |
 
 - 逐条用户可见变化：[docs/CHANGELOG.md](docs/CHANGELOG.md)
 - 批次、取舍、已否决项：[docs/ROADMAP.md](docs/ROADMAP.md)
@@ -242,7 +242,7 @@
 | 编译 | GitHub Actions，ESP-IDF v6.1，真机 `sdkconfig.defaults` 时序 | 通过；mod30 起零告警 |
 | 宿主回归 | 显示/阅读/锁屏/书架/EPUB/设置/OTA TLS/DNS/监看 BMP 等测试 | 通过（CI 每次 push） |
 | 发布 feed | 发布后校验 update.json、镜像大小、SHA-256、线上可取 | 通过（每次 dispatch） |
-| 真机走查 | mod1–mod52 逐项人工验收 | **进行中**；个别修复已在 changelog 标注真机确认 |
+| 真机走查 | mod1–mod55 逐项人工验收 | **进行中**；个别修复已在 changelog 标注真机确认 |
 
 我们尽量把“已验证”和“只是编译过”分开写。看到某条没有真机标注，就当作“代码级/CI 级证据”，不要当成实机承诺。
 
@@ -253,7 +253,7 @@
 ```sh
 python3 tools/prepare_tls_bundle.py "$IDF_PATH"
 idf.py set-target esp32s3
-PICO_PROJECT_VER=0.3.3-rc100-mod52 idf.py build
+PICO_PROJECT_VER=0.3.3-rc100-mod55 idf.py build
 ```
 
 - `sdkconfig.defaults` 是本开发板的 Flash/PSRAM 时序；`sdkconfig.ci` 只用于编译检查，不要把 CI 时序当产品默认。

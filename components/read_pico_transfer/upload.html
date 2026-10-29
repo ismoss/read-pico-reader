@@ -39,7 +39,7 @@ dialog::backdrop{background:#20222175}dialog h2{margin-bottom:10px}dialog p{marg
 @media(max-width:540px){body{padding:18px 12px 48px;font-size:15px}header{align-items:start}h1{font-size:31px}section{padding:17px;border-radius:19px}.entry-actions{width:100%;justify-content:start}li{flex-wrap:wrap}}
 </style>
 <header><div><p class="eyebrow">mossread / TRANSFER</p><h1>TF 卡传输</h1></div><span class="muted">一次连接一台设备</span></header>
-<section><h2>存储状态</h2><p id="storage" role="status">正在读取设备状态…</p><p class="hint">保持 mossoread 停留在传输页面。上传后会保存到对应文件夹。</p></section>
+<section><h2>存储状态</h2><p id="storage" role="status">正在读取设备状态…</p><p class="hint">保持 mossread 停留在传输页面。上传后会保存到对应文件夹。</p></section>
 <section id="browser"><div class="line"><h2>浏览 TF 卡</h2><button id="refresh" class="tiny" type="button">刷新目录</button></div>
 <div class="toolbar"><button id="up" class="tiny" type="button">上一级</button><span id="path">/</span><button id="newFolder" class="tiny" type="button">新建文件夹</button></div>
 <div class="upload" data-kind="file"><p class="hint">先打开目标文件夹，再添加文件。支持任意格式，保留原文件名；同名文件会先询问。</p><input type="file" multiple aria-label="选择任意文件"><button class="primary send" type="button">添加文件到当前目录</button><p class="result" role="status"></p></div>
@@ -70,9 +70,9 @@ $('newFolder').onclick=()=>openEditor('mkdir');
 $('previous').onclick=()=>{if(page){--page;loadDirectory().catch(showError)}};
 $('next').onclick=()=>{if(page+1<pages){++page;loadDirectory().catch(showError)}};
 async function loadSignature(){const r=await request('/signature');if(r.status!==200)throw Error(r.body.error||'无法读取签名');$('signatureText').value=r.body.signature||'';$('signatureResult').textContent='可编辑签名后保存'}
-$('signatureSave').onclick=async()=>{if(busy)return;const text=$('signatureText').value,result=$('signatureResult');if(new TextEncoder().encode(text).length>95){result.textContent='签名过长，最多95字节（约31个汉字）';return}if(/[\x00-\x1f\x7f\u2028\u2029]/.test(text)){result.textContent='签名不能包含换行或控制字符';return}lock(true);try{result.textContent='正在保存…';const r=await request('/signature',{method:'POST',headers:{'Content-Type':'text/plain; charset=utf-8'},body:text});if(r.status!==200)throw Error(r.body.error||'保存失败');result.textContent=text?'签名已保存，kiikoread 状态栏已更新':'签名已清除'}catch(error){result.textContent=error.message}finally{lock(false)}};
+$('signatureSave').onclick=async()=>{if(busy)return;const text=$('signatureText').value,result=$('signatureResult');if(new TextEncoder().encode(text).length>95){result.textContent='签名过长，最多95字节（约31个汉字）';return}if(/[\x00-\x1f\x7f\u2028\u2029]/.test(text)){result.textContent='签名不能包含换行或控制字符';return}lock(true);try{result.textContent='正在保存…';const r=await request('/signature',{method:'POST',headers:{'Content-Type':'text/plain; charset=utf-8'},body:text});if(r.status!==200)throw Error(r.body.error||'保存失败');result.textContent=text?'签名已保存，mossread 状态栏已更新':'签名已清除'}catch(error){result.textContent=error.message}finally{lock(false)}};
 loadSignature().catch(error=>$('signatureResult').textContent=error.message);
-function upload(file,url,onProgress){return new Promise((resolve,reject)=>{const xhr=new XMLHttpRequest();xhr.open('PUT',url);xhr.upload.onprogress=e=>onProgress(e.loaded,e.total||file.size);xhr.onload=()=>{try{resolve({status:xhr.status,body:JSON.parse(xhr.responseText)})}catch{reject(Error('设备响应无法解析，请检查文件是否已保存'))}};xhr.onerror=()=>reject(Error('连接中断，请保持手机连接 kiikoread 热点'));xhr.send(file)})}
+function upload(file,url,onProgress){return new Promise((resolve,reject)=>{const xhr=new XMLHttpRequest();xhr.open('PUT',url);xhr.upload.onprogress=e=>onProgress(e.loaded,e.total||file.size);xhr.onload=()=>{try{resolve({status:xhr.status,body:JSON.parse(xhr.responseText)})}catch{reject(Error('设备响应无法解析，请检查文件是否已保存'))}};xhr.onerror=()=>reject(Error('连接中断，请保持手机连接 mossread 热点'));xhr.send(file)})}
 const types={file:{re:null,url:'/file-upload',limit:0},book:{re:/\.(epub|txt)$/i,url:'/upload',limit:0},font:{re:/\.(ttf|otf)$/i,url:'/font-upload',limit:33554432},picture:{re:/\.(jpg|jpeg|png)$/i,url:'/image-upload',limit:20971520}};
 let cropWidth=684,cropHeight=1216;
 let cropImage=null,cropZoom=1,cropX=0,cropY=0,cropPointer=null;

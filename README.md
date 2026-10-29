@@ -1,10 +1,10 @@
-# kiikoread mod · 小纸 Pico (RDP-G01-W)
+# mossread · 小纸 Pico (RDP-G01-W)
 
 > **Independent downstream build — not an official release.** This repository is maintained by **ismoss** as a fork of [kiikoread (`wegooo-cell/read-pico-reader`)](https://github.com/wegooo-cell/read-pico-reader), based on upstream **0.3.3-rc100**. kiikoread itself is built on [MindReset's demo firmware](https://github.com/MindReset/read_pico_firmware). This mod is not affiliated with, endorsed by, or supported by MindReset or the kiikoread maintainers; upstream release notes, sites, stores, support channels and issue trackers do not cover it.
 
 > **License note.** Upstream code through rc93 is Apache-2.0. Upstream original material first published from rc94 and explicitly marked carries a [personal-study license](licenses/kiikoread-Personal-Study-1.0.txt) (no commercial use). New files added by this fork are Apache-2.0, but **the combined firmware still contains upstream noncommercial material** — use it for personal study and personal devices only; do not sell it or ship it commercially. See [LICENSE](LICENSE) for the exact scope.
 
-**Current build:** `0.3.3-rc100-mod52` (2026-10-28) · **Update feed:** [update.json](https://ismoss.github.io/read-pico-reader/update.json) · **Device:** 小纸 Pico RDP-G01-W (ESP32-S3 / 16 MB flash / 684×1216)
+**Current build:** `0.3.3-rc100-mod55` (2026-10-28) · **Update feed:** [update.json](https://ismoss.github.io/read-pico-reader/update.json) · **Device:** 小纸 Pico RDP-G01-W (ESP32-S3 / 16 MB flash / 684×1216)
 
 [Install](#3-install-and-rollback) · [What changed](#4-what-this-mod-changes) · [Version line](#5-version-line) · [Build](#7-build-from-source) · [License & credit](#9-license-credit-and-boundaries) · [简体中文](README.zh-CN.md)
 
@@ -12,12 +12,12 @@
 
 ## 1. What this is
 
-One sentence: **keep kiikoread's UI, data and partition layout, and make the parts that make you frown behave.**
+One sentence: **build mossread on the kiikoread-compatible base, and make the parts that make you frown behave.**
 
 | Position | Meaning |
 | :--- | :--- |
-| Not a rewrite | Home, shelf, files, settings, reader, transfer and lock screens keep the kiikoread skeleton; book formats, configuration backups, partition table and NVS keys stay compatible |
-| Not official | No endorsement from MindReset or kiikoread; the update feed is self-hosted; report problems here, not upstream |
+| Not a rewrite | Home, shelf, files, settings, reader, transfer and lock screens keep the kiikoread-compatible skeleton; book formats, configuration backups, partition table and NVS keys stay compatible |
+| Not official | No endorsement from MindReset or the kiikoread upstream; the current system brand is mossread, the update feed is self-hosted, and problems belong here rather than upstream |
 | Not a one-off hack | CI (host regressions + board-timing build), a self-hosted OTA feed, a per-release [changelog](docs/CHANGELOG.md) and a [roadmap](docs/ROADMAP.md) |
 
 The mod focuses on four things:
@@ -32,7 +32,7 @@ The mod focuses on four things:
 | Item | Upstream kiikoread | This mod |
 | :--- | :--- | :--- |
 | Baseline | `0.3.3-rc100` | Same source tree + mod patches |
-| Version | `X.Y.Z-rcN` | `X.Y.Z-rcN-modM`, e.g. `0.3.3-rc100-mod52` |
+| Version | `X.Y.Z-rcN` | `X.Y.Z-rcN-modM`, e.g. `0.3.3-rc100-mod55` |
 | Updates | kiikoread.com / upstream GitHub Pages | Self-hosted `ismoss.github.io/read-pico-reader`; never follows upstream |
 | Support | Upstream issues / site | This repository; upstream does not support the mod |
 | License | Apache-2.0 + personal-study from rc94 | Upstream terms preserved; new mod files Apache-2.0 |
@@ -51,7 +51,7 @@ The mod focuses on four things:
 
 - Partition table, dual-slot layout and OTA data partition: untouched, so TF updates and configuration backups stay compatible.
 - Book formats and parsing rules: existing EPUB/TXT limits, font caches and reading-progress format stay as they are.
-- UI strings and brand: the firmware still calls itself kiikoread; this fork does not claim the name or replace the logo.
+- UI brand: the firmware now presents itself as mossread; data, partition layout, protocols and upstream compatibility identifiers remain unchanged.
 - Telemetry: no account, no analytics, no cloud shelf.
 
 ## 3. Install and rollback
@@ -69,13 +69,13 @@ If the current system does not qualify, use the official web flasher to install 
 
 ### 3.2 From kiikoread (recommended)
 
-1. Open [update.json](https://ismoss.github.io/read-pico-reader/update.json) and read `version` and `url`; currently `0.3.3-rc100-mod52`.
+1. Open [update.json](https://ismoss.github.io/read-pico-reader/update.json) and read `version` and `url`; currently `0.3.3-rc100-mod55`.
 2. Download the matching `Pico-update-*.bin`, **rename it to `Pico-update.bin`**, and put it in the TF-card root.
 3. On the device: **Settings → Upgrade & restore → System update → TF-card update**, confirm, and wait for the write and reboot.
 4. After reboot, **Settings → Upgrade & restore → System update** should show the self-hosted feed; later checks can run over WiFi.
 
 Direct link to the current image:
-<https://ismoss.github.io/read-pico-reader/Pico-update-0.3.3-rc100-mod52.bin>
+<https://ismoss.github.io/read-pico-reader/Pico-update-0.3.3-rc100-mod55.bin>
 
 > `Pico-update.bin` is the compatibility name expected by the upstream firmware; do not change it. Overwrite the same path for each update.
 
@@ -221,7 +221,7 @@ These are not new features; they are paths that looked fine but never actually w
 - The remote monitor is a LAN tool, off by default, with no public-internet authentication/encryption; do not port-forward it.
 - FAT16/FAT32 only; exFAT is not enabled, and a large card is not automatically compatible.
 - Inherited EPUB limits remain: 4 MB per XHTML resource, 8 MB per decompressed image, 8192 ZIP entries/chapters.
-- The full on-device walk-through for mod1–mod52 is still in progress; green CI is not a hardware acceptance for every item.
+- The full on-device walk-through for mod1–mod55 is still in progress; green CI is not a hardware acceptance for every item.
 
 ## 5. Version line
 
@@ -229,7 +229,7 @@ These are not new features; they are paths that looked fine but never actually w
 | :--- | :--- | :--- |
 | Start | mod1–mod19 | Fork release line, version scheme, self-hosted OTA, dual-repo engineering rules; in-book landscape, chunked shelf scan + index, font system; DNS, known WiFi, first remote monitor, dual-mode transfer |
 | Network & monitor | mod20–mod26 | Real auto-switch fix, auto-connect switch, upgrade indicators, monitor image/scale/connection fixes |
-| Landscape lock & update chain | mod27–mod52 | Monitor move + one-time RAM token, DNS router default, auto-connect inheritance, zero warnings; font root cause; landscape ticket/keypad/collage/wallpaper slots/transparent cover; wallpaper preview; transfer semantics; update rate/redirect/slow link; monitor PIN and touch expiry; GC16 lock settle |
+| Landscape lock, update chain & rebrand | mod27–mod55 | Monitor move + one-time RAM token, DNS router default, auto-connect inheritance, zero warnings; font root cause; landscape ticket/keypad/collage/wallpaper slots/transparent cover; wallpaper preview; transfer semantics; update rate/redirect/slow link; monitor PIN and touch expiry; GC16 lock settle |
 
 - Per-release user-visible changes: [docs/CHANGELOG.md](docs/CHANGELOG.md)
 - Batches, decisions and rejected work: [docs/ROADMAP.md](docs/ROADMAP.md)
@@ -242,7 +242,7 @@ These are not new features; they are paths that looked fine but never actually w
 | Build | GitHub Actions, ESP-IDF v6.1, board `sdkconfig.defaults` timing | Passing; zero warnings since mod30 |
 | Host regressions | Display/reader/lock/shelf/EPUB/settings/OTA TLS/DNS/monitor BMP suites | Passing on every push |
 | Published feed | Post-deploy check of update.json, image size, SHA-256 and live fetch | Passing on every dispatch |
-| On-device walk-through | Manual acceptance of mod1–mod52 | **In progress**; individual fixes marked hardware-confirmed in the changelog |
+| On-device walk-through | Manual acceptance of mod1–mod55 | **In progress**; individual fixes marked hardware-confirmed in the changelog |
 
 We try to keep “verified” and “merely compiled” separate. If an item has no hardware note, treat it as code/CI-level evidence, not a device promise.
 
@@ -253,7 +253,7 @@ Requires **ESP-IDF v6.1**, target ESP32-S3:
 ```sh
 python3 tools/prepare_tls_bundle.py "$IDF_PATH"
 idf.py set-target esp32s3
-PICO_PROJECT_VER=0.3.3-rc100-mod52 idf.py build
+PICO_PROJECT_VER=0.3.3-rc100-mod55 idf.py build
 ```
 
 - `sdkconfig.defaults` carries this board's flash/PSRAM timing; `sdkconfig.ci` is compile-only. Do not ship the CI timing as the product default.
