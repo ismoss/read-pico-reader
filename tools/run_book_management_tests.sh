@@ -74,7 +74,7 @@ python3 tools/test_transfer_netif.py
 python3 tools/test_pmu_battery.py
 python3 tools/ble_turner_host_test.py
 for test in ota_release ota_online; do
-    cc -std=c11 -Wall -Wextra -Werror -Wno-deprecated-declarations -fsanitize=address,undefined \
+    cc -std=gnu11 -D_DEFAULT_SOURCE -Wall -Wextra -Werror -Wno-deprecated-declarations -fsanitize=address,undefined \
         -Itools/ota_stubs -Imain -Imanaged_components/espressif__cjson/cJSON \
         "tools/${test}_host_test.c" main/ota_release.c managed_components/espressif__cjson/cJSON/cJSON.c \
         -lm -pthread -o "build/book-tests/${test}"

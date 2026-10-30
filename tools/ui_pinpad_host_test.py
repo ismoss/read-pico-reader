@@ -5,6 +5,7 @@
 import argparse
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 from home_cover_cache_host_test import function
 ROOT=Path(__file__).resolve().parents[1]
@@ -118,7 +119,9 @@ int main(int argc,char **argv){
  (p/'test.c').write_text(unit)
  flags=['cc','-std=gnu11','-Wall','-Wextra','-Werror','-Wno-unused-variable','-Wno-unused-function','-Wno-missing-field-initializers','-fsanitize=address,undefined','-ffunction-sections','-fdata-sections','-I'+str(p),'-I'+str(ROOT/'main/ui'),'-I'+str(ROOT/'main/font'),'-I'+str(ROOT/'main')]
  subprocess.run(flags+['-c',str(ROOT/'main/font/ttf_font.c'),'-o',str(p/'ttf.o')],check=True)
- subprocess.run(flags+[str(p/'test.c'),str(p/'assets.c'),str(p/'ttf.o'),str(ROOT/'main/ui/ui_gesture.c'),str(ROOT/'main/ui/ui_image_dither.c'),'-Wl,-dead_strip','-lm','-o',str(p/'test')],check=True)
+ # Keep section garbage collection portable: macOS uses dead_strip, ELF uses gc-sections.
+ gc_flag='-Wl,-dead_strip' if sys.platform=='darwin' else '-Wl,--gc-sections'
+ subprocess.run(flags+[str(p/'test.c'),str(p/'assets.c'),str(p/'ttf.o'),str(ROOT/'main/ui/ui_gesture.c'),str(ROOT/'main/ui/ui_image_dither.c'),gc_flag,'-lm','-o',str(p/'test')],check=True)
  if args.background:
   from PIL import Image
   b=Image.open(args.background).convert('L');assert b.size==(684,1216);(p/'bg.raw').write_bytes(b.tobytes())

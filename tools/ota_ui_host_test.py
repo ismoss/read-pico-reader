@@ -51,6 +51,8 @@ static bool s_update_drawn_busy,s_upgrade_offer_pending,s_upgrade_confirm,s_upgr
 typedef enum { UPGRADE_JOB_NONE, UPGRADE_JOB_CHECK, UPGRADE_JOB_DOWNLOAD } upgrade_job_t;
 static upgrade_job_t s_upgrade_job;
 static int s_upgrade_bar_width;
+static int64_t s_upgrade_beat_ms;
+static int s_upgrade_beat_second = -1;
 static char s_upgrade_notice[96];
 static uint8_t pixels[1216][684];
 static bool append_only;
@@ -73,8 +75,8 @@ static void epd_fill_rect(EpdRect r,int color,uint8_t *fb){
 static void ui_fill_rect_fast(EpdRect r,int color,uint8_t *fb){epd_fill_rect(r,color,fb);}
 static void ui_image_bw_rect(uint8_t *fb,EpdRect r){(void)fb;assert(r.x==496&&r.y==472&&r.width==132&&r.height==42);}
 static void assert_progress(int width){
- for(int y=519;y<527;++y)for(int x=61;x<623;++x)
-  assert(pixels[y][x]==(x<61+width?UI_GRAY_BLACK:UI_GRAY_WHITE));
+ for(int y=519;y<527;++y)for(int x=213;x<623;++x)
+  assert(pixels[y][x]==(x<213+width?UI_GRAY_BLACK:UI_GRAY_WHITE));
  assert(s_upgrade_bar_width==width&&!erased_completed);
 }
 static char s_book_title[128]="海边的信",s_title[128]="chapter";
@@ -123,6 +125,9 @@ static bool s_input_settle,s_input_layout,s_scroll_present_pending;
 static EpdRect s_input_area;
 typedef struct {int kind;} EpdWaveform;
 static const EpdWaveform E0470_WAVEFORM={0},E0470_FOLLOW_WAVEFORM={1};
+static int settings_content_end(void){return UI_NAV_REFRESH_END;}
+static const EpdWaveform *display_settings_scroll_waveform(void){return &E0470_WAVEFORM;}
+static int reader_w(void){return 684;}
 enum EpdDrawMode {MODE_DU,MODE_GL16};
 enum EpdDrawError {EPD_DRAW_SUCCESS};
 static int diff_pushes,full_pushes,render_calls;
@@ -139,10 +144,9 @@ static enum EpdDrawError update_display_area_full_with(void *hl,const EpdWavefor
  ++full_pushes;return update_display_area_diff_with(hl,waveform,mode,area);
 }
 '''
-unit += "static EpdRect ui_pinpad_full(void){return (EpdRect){0,0,684,1216};}\n"
 for name in ("upgrade_percent", "upgrade_remember", "upgrade_status_redraw", "upgrade_progress_area", "draw_upgrade_percent", "draw_upgrade_progress",
              "draw_upgrade_progress_delta", "upgrade_schedule", "upgrade_start_pending", "settings_present",
-             "upgrade_note_line", "draw_upgrade_notes", "upgrade_confirm_button"):
+             "upgrade_note_line", "draw_upgrade_notes_at", "draw_upgrade_notes", "upgrade_confirm_button"):
     unit += function(name) + "\n"
 unit += function("draw_reader_header", root / "main/apps/app_book.c") + "\n"
 unit += r'''
@@ -158,11 +162,11 @@ int main(void){
  memset(pixels,73,sizeof(pixels));draw_upgrade_progress(NULL);assert_progress(0);
  s_update.received=40;assert(upgrade_status_redraw(10000)==APP_REDRAW_NONE);
  s_update.received=50;assert(upgrade_status_redraw(4999)==APP_REDRAW_NONE);assert(upgrade_status_redraw(5100)==APP_REDRAW_AREA);
- append_only=true;draw_upgrade_progress_delta(NULL);assert(ui_text_last_percent==5);assert_progress(28);
+ append_only=true;draw_upgrade_progress_delta(NULL);assert(ui_text_last_percent==5);assert_progress(20);
  for(uint32_t now=5101;now<10100;++now){s_update.received=500;assert(upgrade_status_redraw(now)==APP_REDRAW_NONE);}
- assert(upgrade_status_redraw(10100)==APP_REDRAW_AREA);draw_upgrade_progress_delta(NULL);assert(ui_text_last_percent==50);assert_progress(281);
- s_update.received=1000;assert(upgrade_status_redraw(15100)==APP_REDRAW_AREA);draw_upgrade_progress_delta(NULL);assert(ui_text_last_percent==100);assert_progress(562);
- unsigned painted=paint_calls;s_update.received=800;draw_upgrade_progress_delta(NULL);assert(paint_calls==painted);assert_progress(562);
+ assert(upgrade_status_redraw(10100)==APP_REDRAW_AREA);draw_upgrade_progress_delta(NULL);assert(ui_text_last_percent==50);assert_progress(205);
+ s_update.received=1000;assert(upgrade_status_redraw(15100)==APP_REDRAW_AREA);draw_upgrade_progress_delta(NULL);assert(ui_text_last_percent==100);assert_progress(410);
+ unsigned painted=paint_calls;s_update.received=800;draw_upgrade_progress_delta(NULL);assert(paint_calls==painted);assert_progress(410);
  for(int y=0;y<1216;++y)for(int x=0;x<684;++x)if(x<52||x>=632||y<468||y>=532)assert(pixels[y][x]==73);
  append_only=false;
  s_update.state=PICO_UPDATE_READY;assert(upgrade_status_redraw(15101)==APP_REDRAW_NONE);s_update.busy=false;assert(upgrade_status_redraw(15102)==APP_REDRAW_PAGE);
@@ -179,14 +183,14 @@ int main(void){
   s_update=(pico_update_status_t){.state=PICO_UPDATE_AVAILABLE};upgrade_schedule(job!=0,42);
   assert(starts==started&&!cache_releases&&s_upgrade_job==(job?UPGRADE_JOB_DOWNLOAD:UPGRADE_JOB_CHECK)&&s_update.busy);
   assert(settings_present(&ctx,APP_REDRAW_PAGE));backend_status=s_update;
-  assert(upgrade_start_pending()==APP_REDRAW_NONE&&starts==started+1&&s_upgrade_job==UPGRADE_JOB_NONE&&cache_releases==2);
+  assert(upgrade_start_pending(&ctx)==APP_REDRAW_NONE&&starts==started+1&&s_upgrade_job==UPGRADE_JOB_NONE&&cache_releases==2);
  }
  cache_releases=0;start_error=ESP_ERR_NO_MEM;backend_status.state=PICO_UPDATE_FAILED;
  snprintf(backend_status.message,sizeof(backend_status.message),"内存不足，请退出传书后重试");
- upgrade_schedule(true,50);assert(upgrade_start_pending()==APP_REDRAW_PAGE&&!s_update.busy&&s_update.state==PICO_UPDATE_FAILED);
+ upgrade_schedule(true,50);assert(upgrade_start_pending(&ctx)==APP_REDRAW_PAGE&&!s_update.busy&&s_update.state==PICO_UPDATE_FAILED);
  assert(!strcmp(s_upgrade_notice,"内存不足，请退出传书后重试"));
  cache_releases=0;backend_status.state=PICO_UPDATE_AVAILABLE;snprintf(backend_status.message,sizeof(backend_status.message),"发现新版本，可下载安装");
- upgrade_schedule(true,60);assert(upgrade_start_pending()==APP_REDRAW_PAGE);
+ upgrade_schedule(true,60);assert(upgrade_start_pending(&ctx)==APP_REDRAW_PAGE);
  assert(!strcmp(s_upgrade_notice,"无法开始升级，请退出传书后重试"));
  draw_reader_header(NULL);assert(back_center==title_center&&favorite_center==title_center&&favorite_icon==UI_ICON_BOOKMARK);
  s_reader_favorite=true;draw_reader_header(NULL);assert(back_center==title_center&&favorite_center==title_center&&favorite_icon==UI_ICON_ANIMATE_BOOKMARK_PLUS);

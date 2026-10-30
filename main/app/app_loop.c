@@ -50,6 +50,7 @@
 
 #include "app_registry.h"
 #include "app_content_open.h"
+#include "app_transfer_mode.h"
 #include "boot_state.h"
 #include "ble_page_turner.h"
 #include "ota_online.h"
@@ -223,12 +224,13 @@ static void quick_toggle_wifi(void) {
     if (status.state != READ_PICO_TRANSFER_STOPPED) {
         // 上传期间拒绝断开，复用存储任务已有的原子准入保护。
         // Refuse disconnecting during upload using the storage owner's atomic admission guard.
-        (void)read_pico_transfer_try_stop_if_idle();
+        if (read_pico_transfer_try_stop_if_idle()) app_transfer_wifi_hold_disconnected();
     } else {
         char ssid[33] = {0}; bool configured = false;
         if (read_pico_transfer_get_saved_wifi(ssid, &configured) == ESP_OK && configured) {
             // 先释放蓝牙占用，再用既有异步连接/重试流程；不新开上传服务器或改写凭据。
             // Release Bluetooth resources first, then reuse connection/retry handling without starting uploads or rewriting credentials.
+            app_transfer_wifi_release_hold();
             ble_pt_sync(false);
             const read_pico_transfer_cfg_t cfg = {.mode = READ_PICO_TRANSFER_MODE_STA, .network_only = true};
             (void)read_pico_transfer_start(&cfg);
@@ -1241,7 +1243,7 @@ void app_loop_run(const app_loop_config_t* config) {
         // auto-lock would never fire again.
         const bool transfer_busy = transfer.state == READ_PICO_TRANSFER_UPLOADING;
         bool idle_blocked = usb_storage_active() || transfer_busy || pico_online_busy() ||
-            current == &app_transfer || current->holds_pmu || power_dialog_open || touch.touched ||
+            current->holds_pmu || power_dialog_open || touch.touched ||
             ctx.request_app || ctx.request_menu || ctx.request_return;
         if (idle_blocked || requested_idle != idle_minutes) last_input_ms = ctx.now_ms;
         idle_minutes = requested_idle;

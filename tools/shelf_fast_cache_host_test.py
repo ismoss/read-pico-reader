@@ -51,6 +51,8 @@ static int s_view=SHELF,rows=9,contrast=100,phase_shift,style=2;
 static bool fast=true,alloc_fail;
 static size_t free_psram=4*1024*1024,allocated_bytes;
 static void release_guard_cache(void){}
+static unsigned s_cover_generation;
+static void book_cover_jobs_cancel(unsigned generation){(void)generation;}
 static unsigned allocations,s_cover_pending_mask,s_cover_decode_mask,s_cover_warm_mask,s_cover_dirty_mask,s_cover_present_mask;
 static struct {int index;uint8_t *gray,*fast_bits;unsigned width,height;uint8_t fast_contrast,fast_phase;bool fast_white_edge;} s_covers[BOOK_ROWS];
 static int app_settings_shelf_style(void){return style;}
@@ -123,29 +125,43 @@ int main(void) {
     assert(allocations==before && allocated_bytes==40446);
     // 原灰阶已经释放，修改对比度/位置的真实准备流程会重新提供解码缓冲。
     // Gray has been released; re-preparation supplies decoding buffers for changed contrast/position.
-    contrast=200;for(int i=0;i<9;++i)seed_gray(i);prepare_fast_covers();assert(allocations==before+9);
+    contrast=200;
+    for(int i=0;i<9;++i)seed_gray(i);
+    prepare_fast_covers();assert(allocations==before+9);
     for(int row=0;row<9;++row){verify_bitmap(row);assert(!s_covers[row].gray);}
-    phase_shift=1;before=allocations;for(int i=0;i<9;++i)seed_gray(i);prepare_fast_covers();assert(allocations==before+9);
+    phase_shift=1;before=allocations;
+    for(int i=0;i<9;++i)seed_gray(i);
+    prepare_fast_covers();assert(allocations==before+9);
     for(int row=0;row<9;++row)verify_bitmap(row);
     // 有效黑白不会因内存减少被丢弃；灰阶释放后仍保持同一份热缓存。
     // Memory pressure does not evict already valid packed artwork.
     free_psram=1;prepare_fast_covers();assert(allocated_bytes==40446);
     app_book_cover_mode_changed();assert(!allocated_bytes);
-    for(int i=0;i<9;++i)seed_gray(i);prepare_fast_covers();
+    for(int i=0;i<9;++i)seed_gray(i);
+    prepare_fast_covers();
     for(int row=0;row<13;++row)assert(!s_covers[row].fast_bits && !s_covers[row].gray);
     assert(!allocated_bytes);
-    free_psram=4*1024*1024;alloc_fail=true;for(int i=0;i<9;++i)seed_gray(i);prepare_fast_covers();
+    free_psram=4*1024*1024;alloc_fail=true;
+    for(int i=0;i<9;++i)seed_gray(i);
+    prepare_fast_covers();
     for(int row=0;row<13;++row)assert(!s_covers[row].fast_bits && !s_covers[row].gray);
     assert(!allocated_bytes);
-    alloc_fail=false;rows=9;for(int i=0;i<9;++i)seed_gray(i);prepare_fast_covers();
+    alloc_fail=false;rows=9;
+    for(int i=0;i<9;++i)seed_gray(i);
+    prepare_fast_covers();
     fast=false;prepare_fast_covers();assert(!allocated_bytes);
     // 普通/水波纹只保留灰阶；模式变化释放，快刷再按需生成。
     // Ordinary/ripple retain gray only; mode changes release the obsolete representation.
-    for(int i=0;i<9;++i)seed_gray(i);prepare_fast_covers();assert(allocated_bytes==9u*176*240);
+    for(int i=0;i<9;++i)seed_gray(i);
+    prepare_fast_covers();assert(allocated_bytes==9u*176*240);
     for(int row=0;row<13;++row)assert(!s_covers[row].fast_bits);
     app_book_cover_mode_changed();assert(!allocated_bytes);
-    fast=true;for(int i=0;i<9;++i)seed_gray(i);prepare_fast_covers();s_view=MANAGE;prepare_fast_covers();assert(!allocated_bytes);
-    s_view=SHELF;for(int i=0;i<9;++i)seed_gray(i);prepare_fast_covers();invalidate_covers();assert(!allocated_bytes);
+    fast=true;
+    for(int i=0;i<9;++i)seed_gray(i);
+    prepare_fast_covers();s_view=MANAGE;prepare_fast_covers();assert(!allocated_bytes);
+    s_view=SHELF;
+    for(int i=0;i<9;++i)seed_gray(i);
+    prepare_fast_covers();invalidate_covers();assert(!allocated_bytes);
     for(int row=0;row<13;++row)assert(!s_covers[row].gray && !s_covers[row].fast_bits && s_covers[row].index==-1);
     // 快刷封面白底纯白，黑区少量白点；字形与收藏在缓存之外绘制。
     // Pure white cover backgrounds remain white, while solid blacks contain sparse white dots; glyphs and favorites are outside the cache.

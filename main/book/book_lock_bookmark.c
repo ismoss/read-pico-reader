@@ -27,6 +27,10 @@
 #define SEAL_CACHE BOOK_SEAL_CACHE_PARENT "/locks/seal-layer.bin"
 #define SEAL_TEMP SEAL_CACHE ".tmp"
 #define SEAL_PACK SEAL_CACHE ".packed"
+// 行缓冲按屏幕长边预留：横屏书封是 1216x684，旧 684 宽缓冲会越界。
+// Row buffers reserve the long screen edge: a landscape cover is 1216x684, so a 684-wide buffer would overflow.
+#define SEAL_ROW_BYTES (1216u * 2u)
+#define SEAL_PACKED_BYTES (SEAL_ROW_BYTES + 16u)
 
 typedef struct {
     uint8_t *visited,*pending;
@@ -47,7 +51,8 @@ static void white_flood_mark(white_flood_t *f,size_t at,unsigned y) {
 // Original alpha takes priority, protecting white artwork in transparent assets; workspace is one bit/pixel plus a bounded row queue.
 static bool remove_white_background(uint8_t *gray,uint8_t *alpha,unsigned w,unsigned h) {
     size_t count=(size_t)w*h;
-    if(!gray||!alpha||!w||!h||w>684||h>1216)return false;
+    if(!gray||!alpha||!w||!h||
+       !((w<=684&&h<=1216)||(w<=1216&&h<=684)))return false;
     for(size_t i=0;i<count;++i)if(alpha[i]!=255)return true;
     bool border=false;
     for(unsigned x=0;x<w;++x)if(gray[x]>=250||gray[(h-1)*w+x]>=250){border=true;break;}
@@ -106,11 +111,18 @@ static uint32_t seal_checksum(uint32_t hash,const uint8_t *p,size_t n) {
 // 每行按灰度/alpha原始字节对无损压缩；高噪声行保持原样，不降低透明度或灰阶。
 // Losslessly pack exact gray/alpha pairs per row; noisy rows remain raw without reducing alpha or gray precision.
 static bool seal_write_row(FILE *file,const uint8_t *row,unsigned w){
-    uint8_t packed[684*2+6],size[2];unsigned x=0,n=0;
+    if(!file||!row||!w||w>1216u)return false;
+    // 锁屏绘制只在主任务单线程执行，压缩缓冲放 .bss，避免与调用方的 1216 行缓冲在栈上叠加。
+    // Lock art is drawn single-threaded on the main task, so keep the packing buffer in .bss
+    // instead of stacking it on top of the caller's 1216-wide row buffer.
+    static uint8_t packed[SEAL_PACKED_BYTES];uint8_t size[2];unsigned x=0,n=0;
     while(x<w){
         unsigned run=1;
         while(run<128&&x+run<w&&!memcmp(row+x*2,row+(x+run)*2,2))++run;
-        if(run>=3){packed[n++]=(uint8_t)(128+run-1);packed[n++]=row[x*2];packed[n++]=row[x*2+1];x+=run;}
+        if(run>=3){
+            if(n+3>sizeof(packed))return false;
+            packed[n++]=(uint8_t)(128+run-1);packed[n++]=row[x*2];packed[n++]=row[x*2+1];x+=run;
+        }
         else{
             unsigned start=x;x+=run;
             while(x<w&&x-start<128){
@@ -119,7 +131,9 @@ static bool seal_write_row(FILE *file,const uint8_t *row,unsigned w){
                 if(run>128-(x-start))run=128-(x-start);
                 x+=run;
             }
-            unsigned count=x-start;packed[n++]=(uint8_t)(count-1);
+            unsigned count=x-start;
+            if(!count||n+1u+count*2u>sizeof(packed))return false;
+            packed[n++]=(uint8_t)(count-1);
             memcpy(packed+n,row+start*2,count*2);n+=count*2;
         }
     }
@@ -127,7 +141,9 @@ static bool seal_write_row(FILE *file,const uint8_t *row,unsigned w){
     return fwrite(size,1,2,file)==2&&fwrite(length?packed:row,1,length?length:w*2,file)==(length?length:w*2);
 }
 static bool seal_read_row(FILE *file,uint8_t *row,unsigned w){
-    uint8_t size[2],packed[684*2+6];
+    // 同上：单线程主任务绘制，packed 放 .bss，降低嵌套栈用量。
+    // Same as above: single-threaded main-task draw, keep packed in .bss to cut nested stack use.
+    uint8_t size[2];static uint8_t packed[SEAL_PACKED_BYTES];
     if(fread(size,1,2,file)!=2)return false;
     unsigned length=(unsigned)size[0]+((unsigned)size[1]<<8);
     if(!length)return fread(row,2,w,file)==w;
@@ -172,7 +188,7 @@ static bool seal_build_memory(const char *path,seal_header_t *header,bool *attem
     *attempted=true;
     FILE *file=fopen(SEAL_PACK,"wb");
     if(!file){free(layers);return false;}
-    header->checksum=2166136261u;uint8_t row[684*2];
+    header->checksum=2166136261u;uint8_t row[SEAL_ROW_BYTES];
     ok=fwrite(header,1,sizeof(*header),file)==sizeof(*header);
     for(unsigned y=0;y<header->height&&ok;++y){
         for(unsigned x=0;x<header->width;++x){
@@ -188,7 +204,7 @@ static bool seal_build_memory(const char *path,seal_header_t *header,bool *attem
     (void)remove(SEAL_PACK);return false;
 }
 static bool seal_row(void *context,unsigned y,unsigned w,const uint8_t *gray,const uint8_t *alpha) {
-    seal_sink_t *s=context; uint8_t row[684*2];
+    seal_sink_t *s=context; uint8_t row[SEAL_ROW_BYTES];
     for(unsigned x=0;x<w;++x) {
         row[x*2]=gray[x];row[x*2+1]=alpha[x];
         if(alpha[x]!=255)s->has_alpha=true;
@@ -228,7 +244,7 @@ static bool seal_remove_white(FILE *file,const uint8_t *white,unsigned w,unsigne
             }
         }
     }
-    bool ok=true;uint8_t row[684*2];
+    bool ok=true;uint8_t row[SEAL_ROW_BYTES];
     for(unsigned y=0;y<h&&ok;++y) {
         long at=(long)(sizeof(seal_header_t)+(size_t)y*w*2);
         ok=!fseek(file,at,SEEK_SET)&&fread(row,2,w,file)==w;
@@ -253,7 +269,7 @@ static bool seal_build(const char *path,seal_header_t *header) {
         book_png_file_layer_rows(path,header->width,header->height,seal_row,&sink);
     if(ok&&!sink.has_alpha)ok=seal_remove_white(f,white,header->width,header->height);
     free(white);
-    uint8_t row[684*2];header->checksum=2166136261u;
+    uint8_t row[SEAL_ROW_BYTES];header->checksum=2166136261u;
     if(ok)ok=!fflush(f)&&!fseek(f,sizeof(*header),SEEK_SET);
     FILE *packed=ok?fopen(SEAL_PACK,"wb"):NULL;
     if(ok)ok=packed&&fwrite(header,1,sizeof(*header),packed)==sizeof(*header);
@@ -270,7 +286,7 @@ static bool seal_build(const char *path,seal_header_t *header) {
 }
 static FILE *seal_open(const seal_header_t *wanted) {
     FILE *f=fopen(SEAL_CACHE,"rb");if(!f)return NULL;
-    seal_header_t h;uint8_t row[684*2];uint32_t sum=2166136261u;
+    seal_header_t h;uint8_t row[SEAL_ROW_BYTES];uint32_t sum=2166136261u;
     bool ok=fread(&h,1,sizeof(h),f)==sizeof(h)&&h.magic==wanted->magic&&h.width==wanted->width&&
         h.height==wanted->height&&h.key==wanted->key;
     for(unsigned y=0;y<wanted->height&&ok;++y) {
@@ -346,7 +362,7 @@ static bool seal_draw(uint8_t *fb,const char *path,unsigned w,unsigned h,bool *s
         bool ok=seal_draw_rows(f,fb,w,h,work,started);
         free(work);fclose(f);return ok;
     }
-    uint8_t row[684*2];bool ok=true;int ox=((int)epd_rotated_display_width()-(int)w)/2,oy=((int)epd_rotated_display_height()-(int)h)/2;
+    uint8_t row[SEAL_ROW_BYTES];bool ok=true;int ox=((int)epd_rotated_display_width()-(int)w)/2,oy=((int)epd_rotated_display_height()-(int)h)/2;
     for(unsigned pass=0;pass<2&&ok;++pass) {
         ok=!fseek(f,sizeof(wanted),SEEK_SET);
         for(unsigned y=0;y<h&&ok;++y) {
@@ -394,7 +410,7 @@ bool book_lock_bookmark_draw(uint8_t *fb,const char *path) {
     if(ok) {
         // 小幅偏移的柔影只作用在非透明轮廓附近。/ A softly offset shadow affects only the nontransparent silhouette.
         for(unsigned y=0;y<h;++y)for(unsigned x=0;x<w;++x){
-            unsigned a=alpha[(size_t)y*w+x];if(!a||x+ox+4>=684||y+oy+6>=1216)continue;
+            unsigned a=alpha[(size_t)y*w+x];if(!a||x+ox+4>=cw||y+oy+6>=ch)continue;
             int xx=ox+x+4,yy=oy+y+6;
             unsigned bg=pixel(fb,xx,yy);
             epd_draw_pixel(xx,yy,ui_image_dither_gray((bg*(255-a/5)+127)/255,xx,yy),fb);

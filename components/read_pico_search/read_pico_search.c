@@ -137,7 +137,8 @@ bool read_pico_search_match(const char* filename, const char* query) {
 size_t read_pico_search_candidates(const char* syllable, uint32_t* out, size_t cap, size_t skip) {
     if (!syllable || !out || !cap) return 0;
     char normalized[9];
-    size_t n = strnlen(syllable, sizeof(normalized));
+    size_t n = 0;
+    while (n < sizeof(normalized) && syllable[n]) ++n;
     if (!n || n >= sizeof(normalized)) return 0;
     for (size_t i = 0; i < n; ++i) {
         unsigned char c = lower((unsigned char)syllable[i]);

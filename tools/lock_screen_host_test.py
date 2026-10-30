@@ -5,8 +5,12 @@
 from pathlib import Path
 import subprocess
 import tempfile
+import re
 from home_cover_cache_host_test import function
 ROOT=Path(__file__).resolve().parents[1]
+source=(ROOT/'main/lock_screen.c').read_text()
+magic=re.search(r'^#define ART_MAGIC UINT32_C\((0x[0-9A-Fa-f]+)\)$',source,re.M)
+assert magic,r'ART_MAGIC definition not found in main/lock_screen.c'
 with tempfile.TemporaryDirectory() as folder:
  p=Path(folder)
  (p/'app.h').write_text((ROOT/'tools/ui_gesture_stubs/app.h').read_text())
@@ -121,7 +125,7 @@ static enum EpdDrawError update_display_full(void *h){(void)h;++fulls;return EPD
 static void guard_draw_result(void *h,enum EpdDrawError result){(void)h;(void)result;}
 // 密码验证通过会请求一次整屏定稿，清掉局部 DU 键盘残影。/ A verified PIN asks for one full settle to clear DU key ghosts.
 static void display_request_full_refresh(void){++fulls;}
-'''.replace('FOLDER',str(p))
+'''.replace('FOLDER',str(p)).replace('UINT32_C(0x50414434)', 'UINT32_C(%s)' % magic.group(1))
  # Declarations precede the backdrop stub; state/hit logic comes from the production pad.
  unit=unit.replace('static void ui_pinpad_paint_input(', 'void ui_pinpad_paint_input(').replace('static void ui_pinpad_begin(', 'void ui_pinpad_begin(').replace('static void ui_pinpad_paint(', 'void ui_pinpad_paint(')
  for n in ('ui_pinpad_full','ui_pinpad_entry_area','ui_pinpad_end','ui_pinpad_reset','pad_w','pad_h','key_rect','joined','hit_test','ui_pinpad_handle'):

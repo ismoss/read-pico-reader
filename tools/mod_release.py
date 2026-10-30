@@ -67,14 +67,16 @@ def build(dist: Path, out: Path, version: str, notes: str) -> None:
     (out / "dns.json").write_text(json.dumps(DNS_LIST, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     (out / ".nojekyll").touch()
     (out / "index.html").write_text(
-        "<!doctype html><meta charset=\"utf-8\"><title>kiikoread mod feed</title>"
-        f"<p>Read_Pico mod OTA feed. Latest: {version}. <a href=\"update.json\">update.json</a></p>",
+        "<!doctype html><meta charset=\"utf-8\"><title>mossread mod feed</title>"
+        f"<p>mossread mod OTA feed. Latest: {version}. <a href=\"update.json\">update.json</a></p>",
         encoding="utf-8")
 
 
 def fetch_no_redirect(url: str, timeout: int):
-    # OTA 客户端禁用跟随重定向；自检也按同样的规则，任何 302 都算失败。
-    # The OTA client never follows redirects; verify the same way and fail on any 302.
+    # OTA 客户端会跟随重定向，但发布地址仍固定为 GitHub Pages 直链；自检拒绝任何 302，
+    # 保证清单 URL 不会依赖会变化的跳转目标。
+    # The OTA client follows redirects, but release URLs stay on direct GitHub Pages links;
+    # the check rejects any 302 so the manifest never depends on a changing redirect target.
     class NoRedirect(urllib.request.HTTPRedirectHandler):
         def redirect_request(self, *args, **kwargs):
             return None

@@ -161,6 +161,16 @@ int main(int argc,char **argv){
  assert(cover_edge(4.8f,4.8f,220)&&!inside_cover(0,0,220));
  lock_placement_t p[30];assert(make_placements(lib,p)==30);
  for(unsigned i=0;i<30;++i){const lock_book_t *b=&lib->books[p[i].index];assert(fabsf(p[i].w/334.f-(float)b->source_w/b->source_h)<.00001f);if(i%5)assert(fabsf(p[i].x-p[i-1].x-p[i-1].w-18.f)<.001f);}
+ size_t visible_cover_bytes=0;
+ unsigned first_visible_book=0;
+ bool found_visible=false;
+ for(unsigned i=0;i<lib->used;++i){
+  bool visible=false;
+  for(unsigned q=0;q<30;++q)if(p[q].index==i&&cover_visible(p[q]))visible=true;
+  if(visible){visible_cover_bytes+=(size_t)lib->books[i].width*lib->books[i].height;if(!found_visible){first_visible_book=i;found_visible=true;}}
+ }
+ // 选一本实际参与绘制的封面做损坏测试；屏外封面按设计不做像素读取。
+ // Damage a cover that is actually painted; off-screen covers are intentionally not read pixel-by-pixel.
  host_free(lib);assert(decoded==15);
  char hidden[256];snprintf(hidden,sizeof(hidden),"%s/books/nested/01.epub",fixtures);hidden_path=hidden;book_lock_collage_invalidate();
  lib=library_load();assert(lib&&lib->count==14&&lib->used==14);host_free(lib);
@@ -177,7 +187,7 @@ int main(int argc,char **argv){
  // Complete art precedes persistence, and the dimensions pass does not reread cover pixels.
  assert(remove(LOCK_CACHE_DIR "/collage.bin")==0);cache_payload_read=0;
  assert(book_lock_collage_prepare(other)&&!memcmp(fb,other,LOCK_FRAME_BYTES)&&live==warm);
- assert(cache_payload_read==cover_bytes&&s_pending_frame==other);
+ assert(cache_payload_read==visible_cover_bytes&&s_pending_frame==other);
  FILE *missing=fopen(LOCK_CACHE_DIR "/collage.bin","rb");assert(!missing);
  book_lock_collage_cache_commit(fb);assert(!s_pending_frame);
  missing=fopen(LOCK_CACHE_DIR "/collage.bin","rb");assert(!missing);
@@ -203,16 +213,17 @@ int main(int argc,char **argv){
  profile="自定义名字";assert(book_lock_collage_draw(other)&&memcmp(fb,other,LOCK_FRAME_BYTES));assert(decoded==15);profile="名字很长名字很长名字很长名字很长名字很长";assert(book_lock_collage_draw(other));profile="Kiiko";
  // 损坏封面头不能把无效比例带入几何计算；重解码后重新建立缓存。
  // Invalid cover metadata cannot enter geometry; decode again and rebuild the cache.
- lib=library_load();assert(lib);char cached_cover[112];image_cache_path(&lib->books[0],cached_cover);
+ lib=library_load();assert(lib&&first_visible_book<lib->used);char cached_cover[112];image_cache_path(&lib->books[first_visible_book],cached_cover);
  FILE *bad=fopen(cached_cover,"r+b");assert(bad);lock_cache_t header;assert(fread(&header,1,sizeof(header),bad)==sizeof(header));header.source_h=0;rewind(bad);assert(fwrite(&header,1,sizeof(header),bad)==sizeof(header));fclose(bad);
- assert(!cover_dimensions_read(&lib->books[0]));
- unsigned prior_decoded=decoded;uint8_t *repaired=cover_load(&lib->books[0],&lib->cache_complete);assert(repaired&&decoded==prior_decoded+1&&lib->books[0].source_h);host_free(repaired);
+ assert(!cover_dimensions_read(&lib->books[first_visible_book]));
+ unsigned prior_decoded=decoded;uint8_t *repaired=cover_load(&lib->books[first_visible_book],&lib->cache_complete);assert(repaired&&decoded==prior_decoded+1&&lib->books[first_visible_book].source_h);host_free(repaired);
  // 尺寸头可读时，损坏像素仍须在正式绘制时校验并修复。
  // Valid dimensions never skip checksum validation of damaged pixels in the drawing pass.
  bad=fopen(cached_cover,"r+b");assert(bad&&fseek(bad,sizeof(lock_cache_t)+4,SEEK_SET)==0);int badpixel=fgetc(bad);assert(fseek(bad,-1,SEEK_CUR)==0&&fputc(badpixel^1,bad)!=EOF);fclose(bad);
- assert(cover_dimensions_read(&lib->books[0]));host_free(lib);
+ assert(cover_dimensions_read(&lib->books[first_visible_book]));host_free(lib);
  assert(remove(LOCK_CACHE_DIR "/collage.bin")==0);unsigned before_repair=decoded;
- assert(book_lock_collage_prepare(other)&&decoded==before_repair+1&&!memcmp(fb,other,LOCK_FRAME_BYTES));book_lock_collage_cache_commit(other);
+ bool repaired_prepare=book_lock_collage_prepare(other);
+ assert(repaired_prepare&&decoded==before_repair+1&&!memcmp(fb,other,LOCK_FRAME_BYTES));book_lock_collage_cache_commit(other);
  rotation=EPD_ROT_INVERTED_PORTRAIT;assert(book_lock_collage_draw(other));rotation=EPD_ROT_PORTRAIT;
  uint8_t small[64]={0};assert(!ttf_text_mask_px(small,700,1,0,0,48,"本"));assert(!ttf_text_mask_px(small,8,181,0,0,48,"本"));
  // 每个阶段强制分配失败；绘制失败不留持久内存，也不会对启动恢复状态进行写入。

@@ -636,7 +636,8 @@ void enter_lock_and_sleep(
     // collage lay out on the 1216×684 canvas; every other style and every portrait entry returns to
     // portrait first.
     enum EpdRotation prior_rotation = epd_get_rotation();
-    bool landscape_lock = (lock_style == 0 || lock_style == 1 || lock_style == 2 || lock_style == 3) && prior_rotation != EPD_ROT_INVERTED_PORTRAIT;
+    bool landscape_lock = (lock_style == 0 || lock_style == 1 || lock_style == 2 || lock_style == 3) &&
+                          (prior_rotation == EPD_ROT_LANDSCAPE || prior_rotation == EPD_ROT_INVERTED_LANDSCAPE);
     if (!landscape_lock) epd_set_rotation(EPD_ROT_INVERTED_PORTRAIT);
     // 透明书封保留当前页面作为底图，不清白、不重排阅读页，也不读取旧阅读快照。
     // Keep the current page beneath the PNG; no white reset, reader reflow or old reader snapshot.

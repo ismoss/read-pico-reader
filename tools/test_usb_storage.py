@@ -86,6 +86,10 @@ int read_pico_sd_sync(void){assert(mounted);mounted=false;return ESP_OK;}
 int read_pico_sd_remount(void){assert(!driver&&!borrowed&&!msc&&!host);mounted=true;++remounts;return ESP_OK;}
 bool ttf_font_is_builtin(void){return true;}
 int ttf_font_open_builtin(void){return ESP_OK;}
+bool ui_avatar_quiesce(unsigned timeout_ms){assert(timeout_ms==2000);return true;}
+bool book_cover_jobs_quiesce(unsigned timeout_ms){assert(timeout_ms==2000);return true;}
+void book_lock_collage_invalidate(void){}
+void book_store_notify_changed(void){}
 int sdmmc_host_init(void){assert(!mounted&&!host);if(failed(1))return ESP_FAIL;host=true;return ESP_OK;}
 int sdmmc_host_init_slot(int slot,const sdmmc_slot_config_t *c){assert(slot==1&&c->width==1);return failed(2);}
 int sdmmc_card_init(const sdmmc_host_t *h,sdmmc_card_t *c){assert(h->max_freq_khz==20000);c->marker=47;return failed(3);}
@@ -95,16 +99,22 @@ int usb_del_phy(usb_phy_handle_t h){free(h);return ESP_OK;}
 int tinyusb_msc_install_driver(const tinyusb_msc_driver_config_t *c){assert(c->user_flags.auto_mount_off&&!mounted);if(failed(4))return ESP_FAIL;msc=true;return ESP_OK;}
 int tinyusb_msc_new_storage_sdmmc(const tinyusb_msc_storage_config_t *c,tinyusb_msc_storage_handle_t *h){
     assert(msc&&c->medium.card&&c->fat_fs.do_not_format);
-    if(failed(5))return ESP_FAIL;borrowed=c->medium.card;*h=malloc(1);assert(*h);return ESP_OK;
+    if(failed(5))return ESP_FAIL;
+    borrowed=c->medium.card;*h=malloc(1);assert(*h);return ESP_OK;
 }
 int tinyusb_driver_install(const tinyusb_config_t *c){(void)c;assert(borrowed&&!mounted&&!s_serial_phy);if(failed(6))return ESP_FAIL;driver=connected=true;return ESP_OK;}
 int tinyusb_msc_delete_storage(tinyusb_msc_storage_handle_t h){
     assert(borrowed&&borrowed->marker==47&&!mounted);++deletes;
-    if(busy>0){--busy;return ESP_ERR_INVALID_STATE;}if(delete_error)return delete_error;
+    if(busy>0){--busy;return ESP_ERR_INVALID_STATE;}
+    if(delete_error)return delete_error;
     free(h);borrowed=NULL;return ESP_OK;
 }
-int tinyusb_driver_uninstall(void){assert(!borrowed&&!connected);if(usb_error)return usb_error;driver=false;return ESP_OK;}
-int tinyusb_msc_uninstall_driver(void){assert(!borrowed&&!driver);if(msc_error)return msc_error;msc=false;return ESP_OK;}
+int tinyusb_driver_uninstall(void){
+    assert(!borrowed&&!connected);if(usb_error)return usb_error;driver=false;return ESP_OK;
+}
+int tinyusb_msc_uninstall_driver(void){
+    assert(!borrowed&&!driver);if(msc_error)return msc_error;msc=false;return ESP_OK;
+}
 bool tud_mounted(void){return connected;}
 void tud_disconnect(void){assert(driver);connected=false;}
 static void stopped(void){assert(mounted&&!usb_storage_active()&&!usb_storage_connected());assert(!s_cleanup_pending&&!s_card&&!s_storage&&!host&&!driver&&!msc&&s_serial_phy);}
@@ -141,5 +151,6 @@ with tempfile.TemporaryDirectory() as d:
         header=p/name;header.parent.mkdir(parents=True,exist_ok=True);header.write_text('#include "usb_stub.h"\n')
     (p/'test.c').write_text(UNIT)
     subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-g','-fsanitize=address,undefined',
-                    '-fno-omit-frame-pointer',f'-I{p}',f'-I{ROOT / "main/apps"}',str(p/'test.c'),'-o',str(p/'test')],check=True)
+                    '-fno-omit-frame-pointer',f'-I{p}',f'-I{ROOT / "main/apps"}',
+                    f'-I{ROOT / "main/book"}',f'-I{ROOT / "main/ui"}',str(p/'test.c'),'-o',str(p/'test')],check=True)
     subprocess.run([str(p/'test')],check=True)

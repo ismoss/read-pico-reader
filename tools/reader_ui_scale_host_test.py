@@ -48,7 +48,7 @@ static unsigned glyphs;
 static EpdRect last_box;
 static int s_reader_slider=-1,s_reader_preview_px=32,s_px=32;
 static unsigned app_settings_system_font_size(void){return scale;}
-static int ui_text_effective_px(int px){return scaling?(px+2)*scale/100:px+2;}
+static int ui_text_effective_px(int px){return scaling?(int)((px+2)*scale/100):(px+2);}
 static bool ttf_font_is_builtin(void){return face==0;}
 static bool ui_font_has_text(const char *text){(void)text;return true;}
 static int chars(const char *s){int n=0;for(;*s;s++)if(((unsigned char)*s&0xc0)!=0x80)++n;return n;}
@@ -116,7 +116,7 @@ static void draw_reading_font_name(uint8_t *fb,EpdRect box,const char *text){
 '''
 unit+=function('draw_sheet',book)+'\n'
 for name in ('reader_ui_extra','reader_font_top','reader_font_card','reader_slider_rect',
-             'draw_pill_slider','draw_font_pair','reading_setting_rect','reading_settings_top',
+             'draw_pill_slider','draw_font_pair','reading_settings_top','reading_setting_rect',
              'reading_toggle_rect','draw_reading_switch','draw_reading_card','draw_reading_toggle'):
     unit+=function(name,book)+'\n'
 for name in ['s_font_card','s_weight_card','s_bookfont_card','s_layout_card','s_rule_card','s_antialias_card']:

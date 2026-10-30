@@ -45,34 +45,70 @@ typedef unsigned nvs_handle_t;
 enum { ESP_OK, ESP_ERR_NVS_NOT_FOUND, ESP_ERR_INVALID_STATE, ESP_ERR_INVALID_ARG, ESP_FAIL };
 enum { NVS_READONLY, NVS_READWRITE };
 static transfer_credentials_t committed, staged;
+static transfer_credentials_t committed_known[8], staged_known[8];
 static bool present, pending_present;
+static bool present_known[8], pending_present_known[8];
 static int fail_open, fail_write, fail_commit, handles;
+static int known_index(const char *key) {
+    return strlen(key) == 6 && !strncmp(key, "known", 5) && key[5] >= '0' && key[5] <= '7'
+        ? key[5] - '0' : -1;
+}
 static esp_err_t nvs_open(const char *name, int mode, nvs_handle_t *handle) {
     assert(!strcmp(name, "rp_wifi")); (void)mode;
     if (fail_open) return ESP_FAIL;
-    ++handles; *handle = 1; staged = committed; pending_present = present; return ESP_OK;
+    ++handles; *handle = 1; staged = committed; pending_present = present;
+    memcpy(staged_known, committed_known, sizeof(staged_known));
+    memcpy(pending_present_known, present_known, sizeof(pending_present_known));
+    return ESP_OK;
 }
 static esp_err_t nvs_get_blob(nvs_handle_t handle, const char *key, void *out, size_t *size) {
-    assert(handle == 1 && !strcmp(key, "credentials"));
-    if (!present) return ESP_ERR_NVS_NOT_FOUND;
-    assert(*size >= sizeof(committed)); *size = sizeof(committed); memcpy(out, &committed, *size); return ESP_OK;
+    assert(handle == 1);
+    if (!strcmp(key, "credentials")) {
+        if (!present) return ESP_ERR_NVS_NOT_FOUND;
+        assert(*size >= sizeof(committed)); *size = sizeof(committed); memcpy(out, &committed, *size); return ESP_OK;
+    }
+    int index = known_index(key);
+    assert(index >= 0);
+    if (!present_known[index]) return ESP_ERR_NVS_NOT_FOUND;
+    assert(*size >= sizeof(committed_known[index]));
+    *size = sizeof(committed_known[index]);
+    memcpy(out, &committed_known[index], *size);
+    return ESP_OK;
 }
 static esp_err_t nvs_set_blob(nvs_handle_t handle, const char *key, const void *in, size_t size) {
-    assert(handle == 1 && !strcmp(key, "credentials") && size == sizeof(staged));
+    assert(handle == 1 && size == sizeof(staged));
     if (fail_write) return ESP_FAIL;
-    memcpy(&staged, in, size); pending_present = true; return ESP_OK;
+    if (!strcmp(key, "credentials")) {
+        memcpy(&staged, in, size); pending_present = true; return ESP_OK;
+    }
+    int index = known_index(key);
+    assert(index >= 0);
+    memcpy(&staged_known[index], in, size); pending_present_known[index] = true;
+    return ESP_OK;
 }
 static esp_err_t nvs_erase_key(nvs_handle_t handle, const char *key) {
-    assert(handle == 1 && !strcmp(key, "credentials"));
+    assert(handle == 1);
     if (fail_write) return ESP_FAIL;
-    pending_present = false; return present ? ESP_OK : ESP_ERR_NVS_NOT_FOUND;
+    if (!strcmp(key, "credentials")) {
+        pending_present = false; return present ? ESP_OK : ESP_ERR_NVS_NOT_FOUND;
+    }
+    int index = known_index(key);
+    assert(index >= 0);
+    pending_present_known[index] = false;
+    return present_known[index] ? ESP_OK : ESP_ERR_NVS_NOT_FOUND;
 }
 static esp_err_t nvs_commit(nvs_handle_t handle) {
     assert(handle == 1);
     if (fail_commit) return ESP_FAIL;
-    committed = staged; present = pending_present; return ESP_OK;
+    committed = staged; present = pending_present;
+    memcpy(committed_known, staged_known, sizeof(committed_known));
+    memcpy(present_known, pending_present_known, sizeof(present_known));
+    return ESP_OK;
 }
-static void nvs_close(nvs_handle_t handle) { assert(handle == 1); --handles; clear_secret(&staged, sizeof(staged)); }
+static void nvs_close(nvs_handle_t handle) {
+    assert(handle == 1); --handles;
+    clear_secret(&staged, sizeof(staged)); clear_secret(staged_known, sizeof(staged_known));
+}
 #include "../components/read_pico_transfer/transfer_credentials_store.h"
 
 static bool parse(const char *json, transfer_credentials_t *c) { return parse_credentials(json, strlen(json), c); }

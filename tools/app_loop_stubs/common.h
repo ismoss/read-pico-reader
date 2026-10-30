@@ -20,11 +20,12 @@ typedef struct { int unused; } EpdiyHighlevelState;
 typedef struct { int x,y,width,height; } EpdRect;
 enum EpdDrawError { EPD_DRAW_SUCCESS };
 enum EpdFontFlags { EPD_DRAW_ALIGN_LEFT, EPD_DRAW_ALIGN_CENTER, EPD_DRAW_ALIGN_RIGHT };
-#define MODE_DU 1
-#define MODE_GL16 2
-#define MODE_GC16 3
-extern int E0470_WAVEFORM;
-extern int E0470_FOLLOW_WAVEFORM;
+enum EpdDrawMode { MODE_DU=1, MODE_GL16=2, MODE_GC16=3 };
+typedef struct { int unused; } EpdWaveform;
+typedef struct EpdWaveformPhases EpdWaveformPhases;
+enum EpdRotation { EPD_ROT_LANDSCAPE, EPD_ROT_PORTRAIT, EPD_ROT_INVERTED_LANDSCAPE, EPD_ROT_INVERTED_PORTRAIT };
+extern const EpdWaveform E0470_WAVEFORM;
+extern const EpdWaveform E0470_FOLLOW_WAVEFORM;
 bool continuous_du_init(void);
 int64_t esp_timer_get_time(void);
 void vTaskDelay(int);
@@ -68,7 +69,13 @@ int ttf_font_open(const char*);
 int ttf_font_open_builtin(void);
 typedef struct { bool present, mounted; } read_pico_sd_info_t;
 int read_pico_sd_get_info(read_pico_sd_info_t*);
-void read_pico_sd_start_probe(void);
+esp_err_t read_pico_sd_start_probe(void);
 
 int epd_rotated_display_width(void);
+int epd_rotated_display_height(void);
+int epd_width(void);
+int epd_height(void);
+enum EpdRotation epd_get_rotation(void);
+void epd_set_rotation(enum EpdRotation rotation);
+enum EpdDrawError update_display_main_turn(EpdiyHighlevelState*, EpdRect, int);
 void epd_fill_triangle(int,int,int,int,int,int,uint8_t,uint8_t*);

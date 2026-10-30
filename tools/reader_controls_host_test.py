@@ -46,7 +46,8 @@ static int reader_w(void){return UI_LOCK_WIDTH;}
 static int reader_h(void){return UI_LOCK_HEIGHT;}
 '''
 unit+='static unsigned font_scale=100;\nstatic unsigned app_settings_system_font_size(void){return font_scale;}\n'
-unit+=function('reader_ui_extra',book)+'\n'+function('reader_font_card',book)+'\n'
+unit+='static bool reader_panel_landscape(void){return false;}\n'
+unit+=function('reader_ui_extra',book)+'\n'+function('reader_font_top',book)+'\n'+function('reader_font_card',book)+'\n'
 for name in ['s_font_card','s_weight_card','s_bookfont_card','s_layout_card','s_rule_card','s_antialias_card']:
  unit+=re.search(r'^#define '+name+r' .*',s,re.M)[0]+'\n'
 unit+=function('reader_tools_swipe',book)+'\n'+function('reader_swipe_direction',book)+'\n'

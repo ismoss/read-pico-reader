@@ -19,6 +19,8 @@ typedef int esp_err_t;
 #define ESP_ERR_INVALID_ARG 0x102
 #define ESP_ERR_NO_MEM 0x101
 #define ESP_ERR_NOT_FINISHED 0x107
+#define ESP_ERR_NOT_FOUND 0x105
+#define ESP_ERR_INVALID_STATE 0x103
 typedef struct { int x,y,width,height; } EpdRect;
 typedef enum { APP_REDRAW_NONE, APP_REDRAW_AREA, APP_REDRAW_PAGE, APP_REDRAW_FULL, APP_REDRAW_DONE } app_redraw_t;
 struct app_desc;
@@ -26,7 +28,22 @@ typedef struct { bool touched; uint8_t count; uint16_t x,y; } cst836u_touch_t;
 typedef struct { uint8_t* fb; void* hl; bool consumed,released; int64_t now_ms; const cst836u_touch_t* touch; const struct app_desc* request_app; bool request_return; } app_ctx_t;
 typedef enum { UI_GESTURE_PRESS, UI_GESTURE_TAP, UI_GESTURE_CANCEL, UI_GESTURE_LONG_PRESS } ui_gesture_type_t;
 typedef struct { ui_gesture_type_t type; uint16_t x,y,x0,y0; } ui_gesture_event_t;
-typedef struct app_desc { const char *title,*detail; bool enter_full,owns_keys; bool(*menu_handle_enabled)(app_ctx_t*); void(*on_enter)(app_ctx_t*); void(*on_exit)(app_ctx_t*); void(*on_media_lost)(app_ctx_t*); void(*render)(app_ctx_t*,uint8_t*); bool(*present)(app_ctx_t*,app_redraw_t); app_redraw_t(*on_tick)(app_ctx_t*); app_redraw_t(*on_gesture)(app_ctx_t*,const ui_gesture_event_t*); app_redraw_t(*on_key)(app_ctx_t*,int); } app_desc_t;
+typedef struct app_desc {
+    const char *title,*detail;
+    bool holds_pmu,enter_full,binary_ui,persistent_navigation,owns_keys;
+    bool(*navigation_enabled)(app_ctx_t*);
+    bool(*menu_handle_enabled)(app_ctx_t*);
+    bool(*edge_back_enabled)(app_ctx_t*);
+    bool(*back_swipe_area)(app_ctx_t*,const ui_gesture_event_t*);
+    void(*on_enter)(app_ctx_t*);
+    void(*on_exit)(app_ctx_t*);
+    void(*on_media_lost)(app_ctx_t*);
+    void(*render)(app_ctx_t*,uint8_t*);
+    bool(*present)(app_ctx_t*,app_redraw_t);
+    app_redraw_t(*on_tick)(app_ctx_t*);
+    app_redraw_t(*on_gesture)(app_ctx_t*,const ui_gesture_event_t*);
+    app_redraw_t(*on_key)(app_ctx_t*,int);
+} app_desc_t;
 enum EpdDrawMode { MODE_DU,MODE_GL16,MODE_GC16 };
 #define UI_MARGIN 40
 #define UI_CONTENT_TOP 176
@@ -70,6 +87,7 @@ static inline void ui_draw_icon(uint8_t* f,...) {(void)f;}
 static inline void ui_draw_pressed_round_rect(uint8_t* f,...) {(void)f;}
 static inline void ui_draw_round_rect(uint8_t* f,...) {(void)f;}
 static inline void ui_fill_round_rect(uint8_t* f,...) {(void)f;}
+static inline void ui_fill_rect_fast(EpdRect r,uint8_t gray,uint8_t* f) {(void)r;(void)gray;(void)f;}
 static inline void ui_draw_menu_handle(uint8_t* f,...) {(void)f;}
 static inline void ui_hairline(uint8_t* f,...) {(void)f;}
 static inline void ui_text(uint8_t* f,...) {(void)f;}
@@ -103,8 +121,8 @@ static inline int app_count(void) {return 0;}
 static inline const app_desc_t* app_at(int i) {(void)i;return NULL;}
 typedef enum {READ_PICO_TRANSFER_MODE_AP,READ_PICO_TRANSFER_MODE_STA} read_pico_transfer_mode_t;
 typedef enum {READ_PICO_TRANSFER_STOPPED,READ_PICO_TRANSFER_STARTING,READ_PICO_TRANSFER_READY,READ_PICO_TRANSFER_UPLOADING,READ_PICO_TRANSFER_ERROR} read_pico_transfer_state_t;
-typedef struct {read_pico_transfer_mode_t mode;bool network_only;const char* root_dir;bool is_flash;size_t file_limit;uint64_t(*free_bytes_cb)(void*);void* free_bytes_ctx;bool(*title_get_cb)(const char*,char*,size_t);int(*title_set_cb)(const char*,const char*);int(*file_changed_cb)(const char*);void(*file_deleted_cb)(const char*);void(*file_moved_cb)(const char*,const char*,uint32_t);void(*directory_deleted_cb)(const char*);void(*directory_moved_cb)(const char*,const char*);bool(*wallpaper_set_cb)(const char*);bool(*signature_get_cb)(char*,size_t);int(*signature_set_cb)(const char*);} read_pico_transfer_cfg_t;
-typedef struct {read_pico_transfer_mode_t mode;read_pico_transfer_state_t state;bool wifi_configured,network_ready;char ssid[33],wifi_ssid[33],url[64],cur_name[241];unsigned sta_count,done_count,changed_count;size_t cur_bytes,cur_total;int last_error;} read_pico_transfer_status_t;
+typedef struct {read_pico_transfer_mode_t mode;bool network_only,prefer_known;const char* root_dir;bool is_flash;size_t file_limit;uint64_t(*free_bytes_cb)(void*);void* free_bytes_ctx;bool(*title_get_cb)(const char*,char*,size_t);int(*title_set_cb)(const char*,const char*);int(*file_changed_cb)(const char*);void(*file_deleted_cb)(const char*);void(*file_moved_cb)(const char*,const char*,uint32_t);void(*directory_deleted_cb)(const char*);void(*directory_moved_cb)(const char*,const char*);bool(*wallpaper_set_cb)(const char*);bool(*wallpaper_land_set_cb)(const char*);bool(*signature_get_cb)(char*,size_t);int(*signature_set_cb)(const char*);} read_pico_transfer_cfg_t;
+typedef struct {read_pico_transfer_mode_t mode;read_pico_transfer_state_t state;bool wifi_configured,network_ready;char ssid[33],wifi_ssid[33],connected_ssid[33],url[64],cur_name[241];unsigned sta_count,done_count,changed_count;size_t cur_bytes,cur_total;int last_error;} read_pico_transfer_status_t;
 #define READ_PICO_TRANSFER_PASSWORD "readpico"
 static read_pico_transfer_status_t test_status;
 static bool test_busy;
@@ -116,14 +134,16 @@ static size_t test_scan_count = 8;
 static char test_saved_ssid[33];
 static inline bool read_pico_transfer_try_stop_if_idle(void) {return !test_busy;}
 static int test_stop_count;
+static int test_start_count;
 static bool test_wifi_running;
 static inline void read_pico_transfer_stop(void) { ++test_stop_count; test_wifi_running=false; }
 static inline void read_pico_transfer_get_status(read_pico_transfer_status_t* s) {*s=test_status;}
 static inline int read_pico_transfer_get_saved_wifi(char* s,bool* c) {strcpy(s,test_configured?"saved":"");*c=test_configured;return 0;}
-static inline int read_pico_transfer_start(const read_pico_transfer_cfg_t* c) {if (test_wifi_running) return ESP_FAIL;if (!c->network_only && (!c->file_changed_cb || !c->wallpaper_set_cb || c->file_changed_cb("/flash/books/test.txt"))) return ESP_FAIL;return 0;}
+static inline int read_pico_transfer_start(const read_pico_transfer_cfg_t* c) {++test_start_count;if (test_wifi_running) return ESP_FAIL;if (!c->network_only && (!c->file_changed_cb || !c->wallpaper_set_cb || c->file_changed_cb("/flash/books/test.txt"))) return ESP_FAIL;return 0;}
 static inline void read_pico_transfer_service_poll(void) {}
 static inline int read_pico_transfer_save_wifi(const char* s,const char* p) {(void)p;test_save_count++;snprintf(test_saved_ssid,33,"%s",s);return test_save_error;}
 static inline int read_pico_transfer_scan_wifi(read_pico_transfer_network_t* out,size_t* count) {*count=test_scan_error?0:test_scan_count;for(size_t i=0;i<*count;i++){out[i]=(read_pico_transfer_network_t){.supported=true,.requires_password=true};snprintf(out[i].ssid,33,"network%u",(unsigned)i);}if(*count)snprintf(out[0].ssid,33,"中文家庭网络");return test_scan_error;}
+static inline bool read_pico_transfer_known_wifi_password(const char* s,char* p,size_t c) {(void)s;if(c)p[0]=0;return false;}
 static int test_qr_encodes;
 static bool test_qr_failure;
 static char test_qr_payload[128];
@@ -133,7 +153,7 @@ static inline bool ui_wifi_qr_prepare(const char* s,const char* p) {(void)p;++te
 static inline bool ui_wifi_qr_prepare_url(const char* s) {++test_qr_encodes;snprintf(test_qr_payload,sizeof(test_qr_payload),"%s",s);return !test_qr_failure;}
 static inline void ui_wifi_qr_draw(uint8_t* fb,EpdRect r) {(void)fb;(void)r;}
 
-static inline int read_pico_transfer_forget_wifi(void) { ++test_forget_count; if (test_wifi_running) return ESP_FAIL; if (!test_forget_error) test_configured=false; return test_forget_error; }
+static inline int read_pico_transfer_forget_wifi(void) { ++test_forget_count; if (test_wifi_running) return ESP_FAIL; if (!test_forget_error) {test_configured=false;test_status=(read_pico_transfer_status_t){0};} return test_forget_error; }
 
 static inline int book_progress_forget(const char* path) {(void)path;return ESP_OK;}
 typedef struct {uint32_t file_size;} book_progress_t;

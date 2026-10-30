@@ -5,7 +5,8 @@
  * 传书页负责两种接入模式生命周期、书源注入与状态展示；HTTP和文件接收属于独立组件。
  * Transfer page owns both network modes, storage injection and status; the component receives files.
  *
- * 冻结：按用户双模式要求提供热点与已有WiFi；离开传书时停服，配网后已连接的 STA 保持在线；深睡/断电会中断传输。
+ * 冻结：按用户双模式要求提供热点与已有WiFi；离开传书时总是停掉传输会话（HTTP/热点）；
+ * 有已保存凭据且用户未主动断开时，以 network_only 接回 STA；主动断开跨离页保持；深睡/断电会中断传输。
  * render只画快照；内置存储单文件上限由book_store提供，不格式化TF卡。
  * 上传并发扫描曾欠载，页内增加预填余量；离页停服后恢复，不改波形或像素时钟。
  * 用户要求设备端配网：停服后扫描选网，ASCII密码只在连接保存时写入，离开输入页即清空。
@@ -14,9 +15,10 @@
  * 用户验收要求停止后恢复进入传书前的页面或菜单位置；遗忘网络必须确认。
  * 用户要求联网后提供网址二维码；热点用单码切换连接/网页，网络变更清除旧码。
  * 卡失效时停止并汇合接收任务，清除旧容量与二维码；当前请求不得切换存储源。
- * 配网列表与确认页底栏可切换主页面；密码页底部保留输入操作键，已连接的 STA 在离页后保活。
+ * 配网列表与确认页底栏可切换主页面；密码页底部保留输入操作键。主动断开在离页后继续生效。
  * 正在上传时禁止主动切页；USB 退出必须先断开电脑再启动本机重新挂载。
- * Frozen: AP/STA transfer stops on exit while a provisioned connected STA stays online; deep sleep or power loss interrupts transfer.
+ * Frozen: AP/STA transfer always stops on exit; a saved STA is restored in network_only mode only
+ * when the user has not deliberately disconnected. That hold survives page exit. Deep sleep or power loss interrupts transfer.
  * Render only paints snapshots; book_store defines the flash file limit. Never format the TF card.
  * Concurrent uploads underrun scan queues; increase prefill until service exit without changing waveforms or pixel clocks.
  * User-requested device provisioning scans while stopped; save ASCII passwords only on connect and clear input on leaving the editor.
@@ -27,7 +29,8 @@
  * Acceptance requires returning to the page or menu position used to enter transfer; forgetting WiFi requires confirmation.
  * User-requested URL QR follows network readiness; AP switches one code between joining and browsing, discarding stale codes on changes.
  * Lost media stops and joins reception and clears capacity/QR; never switch storage beneath an active request.
- * Provisioning lists and confirmation keep the main tabs active; the password editor keeps its input actions, and connected STA persists after exit.
+ * Provisioning lists and confirmation keep the main tabs active; the password editor keeps its
+ * input actions. A deliberate disconnect remains in force after page exit.
  * Navigation waits for an active upload; USB exit disconnects the host before local remount.
  */
 #include <stdio.h>
@@ -198,6 +201,12 @@ static transfer_view_t s_view;
 bool app_transfer_wifi_auto_connect_blocked(void) {
     if (s_user_disconnect_hold) return true;
     return s_wifi_settings_only && s_view == TRANSFER_PASSWORD;
+}
+
+// 二改：快捷菜单“关闭 WiFi”与网络页“断开”共用同一道用户意图闸门。
+// Mod: the quick-menu "WiFi off" action shares the network page's deliberate-disconnect gate.
+void app_transfer_wifi_hold_disconnected(void) {
+    s_user_disconnect_hold = true;
 }
 
 // 二改：亮屏/解锁视为"重新开始"——用户此前手动"断开"过的那一次不再继续压制自动连接。
@@ -521,7 +530,11 @@ static bool enter_networks(void) {
     // With a saved network, continue with a connection once the list is up instead of waiting for
     // the fallback. The auto-connect switch still wins: when it is off, opening the page must not
     // connect on its own.
-    s_auto_connect_after_scan = s_saved_configured && app_settings_wifi_auto_connect();
+    // 主动断开的 hold 跨离页保留；重新进入页面只看列表，不能仅因扫描完成就偷偷连回。
+    // The deliberate-disconnect hold survives page exit; re-entering only shows the list and
+    // must not reconnect just because the scan finished.
+    s_auto_connect_after_scan = s_saved_configured && app_settings_wifi_auto_connect() &&
+                                !s_user_disconnect_hold;
     clear_password();
     return true;
 }
@@ -1160,15 +1173,11 @@ static void transfer_on_exit(app_ctx_t* ctx) {
     s_scan_pending = s_network_connect_pending = false;
     read_pico_transfer_status_t latest = {0};
     read_pico_transfer_get_status(&latest);
-    // 传完/离开这一页不再把已连上的 WiFi 拆掉：STA 连着的网是用户本来就有的，只有热点(AP)才该停。
-    // 之前只有从"WiFi 设置"进来的流程保活，正常传书流一离开就把整栈停掉，用户会莫名掉网。
-    // Leaving the page no longer tears down a connected station: that network is the user's own, and
-    // only the hotspot (AP) belongs to the transfer session. Previously only the settings-only entry
-    // kept it, so a normal transfer session dropped the whole stack on exit.
     // 用户定义：离开这一页 = 不再传书，但**不代表不想联网**。所以总是停掉传输会话（HTTP 服务、
-    // 热点），如果刚才连着的是 STA 网，再用 network_only 把这条网重新接回来。
-    // User rule: leaving this page stops transferring, not the network. The session (HTTP server,
-    // hotspot) always stops; a station that was connected is brought back in network_only mode.
+    // 热点）；只有用户没有主动断开时，才用已保存凭据以 network_only 接回 STA。
+    // User rule: leaving this page stops transferring, not the network. The transfer session
+    // (HTTP server, hotspot) always stops; saved credentials restore STA in network_only mode only
+    // when the user has not deliberately disconnected.
     bool keep_sta = latest.network_ready && latest.mode == READ_PICO_TRANSFER_MODE_STA;
     stop_session();
     // 用户规则：离开这一页就该回到"原来连着的那个网"，和自己有没有开自动连接无关。
@@ -1176,7 +1185,10 @@ static void transfer_on_exit(app_ctx_t* ctx) {
     // 只要有已保存的凭据就把网络接回来：刚才那个网还在就接它，不在场就挑当前能连的第一个。
     // Restore the network whenever credentials exist: the same network when it is still there,
     // otherwise the first known one actually in range.
-    if (!s_media_lost) {
+    // 用户主动断开也要跨过离页恢复：否则刚点“断开”再退出，既有的凭据会把它立刻接回来。
+    // A deliberate disconnect must also survive page exit; otherwise the saved credentials
+    // reconnect it immediately after leaving the transfer page.
+    if (!s_media_lost && !s_user_disconnect_hold) {
         char ssid[33]; bool configured = false;
         if (read_pico_transfer_get_saved_wifi(ssid, &configured) == ESP_OK && configured) {
             read_pico_transfer_cfg_t cfg = {.mode = READ_PICO_TRANSFER_MODE_STA, .network_only = true,

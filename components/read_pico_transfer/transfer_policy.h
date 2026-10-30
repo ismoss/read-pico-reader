@@ -79,7 +79,11 @@ static bool credentials_valid(const transfer_credentials_t *c) {
 
 static bool credentials_from_text(const char *ssid, const char *password, transfer_credentials_t *out) {
     memset(out, 0, sizeof(*out));
-    if (!ssid || !password || strnlen(ssid, 33) > 32 || strnlen(password, 65) > 64) return false;
+    if (!ssid || !password) return false;
+    size_t ssid_len = 0, password_len = 0;
+    while (ssid_len <= 32 && ssid[ssid_len]) ++ssid_len;
+    while (password_len <= 64 && password[password_len]) ++password_len;
+    if (ssid_len > 32 || password_len > 64) return false;
     out->version = 1; strcpy(out->ssid, ssid); strcpy(out->password, password);
     if (credentials_valid(out)) return true;
     clear_secret(out, sizeof(*out)); return false;

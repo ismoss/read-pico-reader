@@ -18,6 +18,11 @@ void app_transfer_request_wifi_setup(void);
 // is sitting on the provisioning / password page, so the background must leave the radio alone.
 bool app_transfer_wifi_auto_connect_blocked(void);
 
+// 二改：用户从快捷菜单关闭 WiFi 后，主循环兜底不得立刻把它接回来。
+// Mod: after the user turns WiFi off from the quick menu, the loop-side fallback must not
+// reconnect it immediately.
+void app_transfer_wifi_hold_disconnected(void);
+
 // 二改：亮屏/解锁时解除"手动断开"的压制（一次断开只管到下次亮屏）。
 // Mod: clear the manual-disconnect hold on a wake/unlock (one disconnect lasts until then).
 void app_transfer_wifi_release_hold(void);

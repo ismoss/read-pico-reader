@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Mock driver regression for the real SD lifecycle / 实际 SD 生命周期的模拟驱动回归。"""
 from pathlib import Path
+import os
 import subprocess
 
 root = Path(__file__).resolve().parents[1]
@@ -13,7 +14,7 @@ for name in ('driver/sdmmc_host.h', 'esp_log.h', 'esp_vfs_fat.h',
     p = out / name
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text('#pragma once\n', encoding='utf-8')
-for name in ('ff.h','diskio_sdmmc.h'):
+for name in ('ff.h','diskio_sdmmc.h','esp_timer.h'):
     (out/name).write_text((root/'tools/sd_probe_stubs'/name).read_text())
 source = r'''
 #include <assert.h>
@@ -66,8 +67,13 @@ typedef int BaseType_t;
 static bool present=true, drop_during_mount=false, unmount_fail=false, detect_fail=false;
 static int mounts, unmounts, formats;
 static bool made_books, made_fonts, made_pictures;
+static int64_t mock_now_us;
 static sdmmc_card_t mock_card={.cid={"MOCK"},.csd={2048,512}};
 static void (*pending)(void*);
+int64_t esp_timer_get_time(void){return mock_now_us;}
+static size_t mock_strlcpy(char *dst,const char *src,size_t cap){size_t len=strlen(src);if(cap){size_t n=len<cap-1?len:cap-1;memcpy(dst,src,n);dst[n]=0;}return len;}
+#define strlcpy mock_strlcpy
+static esp_err_t sdmmc_get_status(sdmmc_card_t *card){(void)card;return ESP_OK;}
 esp_err_t read_pico_sd_detect(bool* detected);
 static void vTaskDelay(int n) {(void)n;}
 static void vTaskDelete(void* p) {(void)p;}
@@ -89,6 +95,14 @@ static int mock_mkdir(const char* p,int mode){
 }
 #define mkdir mock_mkdir
 #include "../../components/read_pico/read_pico_sd.c"
+static esp_err_t debounce_info(read_pico_sd_info_t *info){
+    esp_err_t err=ESP_FAIL;
+    for(int i=0;i<3;i++){
+        err=read_pico_sd_get_info(info);
+        if(i<2)mock_now_us+=200000;
+    }
+    return err;
+}
 // 此测试验证拔卡生命周期；空间计数由 sd_probe_host_test 独立覆盖。
 // This fixture checks media lifecycle; allocation counting is covered by sd_probe_host_test.
 BYTE ff_diskio_get_pdrv_card(const sdmmc_card_t *c){(void)c;return 0xff;}
@@ -112,7 +126,8 @@ static void* snapshot_reader(void* arg) {
     for(int i=0;i<20000;i++) {
         read_pico_sd_info_t info;
         int err=read_pico_sd_get_info(&info);
-        if(err==ESP_OK) assert(info.mounted && info.capacity_bytes==1048576 && info.free_bytes==524288);
+        if(err==ESP_OK) assert(info.mounted && info.capacity_bytes==1048576 &&
+            (!info.space_valid ? info.space_error==ESP_ERR_NOT_FINISHED && info.free_bytes==0 : info.free_bytes==524288));
     }
     return NULL;
 }
@@ -140,11 +155,11 @@ int main(void) {
     assert(read_pico_sd_start_probe()==ESP_OK && mounts==1 && unmounts==0);
     detect_fail=false;
     present=false;
-    assert(read_pico_sd_get_info(&info)==ESP_ERR_NOT_FOUND);
+    assert(debounce_info(&info)==ESP_ERR_NOT_FOUND);
     assert(!info.mounted && !info.needs_format && !info.capacity_bytes && !info.free_bytes && !info.name[0]);
     assert(unmounts==0 && card==&mock_card);
     present=true;
-    assert(read_pico_sd_get_info(&info)==ESP_ERR_INVALID_STATE && info.present && !info.mounted);
+    assert(debounce_info(&info)==ESP_ERR_INVALID_STATE && info.present && !info.mounted);
     assert(read_pico_sd_start_probe()==ESP_ERR_INVALID_STATE && mounts==1);
     assert(read_pico_sd_format()==ESP_ERR_INVALID_STATE && formats==0);
     assert(read_pico_sd_remount()==ESP_ERR_NOT_FINISHED && unmounts==1);
@@ -152,27 +167,27 @@ int main(void) {
     assert(read_pico_sd_get_info(&info)==ESP_OK && info.mounted && mounts==2);
     assert(read_pico_sd_remount()==ESP_ERR_NOT_FINISHED);
     present=false;
-    assert(read_pico_sd_get_info(&info)==ESP_ERR_NOT_FOUND);
+    assert(debounce_info(&info)==ESP_ERR_NOT_FOUND);
     present=true;
     finish_probe();
-    assert(read_pico_sd_get_info(&info)==ESP_ERR_INVALID_STATE && !info.mounted && !info.needs_format);
+    assert(debounce_info(&info)==ESP_ERR_INVALID_STATE && !info.mounted && !info.needs_format);
     // 真拔卡之后的检测读错不能让探测结果绕过失效锁存。
     // A detection fault after real removal must not let a probe bypass the removal latch.
     assert(read_pico_sd_remount()==ESP_ERR_NOT_FINISHED);
     present=false;
-    assert(read_pico_sd_get_info(&info)==ESP_ERR_NOT_FOUND);
+    assert(debounce_info(&info)==ESP_ERR_NOT_FOUND);
     present=true;
     detect_fail=true;
     finish_probe();
-    assert(read_pico_sd_get_info(&info)==ESP_ERR_INVALID_STATE && !info.mounted && !info.capacity_bytes);
-    assert(read_pico_sd_format()==ESP_ERR_INVALID_STATE && formats==0);
+    assert(read_pico_sd_get_info(&info)==ESP_ERR_NOT_FOUND && !info.mounted && !info.capacity_bytes);
+    assert(read_pico_sd_format()==ESP_ERR_NOT_FOUND && formats==0);
     detect_fail=false;
     drop_during_mount=true;
     assert(read_pico_sd_remount()==ESP_ERR_NOT_FINISHED);
     finish_probe();
-    assert(read_pico_sd_get_info(&info)==ESP_ERR_NOT_FOUND && !info.mounted);
+    assert(debounce_info(&info)==ESP_ERR_NOT_FOUND && !info.mounted);
     present=true;
-    assert(read_pico_sd_get_info(&info)==ESP_ERR_INVALID_STATE);
+    assert(debounce_info(&info)==ESP_ERR_INVALID_STATE);
     drop_during_mount=false;
     assert(read_pico_sd_remount()==ESP_ERR_NOT_FINISHED);
     finish_probe();
@@ -206,8 +221,9 @@ int main(void) {
 board = (root / 'components/read_pico/read_pico_board.c').read_text(encoding='utf-8')
 detect = board[board.index('esp_err_t read_pico_sd_detect('):board.index('void read_pico_clear_ioe_int(')]
 (out / 'test.c').write_text(source.replace('@BOARD_DETECT@', detect), encoding='utf-8')
+sanitize = [] if os.name == 'nt' else ['-fsanitize=address,undefined']
 subprocess.run(['cc', '-std=gnu11', '-Wall', '-Wextra', '-Werror',
-                '-Wno-unused-variable', '-fsanitize=address,undefined', '-g', '-pthread',
+                '-Wno-unused-variable', *sanitize, '-g', '-pthread',
                 '-I'+str(out), '-I'+str(root/'components/read_pico/include'),
                 str(out/'test.c'), '-o', str(out/'test')], check=True)
 subprocess.run([str(out/'test')], check=True)

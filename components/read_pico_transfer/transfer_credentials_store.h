@@ -9,7 +9,7 @@
 #endif
 #include "transfer_policy.h"
 
-static esp_err_t load_credentials(transfer_credentials_t *out) {
+static inline esp_err_t load_credentials(transfer_credentials_t *out) {
     memset(out, 0, sizeof(*out));
     nvs_handle_t handle;
     esp_err_t err = nvs_open("rp_wifi", NVS_READONLY, &handle);
@@ -26,7 +26,7 @@ static esp_err_t load_credentials(transfer_credentials_t *out) {
     return ESP_OK;
 }
 
-static esp_err_t store_credentials(const transfer_credentials_t *next) {
+static inline esp_err_t store_credentials(const transfer_credentials_t *next) {
     if (next && !credentials_valid(next)) return ESP_ERR_INVALID_ARG;
     nvs_handle_t handle;
     esp_err_t err = nvs_open("rp_wifi", NVS_READWRITE, &handle);
@@ -45,7 +45,7 @@ static esp_err_t store_credentials(const transfer_credentials_t *next) {
 // feeds best-network picking and password-free reconnection.
 #define TRANSFER_KNOWN_WIFI_MAX 8
 
-static void known_forget(nvs_handle_t handle, const char *ssid) {
+static inline void known_forget(nvs_handle_t handle, const char *ssid) {
     transfer_credentials_t net = {0};
     for (int i = 0; i < TRANSFER_KNOWN_WIFI_MAX; ++i) {
         char key[9];
@@ -57,7 +57,7 @@ static void known_forget(nvs_handle_t handle, const char *ssid) {
     clear_secret(&net, sizeof(net));
 }
 
-static void known_upsert(const transfer_credentials_t *net) {
+static inline void known_upsert(const transfer_credentials_t *net) {
     if (!net || !credentials_valid(net)) return;
     nvs_handle_t handle;
     if (nvs_open("rp_wifi", NVS_READWRITE, &handle) != ESP_OK) return;
@@ -88,7 +88,7 @@ static void known_upsert(const transfer_credentials_t *net) {
 // Mod: load the whole known library in one pass. Comparing each scan record with known_find()
 // would open NVS per AP and read up to eight blobs — hundreds of NVS accesses for twenty APs,
 // wasting hundreds of milliseconds. Read once, then compare in memory.
-static int known_load_all(transfer_credentials_t nets[TRANSFER_KNOWN_WIFI_MAX]) {
+static inline int known_load_all(transfer_credentials_t nets[TRANSFER_KNOWN_WIFI_MAX]) {
     if (!nets) return 0;
     int found = 0;
     nvs_handle_t handle;
@@ -106,7 +106,7 @@ static int known_load_all(transfer_credentials_t nets[TRANSFER_KNOWN_WIFI_MAX]) 
     return found;
 }
 
-static bool known_find(const char *ssid, transfer_credentials_t *out) {
+static inline bool known_find(const char *ssid, transfer_credentials_t *out) {
     if (!ssid || !out) return false;
     memset(out, 0, sizeof(*out));
     nvs_handle_t handle;

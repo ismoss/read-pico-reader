@@ -830,7 +830,8 @@ void book_cover_fast_cache_write_checked(const char *p,const char *t,const char 
 // 与壁纸解码共用行窗口，不保留整张源RGBA图。/ Reuse wallpaper row windows without retaining full-source RGBA.
 bool book_png_file_layer(const char *path, unsigned width, unsigned height, uint8_t *gray, uint8_t *alpha) {
     struct stat st;
-    if (!path || !gray || !alpha || !width || !height || width > 684 || height > 1216 ||
+    if (!path || !gray || !alpha || !width || !height ||
+        !((width <= 684 && height <= 1216) || (width <= 1216 && height <= 684)) ||
         stat(path, &st) || st.st_size <= 0 || (uint64_t)st.st_size > BOOK_IMAGE_FILE_MAX) return false;
     FILE *file = fopen(path, "rb");
     if (!file) return false;
@@ -842,7 +843,8 @@ bool book_png_file_layer(const char *path, unsigned width, unsigned height, uint
 bool book_png_file_layer_rows(const char *path, unsigned width, unsigned height,
         bool (*sink)(void *, unsigned, unsigned, const uint8_t *, const uint8_t *), void *context) {
     struct stat st;
-    if (!path || !sink || !width || !height || width > 684 || height > 1216 ||
+    if (!path || !sink || !width || !height ||
+        !((width <= 684 && height <= 1216) || (width <= 1216 && height <= 684)) ||
         stat(path, &st) || st.st_size <= 0 || (uint64_t)st.st_size > BOOK_IMAGE_FILE_MAX) return false;
     FILE *file = fopen(path, "rb");
     if (!file) return false;

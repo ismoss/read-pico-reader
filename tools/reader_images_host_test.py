@@ -124,6 +124,7 @@ static void *heap_caps_calloc(size_t n,size_t size,int c){(void)c;return fail_al
 static void invalidate_prep(void){++invalidations;}
 static void copy_text(char *out,size_t size,const char *in){snprintf(out,size,"%s",in);}
 static void fit_text(char *out,int px,int max){(void)px;if(max<40)out[0]=0;}
+static void reader_sync_rotation(void){}
 static const char *esp_err_to_name(int err){(void)err;return "error";}
 static void vTaskDelay(unsigned ticks){(void)ticks;}
 static esp_err_t book_chapter_image(size_t chapter,const char *path,uint8_t **out,size_t *size,bool *png){
@@ -133,7 +134,8 @@ static esp_err_t book_chapter_image(size_t chapter,const char *path,uint8_t **ou
 }
 static esp_err_t book_chapter_image_dimensions(size_t chapter,const char *path,unsigned *w,unsigned *h){
  assert(path);if(locked)measured_chapter=chapter;else assert(chapter==s_chapter);
- if(atoi(path)==read_failure)return ESP_FAIL;*w=60;*h=20;return ESP_OK;
+ if(atoi(path)==read_failure)return ESP_FAIL;
+ *w=60;*h=20;return ESP_OK;
 }
 static bool book_image_dimensions(const uint8_t *data,size_t len,bool png,unsigned *w,unsigned *h){
  (void)png;assert(data&&len==1);*w=60;*h=20;return true;

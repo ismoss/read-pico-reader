@@ -202,7 +202,11 @@ int main(void) {
     network_ui_tick(&ctx);
     assert(s_network_count == 8 && !s_scan_pending);
     test_configured = s_saved_configured = true;
-    tap(&ctx, (EpdRect){540, UI_NAV_TOP + 16, 20, 20});
+    // 固定底栏由 app_loop 统一消费，不进入页面自己的 on_gesture；本测试直接模拟那一层。
+    // The persistent navigation is consumed by app_loop, not the page's on_gesture; emulate it here.
+    int nav_index = ui_nav_hit(542, UI_NAV_TOP + 18);
+    assert(nav_index == 3);
+    ui_nav_request(&ctx, nav_index);
     assert(test_nav_index == 3);
     test_nav_index = -1;
     assert(s_view == TRANSFER_NETWORKS);
@@ -258,7 +262,8 @@ int main(void) {
     assert(!s_password[0]);
     // 容量及保存失败时保留密码。/ Capacity and preservation after failed saving.
     tap(&ctx,(EpdRect){24,1010,30,30});
-    for(int i=0;i<70;i++)tap(&ctx,(EpdRect){24,740,30,30});assert(strlen(s_password)==64);
+    for(int i=0;i<70;i++)tap(&ctx,(EpdRect){24,740,30,30});
+    assert(strlen(s_password)==64);
     tap(&ctx,(EpdRect){600,896,30,30});assert(strlen(s_password)==63);
     tap(&ctx, password_control_rect(45));
     assert(s_password_visible);
@@ -276,6 +281,9 @@ int main(void) {
     tap(&ctx,(EpdRect){24,740,30,30});
     tap(&ctx, password_control_rect(44));
     assert(s_view == TRANSFER_NETWORKS && !s_password[0]);
+    // 让进入网络页时排队的自动连接先落地，再验证独立的“重新扫描”路径。
+    // Drain the auto-connect queued by entering the network page before testing a manual rescan.
+    network_ui_tick(&ctx);
     test_scan_count = 0;
     tap(&ctx, network_control_rect(8));
     network_ui_tick(&ctx);
@@ -305,8 +313,38 @@ int main(void) {
     assert(on_tick(&ctx) == APP_REDRAW_AREA);
     assert(s_status.changed_count == 1);
     s_session_started = true;
+    s_media_lost = false;
+    test_status = (read_pico_transfer_status_t){.mode=READ_PICO_TRANSFER_MODE_STA,
+        .state=READ_PICO_TRANSFER_READY,.network_ready=true};
+    test_configured = true;
+    test_wifi_running = false;
+    s_any_changed = true;
+    int starts_before = test_start_count;
     transfer_on_exit(&ctx);
-    assert(test_store_changes == 1);
+    assert(test_store_changes == 1 && test_start_count == starts_before + 1);
+    // 主动断开后离页不得被已保存凭据重新接回；下一次亮屏才解除 hold。
+    // Leaving after a deliberate disconnect must not reconnect from saved credentials;
+    // only a later wake releases the hold.
+    s_user_disconnect_hold = true;
+    starts_before = test_start_count;
+    transfer_on_exit(&ctx);
+    assert(test_start_count == starts_before);
+    // 重新进入网络页也不能让“扫描完自动接续”绕过主动断开；只有手点连接才解除。
+    // Re-entering the network page must not let scan-triggered auto-connect bypass the
+    // deliberate disconnect; only an explicit connect tap releases it.
+    test_configured = s_saved_configured = true;
+    test_status = (read_pico_transfer_status_t){.mode=READ_PICO_TRANSFER_MODE_STA,
+        .state=READ_PICO_TRANSFER_STOPPED,.wifi_configured=true};
+    assert(enter_networks());
+    assert(!s_auto_connect_after_scan);
+    starts_before = test_start_count;
+    network_ui_tick(&ctx);
+    assert(test_start_count == starts_before && !s_network_connect_pending);
+    tap(&ctx, network_control_rect(6));
+    assert(!s_user_disconnect_hold && s_start_pending);
+    s_start_pending = false;
+    s_user_disconnect_hold = false;
+    test_status = (read_pico_transfer_status_t){0};
     on_enter(&ctx);
     tap(&ctx, method_control_rect(1));
     on_tick(&ctx);

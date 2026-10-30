@@ -42,6 +42,12 @@ static unsigned layout_span=100,reflows,paints,saves,failed_reflows;
 static uint8_t full_pages;
 static const char *app_settings_book_background_path(void){return "";}
 static void copy_text(char *to,size_t cap,const char *from){snprintf(to,cap,"%s",from);}
+static bool book_file_path_supported(const char *path){
+ const char *ext=path?strrchr(path,'.'):NULL;
+ return ext&&(!strcasecmp(ext,".txt")||!strcasecmp(ext,".epub"));
+}
+static size_t book_toc_rows(void){return BOOK_TOC_ROWS;}
+static void reader_zoom_reset(void){}
 static void lock_draw(void){assert(!draw_locked);draw_locked=true;}
 static void unlock_draw(void){assert(draw_locked);draw_locked=false;}
 static void invalidate_prep(void){}
@@ -99,7 +105,7 @@ int main(void){
  failed_reflows=1;
  assert(apply_reader_indent(&ctx,3,12)==APP_REDRAW_NONE&&indent==2&&adjustment==-7&&layout_indent==2&&layout_adjustment==-7&&saves==1);
  assert(book_layout_page_start_offset(s_page)==anchor&&!draw_locked);
- assert(apply_reader_indent(&ctx,2,21)==APP_REDRAW_NONE&&saves==1);
+ assert(apply_reader_indent(&ctx,2,101)==APP_REDRAW_NONE&&saves==1);
 
  assert(app_book_request_open("/sdcard/book.epub")&&s_requested_fullscreen&&!s_requested_open_home);
  assert(app_book_request_resume("/sdcard/book.epub",false)&&!s_requested_fullscreen&&s_requested_open_home);

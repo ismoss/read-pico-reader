@@ -49,12 +49,13 @@ covers user-visible changes per release; volatile state lives in the untracked
 
 ## 进行中 / In flight
 
-- 无（mod53 待发版后进入验收）
+- mod60 已发版，等待真机验收。
+- 分支 `mod/glass-dock-lockoff` 的 HEAD 之上有一批**未发版**的审查加固（2026-10-30，详见 `HANDOFF.local.md` 顶部与 `CHANGELOG.md`「待发布」）：锁屏横屏判定收紧为只认 `EPD_ROT_LANDSCAPE`/`EPD_ROT_INVERTED_LANDSCAPE`、OTA 清单慢网窗口对齐 90s、主动断网/快捷关 WiFi 跨页保持、自动锁屏只认 `UPLOADING` 与 OTA、透明书封横屏边界与栈加固、`ART_MAGIC` 再 +1、发布页改名 mossread。**发版前需 CI 全绿 + 真机复验，当前不发版。**
 
 ## 待做 / Planned
 
 2. **两指边缘内划手势（P4）**：六动作（关闭 / 关屏 / 切横竖 / 回主页 / 开目录 / 加书签）、默认全关、只在阅读页、切换持久化（新增"上次横屏方向"键）。
-3. **真机验收全过一遍**：mod1–mod51 一次刷机走查。
+3. **真机验收全过一遍**：mod1–mod60 一次刷机走查。
 4. **OTA 链路**：观察"下载通道 N KB/s"读数，决定要不要镜像源或分片。
 
 ## 锁屏画面的方向适配矩阵
@@ -76,4 +77,4 @@ covers user-visible changes per release; volatile state lives in the untracked
 
 ## 验收状态 / Acceptance
 
-**mod1–mod51 全部为"真机验收 pending"**；每次发布只承诺"编译零告警 + CI 全绿 + 线上 feed 校验通过"。
+**mod1–mod60 全部为"真机验收 pending"**；每次发布只承诺"编译零告警 + CI 全绿 + 线上 feed 校验通过"。

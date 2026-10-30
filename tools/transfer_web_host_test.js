@@ -177,7 +177,7 @@ async function setup({responses = [], confirmations = [true], mode = 'ap'} = {})
   const afterDrag = vm.runInContext('[cropX,cropY]', t.context);
   assert.notDeepEqual(afterDrag, beforeDrag);
   await t.nodes.get('wallpaperSend').onclick();
-  assert.match(t.state.sent.at(-1).url, /^\/image-upload\?name=pico-wallpaper-.+&wallpaper=1$/);
+  assert.match(t.state.sent.at(-1).url, /^\/image-upload\?name=mossread-wallpaper-.+&wallpaper=1$/);
   assert.match(t.nodes.get('wallpaperResult').textContent, /已设为壁纸锁屏/);
   console.log('transfer web interaction tests passed');
 })().catch(error => { console.error(error); process.exitCode = 1; });

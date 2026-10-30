@@ -150,7 +150,9 @@ static esp_err_t range_header(esp_http_client_event_t *event) {
         return ESP_OK;
     if (!strcasecmp(event->header_key, "Content-Range")) {
         unsigned long start, end, size; char tail;
-        range->valid = strnlen(event->header_value, 96) < 96 &&
+        size_t header_len = 0;
+        while (header_len < 96 && event->header_value[header_len]) ++header_len;
+        range->valid = header_len < 96 &&
             sscanf(event->header_value, "bytes %lu-%lu/%lu%c", &start, &end, &size, &tail) == 3 &&
             start <= end && end < size && size <= UINT32_MAX;
         if (range->valid) { range->start = start; range->end = end; range->size = size; }
@@ -244,8 +246,8 @@ static bool check_feed(void) {
     char *json = heap_caps_malloc(8193, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     pico_release_t *release = heap_caps_calloc(1, sizeof(*release), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!json || !release) { state(PICO_UPDATE_FAILED, "内存不足，请退出传书后重试"); goto failed; }
-    // GitHub Pages清单优先，官网清单备用；同一缓冲区顺序请求，无并发TLS连接。
-    // Prefer GitHub Pages metadata, falling back to the website with one shared buffer and no concurrent TLS clients.
+    // 只请求自建 GitHub Pages 清单；同一缓冲区无并发 TLS 连接，官方 fallback 故意留空。
+    // Request only the self-hosted GitHub Pages feed; one shared buffer and no concurrent TLS clients.
     static const char *const feeds[] = {PICO_OTA_FEED_URL};
     bool valid = false;
     // 阶段线索：让失败提示区分「设备没网」「连不上服务器」「服务器异常」「清单无效」。
@@ -267,7 +269,7 @@ static bool check_feed(void) {
         if (code != 200 || length > 8192) { esp_http_client_cleanup(client); continue; }
         got_200 = true;
         size_t received = 0;
-        int64_t idle = esp_timer_get_time() + 30000000;
+        int64_t idle = esp_timer_get_time() + 90000000;
         int n = -1;
         while (received < 8192 && (n = read_chunk(client, (uint8_t *)json + received, (int)(8192 - received), &idle)) > 0)
             received += n;

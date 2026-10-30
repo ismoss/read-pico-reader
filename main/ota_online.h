@@ -15,10 +15,10 @@
 #define PICO_OTA_LAYOUT "pico-dual-4m-v1"
 #define PICO_OTA_BOARD "RDP-G01-W"
 #define PICO_OTA_CAPABILITY "PICO_HTTPS_OTA_V1"
-// 自建更新源：两个地址都指向自己的 GitHub Pages；fallback 不保留官方源，
+// 自建更新源：主地址固定指向自己的 GitHub Pages；官方 fallback 故意留空，
 // 官方清单一旦出现更高版本号会把官方整镜像推进来，等于自动顶掉二改。
-// Self-hosted feed: both URLs point at our own GitHub Pages. The fallback keeps no
-// official origin, whose higher versions would push a stock image that wipes the mods.
+// Self-hosted feed: the primary URL is fixed to our GitHub Pages; the official fallback is
+// intentionally empty, because a higher upstream version would push a stock image that wipes the mods.
 #define PICO_OTA_FEED_URL "https://ismoss.github.io/read-pico-reader/update.json"
 // No automatic upstream fallback: an official image could overwrite the downstream mod.
 // Keep this empty until a separately authenticated mod mirror is available.

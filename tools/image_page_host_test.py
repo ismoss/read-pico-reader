@@ -35,7 +35,7 @@ typedef enum {APP_REDRAW_NONE,APP_REDRAW_PAGE,APP_REDRAW_FULL} app_redraw_t;
 typedef struct {uint8_t *fb;void *hl,*request_app;bool request_return;} app_ctx_t;
 typedef enum {UI_GESTURE_SWIPE_L,UI_GESTURE_SWIPE_R,UI_GESTURE_TAP} gesture_type;
 typedef struct {gesture_type type;int x0,y0;} ui_gesture_event_t;
-typedef struct {const char *title,*detail;bool enter_full,owns_keys;bool(*menu_handle_enabled)(app_ctx_t*);void(*on_enter)(app_ctx_t*),(*on_exit)(app_ctx_t*),(*on_media_lost)(app_ctx_t*),(*render)(app_ctx_t*,uint8_t*);bool(*present)(app_ctx_t*,app_redraw_t);app_redraw_t(*on_key)(app_ctx_t*,int),(*on_gesture)(app_ctx_t*,const ui_gesture_event_t*);} app_desc_t;
+typedef struct {const char *title,*detail;bool enter_full,binary_ui,persistent_navigation,owns_keys;bool(*menu_handle_enabled)(app_ctx_t*),(*edge_back_enabled)(app_ctx_t*);void(*on_enter)(app_ctx_t*),(*on_exit)(app_ctx_t*),(*on_media_lost)(app_ctx_t*),(*render)(app_ctx_t*,uint8_t*);bool(*present)(app_ctx_t*,app_redraw_t);app_redraw_t(*on_key)(app_ctx_t*,int),(*on_gesture)(app_ctx_t*,const ui_gesture_event_t*);} app_desc_t;
 typedef struct {bool mounted;} read_pico_sd_info_t;
 static int test_alloc_fail,test_malloc_fail,test_dimensions_fail,test_decode_fail,test_decodes,test_presentations;
 static unsigned test_pixels;
@@ -51,7 +51,6 @@ static uint8_t ui_image_dither_gray(uint8_t gray,int x,int y){(void)x;(void)y;re
 static void epd_draw_pixel(int x,int y,int gray,uint8_t *fb){(void)gray;(void)fb;assert(x>=0&&y>=0&&x<684&&y<1216);++test_pixels;}
 static void ui_nav_status(uint8_t *fb){(void)fb;}
 static void ui_nav_back(uint8_t *fb,int x,int y){(void)fb;(void)x;(void)y;}
-static void ui_nav_draw(uint8_t *fb,int tab){(void)fb;(void)tab;}
 static void ui_text_vc(uint8_t *fb,...){(void)fb;}
 static void ui_text(uint8_t *fb,...){(void)fb;}
 static void ui_hairline(uint8_t *fb,...){(void)fb;}
@@ -59,8 +58,6 @@ static void ui_fill_round_rect(uint8_t *fb,...){(void)fb;}
 static int update_display_image_gray(void *hl){(void)hl;++test_presentations;return 0;}
 static void guard_draw_result(void *hl,int result){(void)hl;assert(!result);}
 static void *app_home_page(void){return NULL;}
-static int ui_nav_hit(int x,int y){(void)x;(void)y;return -1;}
-static void ui_nav_request(app_ctx_t *ctx,int tab){(void)ctx;(void)tab;}
 static bool ui_rect_hit(EpdRect r,int x,int y){return x>=r.x&&y>=r.y&&x<r.x+r.width&&y<r.y+r.height;}
 #define BOOK_IMAGE_FILE_MAX (50u*1024u*1024u)
 static bool book_image_file_dimensions(const char *path,bool png,unsigned *w,unsigned *h){(void)path;return book_image_dimensions((const uint8_t*)"IMG!",4,png,w,h);}

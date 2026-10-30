@@ -7430,7 +7430,8 @@ static app_redraw_t paint_control(app_ctx_t* ctx, EpdRect rect) {
 static bool reader_tools_swipe(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
     if (s_view != READING || !s_text || s_reader_panel != READER_PANEL_NONE ||
         s_clear_confirm || s_scan_pending || ctx->consumed || ev->type != UI_GESTURE_SWIPE_U ||
-        ev->x0 >= reader_w() || ev->y0 < reader_h() - 120 || ev->y0 >= reader_h()) return false;
+        ev->x0 >= (unsigned)reader_w() || ev->y0 < (unsigned)(reader_h() - 120) ||
+        ev->y0 >= (unsigned)reader_h()) return false;
     s_reader_tap.pending = false;
     s_pressed_control = s_reader_slider = -1;
     s_reader_panel = READER_PANEL_TOOLS;
@@ -8239,8 +8240,9 @@ static void before_lock(app_ctx_t* ctx) {
     // the lock frame so locking no longer flashes a portrait frame first; every other style still
     // returns to portrait, and sync rebuilds the geometry after waking as needed.
     const uint8_t lock_style = app_settings_lock_style();
+    enum EpdRotation rotation = epd_get_rotation();
     bool landscape_lock = reader_landscape_active() && (lock_style == 0 || lock_style == 1 || lock_style == 2 || lock_style == 3) &&
-                          epd_get_rotation() != EPD_ROT_INVERTED_PORTRAIT;
+                          (rotation == EPD_ROT_LANDSCAPE || rotation == EPD_ROT_INVERTED_LANDSCAPE);
     if (!landscape_lock) reader_rotation_leave();
     s_shelf_key_mode=s_shelf_key_paint_pending=false;s_shelf_key_delta=s_shelf_key_pressed=0;
     shelf_category_remember(ctx);

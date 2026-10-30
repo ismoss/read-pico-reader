@@ -227,7 +227,7 @@ void ui_nav_status(uint8_t *fb) {
     read_pico_transfer_get_status(&network);
     const bool wifi_visible = network.network_ready && network.mode == READ_PICO_TRANSFER_MODE_STA;
     const bool bluetooth_visible = app_settings_ble_turner();
-    char percent[8] = "--%";
+    char percent[16] = "--%";
     int gauge_percent = pmu_battery_percent(pmu);
     if (gauge_percent >= 0) snprintf(percent, sizeof(percent), "%u%%", (unsigned)gauge_percent);
     // 按实际百分比宽度排列网络图标，留 10 像素间隔；墨色与电池相同。

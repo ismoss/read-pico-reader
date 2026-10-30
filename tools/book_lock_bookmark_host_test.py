@@ -23,17 +23,30 @@ u=r'''
 #define BYTES (684u*1216u/2u)
 #define BOOK_IMAGE_FILE_MAX (50u*1024u*1024u)
 typedef struct {int x,y,width,height;}EpdRect;
-enum {EPD_ROT_PORTRAIT=1,EPD_ROT_INVERTED_PORTRAIT=2,EPD_ROT_INVERTED_LANDSCAPE=3};
+enum {EPD_ROT_LANDSCAPE=0,EPD_ROT_PORTRAIT=1,EPD_ROT_INVERTED_LANDSCAPE=2,EPD_ROT_INVERTED_PORTRAIT=3};
 static unsigned budget=8u*1024u*1024u;
 static size_t heap_caps_get_free_size(unsigned flags){(void)flags;return budget;}
 static void *heap_caps_malloc(size_t n,unsigned flags){(void)flags;return budget>=n?malloc(n):NULL;}
-static int epd_get_rotation(void){return 0;}
-static int epd_width(void){return 684;}
-static int epd_height(void){return 1216;}
-static int epd_rotated_display_width(void){return 684;}
-static int epd_rotated_display_height(void){return 1216;}
-static uint8_t epd_get_pixel(int x,int y,int w,int h,const uint8_t *fb){assert(x>=0&&y>=0&&x<w&&y<h);int i=y*w+x;return ((fb[i/2]>>(i%2?4:0))&15)<<4;}
-static void epd_draw_pixel(int x,int y,uint8_t gray,uint8_t *fb){assert(x>=0&&y>=0&&x<684&&y<1216);int i=y*684+x;fb[i/2]=(fb[i/2]& (i%2?15:240))|((gray>>4)<<(i%2?4:0));}
+static bool landscape_mode;
+// Match the panel's physical 1216x684 framebuffer. Portrait is inverted portrait
+// (logical 684x1216); landscape is inverted landscape (logical 1216x684).
+static int epd_get_rotation(void){return landscape_mode?2:3;}
+static int epd_width(void){return 1216;}
+static int epd_height(void){return 684;}
+static int epd_rotated_display_width(void){return landscape_mode?1216:684;}
+static int epd_rotated_display_height(void){return landscape_mode?684:1216;}
+static uint8_t epd_get_pixel(int x,int y,int w,int h,const uint8_t *fb){
+ if(x<0||y<0||x>=w||y>=h)return 0;
+ int stride=w/2+(w&1),i=y*stride+x/2;
+ return ((fb[i]>>(x&1?4:0))&15)<<4;
+}
+static void epd_draw_pixel(int x,int y,uint8_t gray,uint8_t *fb){
+ if(landscape_mode){x=1215-x;y=683-y;}
+ else {int t=x;x=y;y=683-t;}
+ assert(x>=0&&y>=0&&x<1216&&y<684);
+ int stride=608,i=y*stride+x/2;unsigned shift=(x&1)?4:0;
+ fb[i]=(fb[i]&~(15u<<shift))|((gray>>4)<<shift);
+}
 
 static void *cover_alloc(size_t n){return heap_caps_malloc(n,0);}
 static void decode_yield(unsigned at){(void)at;}
@@ -91,10 +104,10 @@ int main(int argc,char **argv){
  assert(pixel(fb,300,100)==170&&pixel(fb,300,1150)==170);
  assert(pixel(fb,80,350)==170);assert(pixel(fb,520,350)==0);
  assert(pixel(fb,80,800)>=187&&pixel(fb,80,800)<=221);assert(pixel(fb,520,800)==255);
- if(argc>=6){
-  FILE *bg=fopen(argv[4],"rb");assert(bg&&fread(original,1,BYTES,bg)==BYTES);fclose(bg);
+ if(argc>=8){
+  FILE *bg=fopen(argv[6],"rb");assert(bg&&fread(original,1,BYTES,bg)==BYTES);fclose(bg);
   memcpy(fb,original,BYTES);
-  assert(book_lock_bookmark_draw(fb,argv[5]));
+  assert(book_lock_bookmark_draw(fb,argv[7]));
   FILE *out=fopen("preview.pgm","wb");assert(out);fprintf(out,"P5\n684 1216\n255\n");
   for(int y=0;y<1216;++y)for(int x=0;x<684;++x)fputc(pixel(fb,x,y),out);fclose(out);
  }
@@ -116,8 +129,17 @@ int main(int argc,char **argv){
  uint8_t header[24];assert(fread(header,1,sizeof(header),good)==sizeof(header));fclose(good);
  assert(fwrite(header,1,sizeof(header),bad)==sizeof(header));fclose(bad);
  assert(!book_lock_bookmark_draw(fb,invalid)&&!memcmp(fb,original,BYTES));
+ // 横屏画布 1216x684：透明与不透明白底两种 1600x900 PNG 都必须解码、去白并合成。
+ // Landscape 1216x684: both transparent and opaque-white 1600x900 PNGs must decode,
+ // remove their background, and composite without touching the portrait path.
+ landscape_mode=true;
+ memset(fb,0xaa,BYTES);assert(book_lock_bookmark_draw(fb,argv[4]));
+ assert(pixel(fb,608,342)==0&&pixel(fb,10,10)>=160);
+ memset(fb,0xaa,BYTES);assert(book_lock_bookmark_draw(fb,argv[5]));
+ assert(pixel(fb,608,342)==0&&pixel(fb,10,10)>=160);
+ landscape_mode=false;
  free(fb);free(original);
- puts("PASS: real PNG alpha/premultiplication, opaque black, aspect-fit canvas, all 16 current-page backgrounds, 400 flood/BFS comparisons, white-edge removal with enclosed whites and original alpha preserved, low-memory fallback and no internal-RAM allocation");
+ puts("PASS: real PNG alpha/premultiplication, opaque black, aspect-fit canvas, portrait+landscape 1600x900 PNGs, all 16 current-page backgrounds, 400 flood/BFS comparisons, white-edge removal with enclosed whites and original alpha preserved, low-memory fallback and no internal-RAM allocation");
 }
 '''
 def chunk(k,b):return struct.pack('>I',len(b))+k+b+struct.pack('>I',zlib.crc32(k+b))
@@ -127,11 +149,16 @@ with tempfile.TemporaryDirectory() as d:
  d=Path(d);(d/'test.c').write_text(u);(d/'fixture.png').write_bytes(png)
  white_raw=b''.join(b'\0'+b''.join(bytes((0,0,0)) if 3<=x<=28 and 3<=y<=28 and not (9<=x<=22 and 9<=y<=22) else bytes((255,255,255)) for x in range(32)) for y in range(32))
  (d/'white.png').write_bytes(b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',struct.pack('>IIBBBBB',32,32,8,2,0,0,0))+chunk(b'IDAT',zlib.compress(white_raw))+chunk(b'IEND',b''))
+ land_rgba=b''.join(b'\0'+b''.join(bytes((0,0,0,255)) if 500<=x<1100 and 350<=y<550 else bytes((255,255,255,0)) for x in range(1600)) for y in range(900))
+ (d/'landscape-transparent.png').write_bytes(b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',struct.pack('>IIBBBBB',1600,900,8,6,0,0,0))+chunk(b'IDAT',zlib.compress(land_rgba))+chunk(b'IEND',b''))
+ land_white=b''.join(b'\0'+b''.join(bytes((0,0,0)) if 500<=x<1100 and 350<=y<550 else bytes((255,255,255)) for x in range(1600)) for y in range(900))
+ (d/'landscape-white.png').write_bytes(b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',struct.pack('>IIBBBBB',1600,900,8,2,0,0,0))+chunk(b'IDAT',zlib.compress(land_white))+chunk(b'IEND',b''))
  vendor=r/'managed_components/espressif__libpng/libpng'
  assert vendor.exists(),'Build IDF once to resolve libpng'
  (d/'pnglibconf.h').write_bytes((vendor/'scripts/pnglibconf.h.prebuilt').read_bytes())
  names='png pngerror pngget pngmem pngpread pngread pngrio pngrtran pngrutil pngset pngtrans pngwrite pngwio pngwtran pngwutil'.split()
- subprocess.run(['cc','-std=gnu11','-O2','-Wall','-Wextra','-Werror','-Wno-unused-function','-Wno-misleading-indentation','-fsanitize=address,undefined','-DPNG_ARM_NEON_OPT=0','-DPNG_INTEL_SSE_OPT=0','-DCACHE_ROOT="'+str(d/'cache')+'"','-I'+str(d),'-I'+str(vendor),str(d/'test.c')]+[str(vendor/(n+'.c')) for n in names]+['-lz','-lm','-o',str(d/'test')],check=True)
- args=[str(d/'test'),str(d),str(d/'fixture.png'),str(d/'white.png')]
+ sanitize=[] if os.name=='nt' else ['-fsanitize=address,undefined']
+ subprocess.run(['cc','-std=gnu11','-O2','-Wall','-Wextra','-Werror','-Wno-unused-function','-Wno-misleading-indentation']+sanitize+['-DPNG_ARM_NEON_OPT=0','-DPNG_INTEL_SSE_OPT=0','-DCACHE_ROOT="'+str(d/'cache')+'"','-I'+str(d),'-I'+str(vendor),str(d/'test.c')]+[str(vendor/(n+'.c')) for n in names]+['-lz','-lm','-o',str(d/'test')],check=True)
+ args=[str(d/'test'),str(d),str(d/'fixture.png'),str(d/'white.png'),str(d/'landscape-transparent.png'),str(d/'landscape-white.png')]
  if os.environ.get('BOOKMARK_SAMPLE') and os.environ.get('BOOKMARK_BACKGROUND'):args += [os.environ['BOOKMARK_BACKGROUND'],os.environ['BOOKMARK_SAMPLE']]
  subprocess.run(args,check=True)

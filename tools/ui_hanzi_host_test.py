@@ -74,6 +74,6 @@ int main(void){
 }
 '''.replace('TEST_CP',str(chars[0])).replace('CPS',','.join(map(str,chars)))
  (work/'test.c').write_text(unit)
- subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-Wno-unused-function','-fsanitize=address,undefined','-I'+str(work),'-I'+str(ROOT/'main/font'),'-I'+str(ROOT/'tools/ui_gesture_stubs'),str(work/'test.c'),str(work/'assets.c'),str(ROOT/'main/font/ui_font.c'),str(ROOT/'main/font/ui_hanzi.c'),'-lz','-o',str(work/'test')],check=True)
+ subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-Wno-unused-function','-fsanitize=address,undefined','-I'+str(work),'-I'+str(ROOT/'main/font'),'-I'+str(ROOT/'tools/ui_gesture_stubs'),str(work/'test.c'),str(work/'assets.c'),str(ROOT/'main/font/ui_font.c'),str(ROOT/'main/font/ui_hanzi.c'),'-lz','-lm','-o',str(work/'test')],check=True)
  subprocess.run([str(work/'test')],check=True)
 print(f'Compressed blocks: PASS ({count} glyphs, {len(asset)} bytes; bounded decoding)')

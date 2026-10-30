@@ -19,7 +19,12 @@ def function(name, path=source):
     # Quotes/braces in comments are not C syntax; mask comments while preserving positions.
     tokens = r'//[^\n]*|/\*[\s\S]*?\*/|"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\''
     scan = re.sub(tokens, lambda m: ' ' * len(m[0]) if m[0].startswith(('//', '/*')) else m[0], text)
-    found = re.search(r"^(?:static )?[^\n]+\b" + name + r"\([^;{}]*?\)\s*\{", text, re.M)
+    # Require the name to be the function being declared, not a call inside another
+    # function body. The old loose prefix matched the first `body_rect(), ... {` in
+    # reader_relayout_keep_page and sliced an orphaned statement block.
+    found = re.search(r"^(?:static\s+)?(?:[\w]+\s+)*[\w]+\s*\**\s*(?<![\w])" +
+                      re.escape(name) +
+                      r"\([^;{}]*?\)\s*\{", text, re.M)
     assert found, name
     start, at, depth, quote, escape = found.start(), found.end(), 1, None, False
     while depth:
@@ -231,7 +236,14 @@ static bool app_font_activate_system(void){assert(test_draw_locked);test_system_
 static bool app_font_activate_reading(void){assert(test_draw_locked);test_system_face=false;return true;}
 static bool s_toc_jump_open,s_toc_jump_drag;
 static int s_toc_jump_percent;
-typedef enum {READER_PANEL_NONE,READER_PANEL_TOOLS} reader_panel_t;
+typedef enum {
+    READER_PANEL_NONE,READER_PANEL_TOOLS,READER_PANEL_FONT_SETTINGS,
+    READER_PANEL_LAYOUT_SETTINGS,READER_PANEL_WEIGHT_SETTINGS,READER_PANEL_RULE_SETTINGS,
+    READER_PANEL_FONT_PICKER,READER_PANEL_BACKGROUND,READER_PANEL_BACKGROUND_PREVIEW,
+    READER_PANEL_STATS,READER_PANEL_CHAPTER_JUMP,READER_PANEL_BOOKMARKS,
+    READER_PANEL_STATS_RECENT,READER_PANEL_REFRESH_SETTINGS,READER_PANEL_TURN_SETTINGS,
+    READER_PANEL_KEY_SETTINGS,READER_PANEL_KEY_PICKER,READER_PANEL_FONT_RECOVERY
+} reader_panel_t;
 static reader_panel_t s_reader_panel;
 static int s_reader_slider=-1;
 static bool s_reader_slider_endpoint;
@@ -369,7 +381,16 @@ static int reader_progress_top(void){return UI_LOCK_HEIGHT - 12;}
 #define BOOK_MARGIN_CHOICES 9
 #define BOOK_PX_MIN 18
 #define BOOK_PX_MAX 90
+#define APP_BOOK_TRACK_MIN (-15)
+#define APP_BOOK_TRACK_MAX 15
+#define APP_BOOK_TRACK_COUNT (APP_BOOK_TRACK_MAX-APP_BOOK_TRACK_MIN+1)
+#define APP_BOOK_PARAGRAPH_COUNT 11
+#define READER_IMAGE_ZOOM_MIN 1000
 #define EPD_DRAW_ALIGN_LEFT 0
+enum { UI_PAGER_NONE=-1, UI_PAGER_FIRST, UI_PAGER_PREVIOUS, UI_PAGER_NEXT, UI_PAGER_LAST };
+static EpdRect ui_pager_rect(int action){
+    return (EpdRect){action==UI_PAGER_PREVIOUS?36:588,1006,60,80};
+}
 static int ui_content_width(void){return 604;}
 static int ttf_text_width_px(int px,const char* text){int width=0;for(;*text;text++)if(((unsigned char)*text&0xc0)!=0x80)width+=px;return width;}
 static void ui_text(uint8_t* fb,int x,int y,int px,const char* text,int align,bool inv){(void)fb;(void)x;(void)y;(void)px;(void)align;(void)inv;assert(strlen(test_wrapped)+strlen(text)<sizeof(test_wrapped));strcat(test_wrapped,text);}
@@ -394,6 +415,34 @@ static shelf_category_t *s_categories;
 static int s_category_count,s_category_capacity,s_category_selected,s_category_menu_page;
 static bool s_category_menu;
 static char s_category_root[288];
+static shelf_entry_t *s_shelf_next;
+static size_t s_shelf_next_capacity;
+static int s_count_next;
+static uint32_t s_progress_revision=UINT32_MAX;
+static bool s_shelf_key_mode,s_shelf_key_paint_pending;
+static int s_shelf_key_pressed,s_shelf_key_delta;
+static char s_chapter_heading_title[128],s_chapter_heading_label[32];
+static size_t s_chapter_lead_skip;
+static unsigned s_chapter_lead_row_height;
+static int s_image_zoom_bw,s_zoom_active,s_image_pan_active;
+static int s_image_zoom=READER_IMAGE_ZOOM_MIN;
+static size_t s_image_zoom_page=SIZE_MAX;
+static unsigned s_cover_generation;
+static void reader_indent_hold_cancel(void);
+static EpdRect body_rect(void);
+static void shelf_scan_finalize(app_ctx_t *ctx);
+static void apply_chapter_lead(const char *title,const char *label,size_t skip,unsigned height){
+    (void)title;(void)label;(void)skip;(void)height;
+}
+static void refresh_chapter_lead(void){}
+static bool book_file_path_supported(const char *path){
+    const char *ext=path?strrchr(path,'.'):NULL;
+    return ext&&(!strcasecmp(ext,".txt")||!strcasecmp(ext,".epub"));
+}
+static bool shelf_index_try_load(app_ctx_t *ctx,const read_pico_sd_info_t *sd){
+    (void)ctx;(void)sd;return false;
+}
+static void shelf_index_save(void){}
 """
 unit += function("book_layout_balanced_rect", layout_source) + "\n"
 unit += function("set_reader_view") + "\n"
@@ -432,7 +481,7 @@ static int app_settings_book_paragraph_level(int value){(void)value;return 0;}
 static uint32_t book_progress_revision(void){return test_progress_count;}
 static void reader_font_recovery_reset(void){}
 '''
-for name in ("inline_ink_gray", "reader_margin_width", "reader_margin_levels", "reader_margin_level_for", "reader_margin_for_level", "slider_index", "reader_margin_input", "reader_area", "reader_fullscreen_progress_area", "body_rect_for_tracking", "body_rect", "progress_rect", "copy_text", "reader_footer_strip_number", "favorite_key", "favorite_read_handle", "shelf_hidden_key", "shelf_hidden_read_handle", "shelf_hidden_load", "shelf_hidden_save", "shelf_rows", "row_rect", "shelf_category_add", "shelf_category_init", "shelf_category_matches", "shelf_category_remember", "shelf_category_restore", "shelf_categories_recount", "shelf_matches", "compare_books", "sort_shelf", "shelf_reserve", "delete_retry_find", "delete_retry_reserve", "delete_retry_discard", "scan_dir_begin", "scan_dir_end", "scan_dir_chunk", "shelf_backfill_visit", "shelf_backfill_read_books", "shelf_scan_abort", "shelf_scan_begin", "shelf_scan_chunk", "shelf_scan_finalize", "refresh_cached_progress",
+for name in ("inline_ink_gray", "reader_margin_width", "reader_margin_levels", "reader_margin_level_for", "reader_margin_for_level", "slider_index", "reader_margin_input", "reader_area", "reader_fullscreen_progress_area", "body_rect_for_tracking", "body_rect", "progress_rect", "copy_text", "reader_footer_strip_number", "favorite_key", "favorite_read_handle", "shelf_hidden_key", "shelf_hidden_read_handle", "shelf_hidden_load", "shelf_hidden_save", "shelf_rows", "row_rect", "shelf_category_add", "shelf_category_init", "shelf_category_matches", "shelf_category_remember", "shelf_category_restore", "shelf_categories_recount", "shelf_matches", "compare_books", "sort_shelf", "shelf_reserve", "delete_retry_find", "delete_retry_reserve", "delete_retry_discard", "scan_items", "scan_count", "scan_reserve", "scan_commit", "scan_dir_begin", "scan_dir_end", "scan_dir_chunk", "shelf_backfill_visit", "shelf_backfill_read_books", "shelf_scan_abort", "shelf_scan_begin", "shelf_scan_chunk", "shelf_scan_finalize", "refresh_cached_progress",
              "pending_find", "pending_reserve", "pending_restore", "pending_discard", "pending_mark_latest", "pending_drop_invalidated", "pending_flush", "reader_page_offset", "save_progress", "retry_progress", "layout_name", "manage_panel", "manage_rect", "batch_rect", "manage_back_rect", "bulk_filter_rect", "bulk_nav_rect", "bulk_nav_hit", "leaves", "selected_count", "clear_selection", "toggle_selection", "select_page", "bookmark_compact", "search_begin", "refresh_search_matches", "search_finish", "refresh_capacity", "manage_apply", "manage_action", "batch_apply", "batch_action", "bulk_turn_page", "bulk_finish", "bulk_action", "bulk_control_at", "menu_handle_enabled", "reader_manual_refresh", "apply_reader_option", "reader_return", "reader_key_action", "on_key", "on_key_long", "draw_wrapped_name", "open_requested_book", "on_enter", "book_on_exit"):
     unit += function(name) + "\n"
 unit += r'''
@@ -513,7 +562,9 @@ int main(void) {
         assert(inline_ink_gray((uint8_t)gray)==gray);
     EpdRect margin_slider={36,700,294,66};
     int narrow=reader_margin_input(margin_slider,40,36,48,0);
-    int wide=reader_margin_input(margin_slider,325,36,48,0);
+    // Endpoint taps step one level from the current value; use the penultimate
+    // value to exercise the max endpoint without assuming an old jump-to-max rule.
+    int wide=reader_margin_input(margin_slider,325,42,48,0);
     assert(reader_margin_width(0,48,0)>reader_margin_width(24,48,0));
     assert(reader_margin_width(narrow,48,0)>reader_margin_width(36,48,0));
     assert(wide==48&&reader_margin_width(wide,48,0)<reader_margin_width(36,48,0));
@@ -548,7 +599,9 @@ int main(void) {
     }
     assert(apply_reader_layout(&margin_ctx,48,-1,130,50)==APP_REDRAW_NONE);
     assert(apply_reader_layout(&margin_ctx,48,49,130,50)==APP_REDRAW_NONE);
-    s_margin=test_saved_margin=24;s_reader_slider_endpoint=false;
+    // Endpoint taps now step one level; start at the first non-zero stop so the
+    // left endpoint reaches zero, matching the current slider contract.
+    s_margin=test_saved_margin=6;s_reader_slider_endpoint=false;
     reader_slider_begin(1,40);assert(s_reader_slider_endpoint&&s_reader_preview_margin==0);
     assert(reader_slider_commit(&margin_ctx)==APP_REDRAW_PAGE&&s_margin==0&&test_saved_margin==0);
     s_margin=test_saved_margin=24;s_reader_slider_endpoint=true;
@@ -621,7 +674,11 @@ int main(void) {
     scan_shelf(&ctx);assert(s_count==66);assert(unlink(nested_book)==0);assert(rmdir(nested)==0);scan_shelf(&ctx);
     char deep[14][340];snprintf(deep[0],sizeof(deep[0]),"%s",test_roots[0].path);
     for(int level=1;level<=13;level++){
-        snprintf(deep[level],sizeof(deep[level]),"%s/d%02d",deep[level-1],level);
+        size_t base=strlen(deep[level-1]);assert(base+4<sizeof(deep[level]));
+        memcpy(deep[level],deep[level-1],base);
+        deep[level][base]='/';deep[level][base+1]='d';
+        deep[level][base+2]=(char)('0'+level/10);deep[level][base+3]=(char)('0'+level%10);
+        deep[level][base+4]=0;
         assert(mkdir(deep[level],0700)==0);
     }
     char deep_book[380],ignored_book[380];
@@ -647,7 +704,10 @@ int main(void) {
     test_progress[0].value=(book_progress_t){.file_size=1,.chapter=3,.byte_off=17,.px=48,.pct=42,.last_open_s=19};
     snprintf(test_progress[1].path,BOOK_STORE_PATH_MAX,"%s/missing.txt",outside_dir);
     strcpy(test_progress[2].path,changed);
-    snprintf(test_progress[3].path,BOOK_STORE_PATH_MAX,"%s/book005.txt",test_roots[0].path);
+    size_t root_len=strlen(test_roots[0].path);
+    assert(root_len+sizeof("/book005.txt")<=BOOK_STORE_PATH_MAX);
+    memcpy(test_progress[3].path,test_roots[0].path,root_len);
+    memcpy(test_progress[3].path+root_len,"/book005.txt",sizeof("/book005.txt"));
     for(int i=1;i<4;i++)test_progress[i].value=(book_progress_t){.file_size=1,.px=48,.pct=7};
     favorite_key(outside,test_favorite_key);
     strcpy(test_recent_path,outside);
@@ -673,7 +733,9 @@ int main(void) {
     book_progress_t retained;
     assert(book_progress_load(outside,1,&retained)&&retained.pct==42&&retained.byte_off==17);
     scan_shelf(&ctx);refresh_cached_progress(&ctx);assert(s_count==65&&shelf_hidden_load(outside));
-    assert(shelf_hidden_save(outside,false));refresh_cached_progress(&ctx);
+    // Unhiding is picked up by the cached-progress backfill when the progress revision
+    // changes; simulate that notification instead of relying on the old unconditional pass.
+    assert(shelf_hidden_save(outside,false));s_progress_revision=0;refresh_cached_progress(&ctx);
     assert(s_count==66&&!shelf_hidden_load(outside));
     assert(shelf_hidden_save(test_progress[3].path,true));scan_shelf(&ctx);assert(s_count==65);
     assert(shelf_hidden_save(test_progress[3].path,false));
@@ -801,7 +863,10 @@ int main(void) {
     assert(retry_count==2);calls=test_delete_calls;batch_apply(&ctx);
     assert(!s_delete_retries&&test_delete_calls==calls&&!selected_count());
     // 首页指定的书籍无需先扫描或绘制书架。/ Home's requested book opens before a shelf scan.
-    snprintf(s_requested_open,sizeof(s_requested_open),"%s/book010.txt",test_roots[0].path);
+    size_t requested_root_len=strlen(test_roots[0].path);
+    assert(requested_root_len+sizeof("/book010.txt")<=sizeof(s_requested_open));
+    memcpy(s_requested_open,test_roots[0].path,requested_root_len);
+    memcpy(s_requested_open+requested_root_len,"/book010.txt",sizeof("/book010.txt"));
     s_requested_open_home=true;s_shelf_cache_valid=false;calls=test_open_calls;
     on_enter(&ctx);
     assert(test_open_calls==calls+1&&s_view==READING&&!s_scan_pending&&s_reader_return_home);
@@ -831,7 +896,9 @@ int main(void) {
     assert(test_reflows==4&&test_image_preparations==2);
     assert(apply_reader_option(&ctx,2)==APP_REDRAW_PAGE&&!test_hide_images&&test_images_visible&&s_page==1);
     test_hold_action=APP_READER_KEY_HOME;test_nav_target=-1;
-    assert(on_key_long(&ctx,UI_KEY_2)==APP_REDRAW_NONE && test_nav_target==0);
+    // This reading session came from the shelf, so HOME returns to the shelf
+    // rather than requesting the root/home tab.
+    assert(on_key_long(&ctx,UI_KEY_2)==APP_REDRAW_PAGE && test_nav_target==-1 && s_view==SHELF);
     test_hold_action=APP_READER_KEY_REFRESH;
     test_hold_refresh=test_power_turn=false;s_reader_fullscreen=test_reader_immersive=false;
     s_view=TOC;s_toc_jump_open=true;s_toc_jump_percent=50;
@@ -856,8 +923,8 @@ int main(void) {
     s_reader_fullscreen=false;assert(on_key(&ctx,UI_KEY_2)==APP_REDRAW_PAGE && s_reader_fullscreen);
     assert(on_key(&ctx,UI_KEY_3)==APP_REDRAW_PAGE && s_reader_panel==READER_PANEL_TOOLS);
     assert(on_key_long(&ctx,UI_KEY_2)==APP_REDRAW_FULL && s_reader_panel==READER_PANEL_NONE);
-    test_nav_target=-1;assert(on_key(&ctx,UI_KEY_1)==APP_REDRAW_NONE && test_nav_target==0);
-    s_view=READING;assert(reader_key_action(&ctx,APP_READER_KEY_NONE)==APP_REDRAW_NONE);
+    test_nav_target=-1;assert(on_key(&ctx,UI_KEY_1)==APP_REDRAW_PAGE && s_view==SHELF && test_nav_target==-1);
+    s_view=READING;s_text="body";assert(reader_key_action(&ctx,APP_READER_KEY_NONE)==APP_REDRAW_NONE);
     assert(reader_key_action(&ctx,APP_READER_KEY_REFRESH)==APP_REDRAW_FULL);
     free(s_shelf);free(s_categories);
     while(s_pending)pending_discard(s_pending->path);
@@ -870,6 +937,7 @@ with tempfile.TemporaryDirectory() as tmp:
     exe = Path(tmp) / "test"
     c.write_text(unit, encoding="utf-8")
     subprocess.run(["gcc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-Wno-unused-variable",
-                    "-Wno-unused-function", "-fsanitize=address,undefined", "-I", str(source.parents[1] / "ui"), "-I", str(source.parents[1] / "book"),
+                    "-Wno-unused-function", "-D_DEFAULT_SOURCE", "-fsanitize=address,undefined",
+                    "-I", str(source.parents[1] / "ui"), "-I", str(source.parents[1] / "book"),
                     str(c), str(source.parents[1] / "ui/ui_text_edit.c"), "-o", str(exe)], check=True)
     subprocess.run([str(exe)], check=True)

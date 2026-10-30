@@ -7,8 +7,10 @@ name: mod-build
 # the real-board sdkconfig.defaults; a manual dispatch with a version (X.Y.Z-rcNNN-modM)
 # additionally deploys the minimal OTA feed (update.json + app image) to our GitHub Pages after
 # tests and build pass, then verifies the live endpoints.
-# 不用 GitHub Releases 直链当下载地址：OTA 客户端禁用跟随重定向，Releases 会 302。
-# Never use GitHub Releases links as download URLs: they 302 and the OTA client never follows redirects.
+# OTA 客户端会跟随重定向，但发布地址仍固定为 GitHub Pages 直链，避免把清单 URL 绑到
+# 会变化的 Releases 跳转；发布后自检还会拒绝任何 302，保证线上地址稳定。
+# The OTA client follows redirects, but release URLs stay on direct GitHub Pages links so the
+# manifest never depends on a changing Releases redirect; the post-publish check also rejects 302s.
 # 触发方式（重要）：本文件只存在于二改分支，默认分支 main 是上游镜像、故意不收录它，
 # 所以 dispatch 必须显式指定分支，否则会得到 "Workflow does not have workflow_dispatch trigger"：
 #   gh workflow run mod-build.yml --ref mod/glass-dock-lockoff -f version=... -f notes=...
@@ -50,6 +52,7 @@ jobs:
           python3 tools/lock_pin_host_test.py
           python3 tools/lock_screen_host_test.py
           python3 tools/lock_landscape_slice_host_test.py
+          python3 tools/lock_style_host_test.py
           # tools/lock_collage_host_test.py 仍留在旧的 run_book_management_tests.sh：它在 Linux 上
           # 于 cache_payload_read==cover_bytes 断言失败（与横版拼贴改动无关，见 HANDOFF）。
           # tools/lock_collage_host_test.py stays in the legacy run_book_management_tests.sh: on Linux
@@ -150,6 +153,16 @@ jobs:
             tools/mod_dns_host_test.c managed_components/espressif__cjson/cJSON/cJSON.c \
             -o build/book-tests/mod-dns
           build/book-tests/mod-dns
+          # OTA 状态机是发布前最关键的网络路径；单独放进 CI，避免陈旧宿主测试再次漂移。
+          # The OTA state machine is the critical network path; run its host test so stale
+          # fixtures cannot drift again.
+          mkdir -p build/book-tests
+          cc -std=gnu11 -D_DEFAULT_SOURCE -Wall -Wextra -Werror -pthread \
+            -Itools/ota_stubs -Imain -Imanaged_components/espressif__cjson/cJSON \
+            tools/ota_online_host_test.c main/ota_release.c \
+            managed_components/espressif__cjson/cJSON/cJSON.c \
+            -o build/book-tests/ota-online
+          build/book-tests/ota-online
           python3 tools/monitor_bmp_host_test.py
 
   mod-bin:

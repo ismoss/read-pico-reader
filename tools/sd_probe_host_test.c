@@ -21,11 +21,14 @@ static uint64_t test_total=1024*512,test_free=768*512;
 static esp_err_t test_info_error=ESP_OK;
 static unsigned space_calls, invalidations;
 static bool fat_locked;
+static int64_t test_now_us;
 
 static sdmmc_card_t test_card = {
     .cid.name = "TEST64G", .csd.capacity = 1024, .csd.sector_size = 512,
 };
 
+static size_t host_strlcpy(char *dst, const char *src, size_t cap);
+#define strlcpy host_strlcpy
 #define mkdir(path, mode) (0)
 #include "../components/read_pico/read_pico_sd.c"
 #undef mkdir
@@ -41,6 +44,7 @@ esp_err_t test_host_deinit(void){return ESP_OK;}
 esp_err_t sdmmc_host_init_slot(int slot,const sdmmc_slot_config_t *config){(void)slot;(void)config;return ESP_OK;}
 esp_err_t sdmmc_card_init(const sdmmc_host_t *host,sdmmc_card_t *out){(void)host;*out=test_card;return test_raw_error?ESP_ERR_TIMEOUT:ESP_OK;}
 esp_err_t sdmmc_read_sectors(sdmmc_card_t *c,void *buffer,size_t start,size_t count){(void)c;(void)start;assert(count==1);if(test_raw_error)return ESP_ERR_TIMEOUT;memset(buffer,0x5a,512);if(test_exfat)memcpy((char*)buffer+3,"EXFAT   ",8);return ESP_OK;}
+esp_err_t sdmmc_get_status(sdmmc_card_t *c){(void)c;return ESP_OK;}
 bool read_pico_sd_present(void) { return test_present; }
 esp_err_t read_pico_sd_detect(bool* present) {
     if (detect_failure) return ESP_ERR_TIMEOUT;
@@ -48,6 +52,25 @@ esp_err_t read_pico_sd_detect(bool* present) {
     return ESP_OK;
 }
 const char* esp_err_to_name(esp_err_t err) { (void)err; return "test"; }
+int64_t esp_timer_get_time(void) { return test_now_us; }
+static void advance_ms(unsigned ms) { test_now_us += (int64_t)ms * 1000; }
+static esp_err_t debounce_info(read_pico_sd_info_t *info) {
+    esp_err_t err = ESP_FAIL;
+    for (unsigned i = 0; i < 3; ++i) {
+        err = read_pico_sd_get_info(info);
+        if (i + 1 < 3) advance_ms(200);
+    }
+    return err;
+}
+static size_t host_strlcpy(char *dst, const char *src, size_t cap) {
+    size_t len = strlen(src);
+    if (cap) {
+        size_t copy = len < cap - 1 ? len : cap - 1;
+        memcpy(dst, src, copy);
+        dst[copy] = '\0';
+    }
+    return len;
+}
 BaseType_t xTaskCreate(void (*fn)(void*), const char* name, int stack,
                        void* arg, int priority, void* handle) {
     (void)name; (void)stack; (void)priority; (void)handle;
@@ -109,8 +132,9 @@ int main(void) {
     detect_failure = false;
 
     test_present = false;
-    assert(read_pico_sd_get_info(&info) == ESP_ERR_NOT_FOUND);
+    assert(debounce_info(&info) == ESP_ERR_NOT_FOUND);
     test_present = true;
+    assert(debounce_info(&info) == ESP_ERR_INVALID_STATE && info.present && !info.mounted);
     assert(read_pico_sd_start_probe() == ESP_ERR_INVALID_STATE);
     assert(read_pico_sd_remount() == ESP_ERR_NOT_FINISHED);
     assert(read_pico_sd_get_info(&info) == ESP_OK);
@@ -161,6 +185,9 @@ int main(void) {
     assert(read_pico_sd_get_info(&info)==ESP_OK && info.mounted && info.present);
     detect_failure=false;
     assert(read_pico_sd_get_info(&info)==ESP_OK && info.mounted);
+    assert(!info.space_valid && info.space_error==ESP_ERR_NOT_FINISHED);
+    assert(read_pico_sd_refresh_space()==ESP_OK);
+    assert(read_pico_sd_get_info(&info)==ESP_OK && info.mounted);
     assert(info.space_valid && info.filesystem_bytes==test_total && info.free_bytes==test_free);
     assert(invalidations>0);
     // 多分区卡只统计挂载分区；256GiB卡不能截断，挂载状态与统计错误独立。
@@ -182,6 +209,7 @@ int main(void) {
     assert(read_pico_sd_refresh_space()==ESP_OK);
     assert(read_pico_sd_get_info(&info)==ESP_OK&&info.space_valid&&info.free_bytes==0);
     test_present=false;before_space=space_calls;
+    assert(debounce_info(&info)==ESP_ERR_NOT_FOUND);
     assert(read_pico_sd_refresh_space()==ESP_ERR_NOT_FOUND&&space_calls==before_space);
     assert(read_pico_sd_get_info(&info)==ESP_ERR_NOT_FOUND&&!info.mounted&&!info.space_valid);
     puts("sd_probe: empty boot/insertion, checked CD, bounded settle/fallback, CMD6 busy, OOM, no format suggestion, 256 GiB passed");

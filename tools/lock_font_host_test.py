@@ -14,8 +14,10 @@ unit = r'''
 #include <string.h>
 #include <sys/stat.h>
 #define ESP_OK 0
+#define ESP_LOGW(tag, ...) ((void)(tag))
 #define TTF_FONT_PATH_MAX 288
 #define TTF_FONT_BUILTIN "builtin"
+static const char *TAG = "font";
 typedef struct {char path[288];bool reading;} app_lock_font_t;
 typedef struct {char path[288];} ttf_font_item_t;
 static bool s_reading,system_face,system_scale,recovery;
