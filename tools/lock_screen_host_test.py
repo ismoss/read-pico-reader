@@ -157,10 +157,10 @@ int main(void){
  tap(342,1350);add(158,544,1,0);add(158,544,2,0);add(158,544,0,0);
  add(158,544,1,0);add(158,544,0,-1);add(0,0,0,0);correct();
  lock_screen_authenticate(&hl,(void*)1,(void*)2,false);assert(verified==2&&waits==2&&!ready&&!held&&wiped>2&&entries==2&&!settles);
- // Cold boot waits for a validated double click, then authenticates and retains resume.
- start();correct();lock_screen_authenticate(&hl,(void*)1,(void*)2,true);assert(verified==1&&waits==1&&ready==1&&held==1&&entries==1&&!settles);
+ // Cold boot verifies immediately on the key that powered it on, without eating a second press.
+ start();correct();lock_screen_authenticate(&hl,(void*)1,(void*)2,true);assert(verified==1&&waits==0&&ready==1&&held==1&&entries==1&&!settles);
  // PMU short/long actions only return to the locked art, then demand authentication again.
- for(int action=2;action<=3;++action){start();add(0,0,0,-action);for(int i=0;i<10;++i)add(0,0,0,0);correct();lock_screen_authenticate(&hl,(void*)1,(void*)2,true);assert(verified==1&&waits==2);}
+ for(int action=2;action<=3;++action){start();add(0,0,0,-action);for(int i=0;i<10;++i)add(0,0,0,0);correct();lock_screen_authenticate(&hl,(void*)1,(void*)2,true);assert(verified==1&&waits==1);}
  // Low-memory/cache fallback and display errors still demand the correct credential.
  start();low_memory=display_failure=true;correct();lock_screen_authenticate(&hl,(void*)1,(void*)2,true);assert(verified==1&&fulls>0);low_memory=display_failure=false;
  start();low_memory=true;correct();lock_screen_authenticate(&hl,(void*)1,(void*)2,false);assert(verified==1&&waits==1&&entries==1&&!settles);low_memory=false;

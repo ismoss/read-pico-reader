@@ -144,10 +144,11 @@ void lock_screen_authenticate(EpdiyHighlevelState *hl,cst836u_handle_t touch,sc7
     blank_canvas(fb);
     ui_pinpad_t pad={0};ui_pinpad_begin(&pad,fb,"输入密码");
     restore_art(fb,original);
-    // 每次进入认证都从“无需重画”开始；只有取消/超时/深睡回退才显式置位。
-    // Start each authentication without a forced repaint; only cancel/timeout/deep-sleep fallback set it.
+    // 每次进入认证都从“无需重画”开始；开机直接验证，只有取消/超时/深睡回退才重新等待。
+    // Start each authentication without a forced repaint; boot verifies immediately and only
+    // cancel/timeout/deep-sleep fallback return to the waiting state.
     bool need_paint = false;
-    bool waiting=true;
+    bool waiting=!boot;
     unsigned failures=0;int64_t retry_at=0;
     for(;;){
         // 只有需要重画时才刷锁屏面：取消/超时后要重画，亮屏唤醒时面板本来就还是锁屏图。
