@@ -40,6 +40,7 @@
 #define NVS_KEY_SLEEP "sleep"
 #define NVS_KEY_SHUTDOWN_MODE "shutdown"
 #define NVS_KEY_WAKE_PRESSES "wake_press"
+#define NVS_KEY_WAKE_MIGRATED "wake_migr"
 #define NVS_KEY_DNS_INDEX "dns_idx"
 #define NVS_KEY_DNS_NAME "dns_name"
 #define NVS_KEY_DNS_MAIN "dns_main"
@@ -178,7 +179,8 @@ static uint8_t s_auto_lock_minutes;
 static uint8_t s_shelf_style = 2;
 static char s_books_dir[MEDIA_DIR_MAX] = "/sdcard/books";
 static char s_fonts_dir[MEDIA_DIR_MAX] = "/sdcard/fonts";
-static void nvs_put_u8(const char* key, uint8_t value);
+static esp_err_t nvs_put_u8(const char* key, uint8_t value);
+static esp_err_t nvs_put_wake_presses(uint8_t presses);
 static void nvs_put_u32(const char* key, uint32_t value);
 static bool nvs_put_str(const char *key, const char *value);
 
@@ -235,11 +237,28 @@ void app_settings_init(void) {
     if (nvs_get_u8(h, NVS_KEY_SHUTDOWN_MODE, &raw) == ESP_OK)
         s_staged_shutdown = raw == 1;
     raw = 1;
-    if (nvs_get_u8(h, NVS_KEY_WAKE_PRESSES, &raw) != ESP_OK || (raw != 1 && raw != 2)) raw = 1;
-    // 二改决定：迁移掉历史保存的双击唤醒——单击电源键直接进密码页/原页，开关保留可再开。
-    // Mod decision: migrate any saved double-press away -- one power press goes straight to
-    // the PIN page or the previous page; the switch itself stays available.
-    if (raw == 2) { raw = 1; nvs_put_u8(NVS_KEY_WAKE_PRESSES, 1); }
+    const esp_err_t wake_read = nvs_get_u8(h, NVS_KEY_WAKE_PRESSES, &raw);
+    if (wake_read != ESP_OK || (raw != 1 && raw != 2)) raw = 1;
+    // 二改决定：只迁移一次历史保存的双击唤醒。迁移标记落盘后，用户之后主动打开的
+    // 双击解锁会跨重启保留，不能再在每次开机时被悄悄改回单击。
+    // Migrate a legacy double-press preference exactly once. After the marker is stored, a
+    // double-press choice made by the user survives reboot instead of being reset every boot.
+    uint8_t wake_migrated = 0;
+    const esp_err_t wake_marker =
+        nvs_get_u8(h, NVS_KEY_WAKE_MIGRATED, &wake_migrated);
+    // 读取失败不是“没有历史双击”的证据；只有确定键缺失，或确实读到了合法旧值时才迁移。
+    // A read failure is not evidence that no legacy double-click exists. Migrate only when the
+    // key is conclusively absent or a valid value was read.
+    if (wake_marker == ESP_ERR_NVS_NOT_FOUND &&
+        (wake_read == ESP_OK || wake_read == ESP_ERR_NVS_NOT_FOUND)) {
+        if (raw == 2) {
+            raw = 1;
+        }
+        // 值和迁移标记必须同一次提交，避免只成功一半后下次开机再次迁移或丢掉显式选择。
+        // Persist the value and marker in one commit; a half-write must not re-migrate or erase
+        // an explicit choice on the next boot.
+        (void)nvs_put_wake_presses(raw);
+    }
     s_wake_presses = raw;
     s_dns_index = 0;
     s_dns_choice_saved = false;
@@ -482,9 +501,10 @@ void app_settings_set_staged_shutdown(bool staged) {
 uint8_t app_settings_wake_presses(void) { return s_wake_presses; }
 void app_settings_set_wake_presses(uint8_t presses) {
     if (presses != 2) presses = 1;
-    if (presses == s_wake_presses) return;
     s_wake_presses = presses;
-    nvs_put_u8(NVS_KEY_WAKE_PRESSES, presses);
+    // 用户显式选择与迁移标记合并提交；下次开机不会再迁移这个值。
+    // Commit the explicit choice and migration marker together so a later boot cannot migrate it.
+    (void)nvs_put_wake_presses(presses);
 }
 // 二改「DNS 设置」的兼容序号：默认 0 跟随路由器，越界也回到路由器。
 // Mod DNS settings compatibility index: default and out-of-range value mean router passthrough.
@@ -702,12 +722,25 @@ void app_settings_set_wallpaper_path(const char* path) {
     nvs_close(h);
 }
 
-static void nvs_put_u8(const char* key, uint8_t value) {
+static esp_err_t nvs_put_u8(const char* key, uint8_t value) {
     nvs_handle_t h;
-    if (nvs_open(NVS_NS, NVS_READWRITE, &h) != ESP_OK) return;
-    nvs_set_u8(h, key, value);
-    nvs_commit(h);
+    esp_err_t err = nvs_open(NVS_NS, NVS_READWRITE, &h);
+    if (err != ESP_OK) return err;
+    err = nvs_set_u8(h, key, value);
+    if (err == ESP_OK) err = nvs_commit(h);
     nvs_close(h);
+    return err;
+}
+
+static esp_err_t nvs_put_wake_presses(uint8_t presses) {
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(NVS_NS, NVS_READWRITE, &h);
+    if (err != ESP_OK) return err;
+    err = nvs_set_u8(h, NVS_KEY_WAKE_PRESSES, presses);
+    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_WAKE_MIGRATED, 1);
+    if (err == ESP_OK) err = nvs_commit(h);
+    nvs_close(h);
+    return err;
 }
 
 static void nvs_put_u32(const char* key, uint32_t value) {

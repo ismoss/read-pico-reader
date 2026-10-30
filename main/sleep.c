@@ -180,7 +180,9 @@ static void lock_resume_service(void) {
     if(!hl)return;
     read_pico_sd_info_t info={0};
     if(read_pico_sd_get_info(&info)==ESP_ERR_NOT_FINISHED)return;
-    if(!info.mounted){s_boot_lock_hl=NULL;return;}
+    // 挂卡尚未完成不是终态：保留句柄，启动门随后还能再试一次锁图。
+    // A not-yet-mounted card is not terminal: keep the handle so the boot gate can retry.
+    if(!info.mounted)return;
     // 先对齐方向再校验缓存：锁图头里记着旋转，竖屏去读横版锁图会被判失效而改画一张竖版。
     // Align the orientation before validating the cache: the art header records the rotation, and
     // reading a landscape frame in portrait marks it stale and redraws a portrait face instead.
@@ -697,7 +699,8 @@ void enter_lock_and_sleep(
         time_t now = time(NULL);
         if (now < 1704067200 && pmu && pmu->time_synced) now = pmu->unix_sec;
         app_settings_record_pin_lock((uint32_t)now);
-        if (!lock_pin_grace_active()) lock_screen_authenticate(hl, touch, acc, false, false);
+        if (!lock_pin_grace_active())
+            lock_screen_authenticate(hl, touch, acc, false, false, false);
         else wake = app_light_sleep_wait_timed(NULL, APP_LOCK_LIGHT_SLEEP_MS);
     }
     else wake = app_light_sleep_wait_timed(NULL, APP_LOCK_LIGHT_SLEEP_MS);
@@ -854,10 +857,14 @@ void app_lock_boot_gate(EpdiyHighlevelState *hl, cst836u_handle_t touch, sc7a20h
     // is done, and the page re-enters landscape from the saved setting by itself.
     const bool boot_landscape = boot_lock_landscape();
     if (boot_landscape) epd_set_rotation(boot_lock_rotation());
-    if (!lock_pin_enabled() || (pico_boot_has_resume() && lock_pin_grace_active())) {
+    const bool pin_bypassed =
+        !lock_pin_enabled() || (pico_boot_has_resume() && lock_pin_grace_active());
+    // 无密码/宽限期且已有本次启动的按键证据：直接续读，不为了“展示锁面”多刷一帧。
+    // No PIN, or an active grace window, with real key evidence resumes immediately without a
+    // redundant lock-face refresh.
+    if (pin_bypassed && (!pico_boot_has_resume() || boot_key_unlock)) {
         if(pico_boot_has_resume()) {
             pico_boot_ready();pico_boot_hold_resume();
-            (void)app_light_sleep_wait_timed(NULL,0);
             auto_connect_on_wake();
         }
         s_boot_lock_hl=NULL;s_boot_lock_active=false;s_lock_hint_hl=NULL;
@@ -867,9 +874,18 @@ void app_lock_boot_gate(EpdiyHighlevelState *hl, cst836u_handle_t touch, sc7a20h
     // 卡挂载有界等待仅为了字体/锁屏图；没有卡仍必须验证。
     // Bound mount waiting for the face/art only; absent media still requires authentication.
     read_pico_sd_info_t info;
-    for (unsigned i = 0; i < 150 && read_pico_sd_get_info(&info) == ESP_ERR_NOT_FINISHED; ++i)
+    // 透明书封要先等 SD 完成挂载，否则会先画中央圆锁、随后再合成真正的书封。
+    // Wait for mount before drawing the transparent cover; this avoids fallback-badge -> cover.
+    const unsigned media_wait_ms = app_settings_lock_style() == 3 &&
+        pico_boot_has_resume() ? 5000u : 3000u;
+    for (unsigned i = 0; i < media_wait_ms / 20u; ++i) {
+        esp_err_t sd = read_pico_sd_get_info(&info);
+        if (sd == ESP_OK && info.mounted) break;
+        if (sd != ESP_OK && sd != ESP_ERR_NOT_FINISHED) break;
         vTaskDelay(pdMS_TO_TICKS(20));
+    }
     lock_resume_service();
+    bool boot_face_settled=s_boot_lock_known;
     app_lock_font_t saved; app_font_begin_lock(&saved);
     uint8_t *fb = epd_hl_get_framebuffer(hl);
     if (!lock_screen_restore(fb)) {
@@ -886,7 +902,43 @@ void app_lock_boot_gate(EpdiyHighlevelState *hl, cst836u_handle_t touch, sc7a20h
         if (!drawn) ui_lock_fallback_draw(fb);
     }
     s_boot_lock_hl=NULL;s_boot_lock_active=false;
-    lock_screen_authenticate(hl, touch, acc, true, boot_key_unlock);
+    // 还没有一帧确定落到面板时先整屏定稿；但已拿到开机按键证据、马上要弹密码时，
+    // 只把锁面重建到内存供取消回退，不能先推一张“闪一下又进密码”的中间帧。
+    // Settle an unknown face before waiting, but when the boot key already opens the PIN, rebuild
+    // the face only in memory for cancel fallback and never flash it before the PIN screen.
+    if (!boot_face_settled && !boot_key_unlock) {
+        enum EpdDrawError result=update_display_full(hl);
+        guard_draw_result(hl,result);
+        epd_poweroff();
+        boot_face_settled=result==EPD_DRAW_SUCCESS;
+    }
+    if (pin_bypassed) {
+        // 双击模式或非按键复位启动要在锁面等待；共享等待器按用户选择的单击/双击识别，
+        // 十分钟无操作则重新深睡，绝不把一次误触当成双击解锁。
+        // Double-press mode and non-key boots wait on the face. The shared waiter honors the
+        // selected one/two-press count and returns to deep sleep after ten minutes.
+        s_lock_hint_hl=boot_face_settled?hl:NULL;
+        for (;;) {
+            epd_poweroff();
+            const int woke=(int)app_light_sleep_wait_timed(NULL,10u*60u*1000u);
+            if (woke!=APP_WAKE_TIMEOUT) break;
+            if (pico_boot_has_resume()) {
+                pico_boot_ready();pico_boot_hold_resume();
+            }
+            app_enter_host_sleep(APP_SLEEP_DEEP);
+            // 防御性处理：电源交接意外返回时继续在锁面等待。
+            // Defensive: if the power handoff unexpectedly returns, keep waiting on the face.
+        }
+        if(pico_boot_has_resume()) {
+            pico_boot_ready();pico_boot_hold_resume();
+            auto_connect_on_wake();
+        }
+        s_lock_hint_hl=NULL;
+        app_font_end_lock(&saved);
+        if (boot_landscape) epd_set_rotation(EPD_ROT_INVERTED_PORTRAIT);
+        return;
+    }
+    lock_screen_authenticate(hl, touch, acc, true, boot_key_unlock, boot_face_settled);
     s_lock_hint_hl=NULL;
     app_font_end_lock(&saved);
     // 二改：开机验证通过也是一种解锁——同样自动连网（此前只接了浅睡唤醒路径，深睡开机漏了）。

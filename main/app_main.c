@@ -160,7 +160,11 @@ static bool prepare_startup_frame(EpdiyHighlevelState *hl,uint8_t *framebuffer,b
     // (a pending checkpoint goes through the retained lock frame), so the UI it hands over to is
     // portrait. It used to guess landscape from "the last lock was inside a book", which produced a
     // landscape splash in front of a portrait UI.
-    if(resuming && app_settings_lock_style()!=4)ui_lock_fallback_draw(framebuffer);
+    // 透明书封没有可恢复的底图时不要先画白色圆锁；让启动门等 SD/缓存后再一次性出图。
+    // Do not show the white badge before a transparent-cover boot; let the gate wait for media
+    // and draw the final face once.
+    if(resuming && app_settings_lock_style()!=4 && app_settings_lock_style()!=3)
+        ui_lock_fallback_draw(framebuffer);
     else if(!resuming) {
         draw_startup_frame(framebuffer);
     }
@@ -242,26 +246,49 @@ void app_main(void) {
 
     // 单击开机：开机那一次短按就算开机，直接续读；双击开机仍停在锁屏等第二次。
     // One-press boot treats the powering short press as the boot; double-click boot still waits on the lock face.
+    const pmu_snapshot_t *boot_pmu = read_pico_pmu_get();
+    const bool key_boot_reset = reset == ESP_RST_POWERON || reset == ESP_RST_DEEPSLEEP;
+    const bool pmu_says_key_boot = boot_pmu != NULL && boot_pmu->wake_reason == 2;
+    const bool pmu_wake_unknown = boot_pmu != NULL && boot_pmu->wake_reason == 0;
+    const bool boot_key_candidate =
+        key_boot_reset && (pmu_says_key_boot || pmu_wake_unknown);
     const bool one_press_boot = resuming && !lock_pin_enabled() && hw.pmu_ready &&
         app_settings_wake_presses() == 1;
-    bool boot_press = read_pico_pmu_take_boot_short_press();
+    // 充电/闹钟/OTA/软复位启动时不要提前取走短按锁存；事件要留给锁面等待器。
+    // Do not take the short-press latch on charger/alarm/OTA/software-reset boots; the event
+    // must remain available to the lock-face waiter.
+    bool boot_press = boot_key_candidate && read_pico_pmu_take_boot_short_press();
     // 按住稍久会被 PMU 记成长按，释放也可能晚于握手；有界补等一次按键事件，避免已经按过还要再按。
-    // A slightly long hold is logged as a long press and its release can land after the handshake,
-    // so wait a bounded window for that event instead of asking for a second press.
-    for (unsigned wait = 0; one_press_boot && !boot_press && wait < 50; ++wait) {
+    // 设了密码时也保留这枚真实按键证据，供启动门判断是否可以直达密码。
+    // A slightly long hold is logged as a long press and its release can land after the handshake.
+    // Keep the same bounded wait for PIN boots so the real key event can carry the unlock evidence.
+    const bool single_pin_boot = resuming && lock_pin_enabled() &&
+        app_settings_wake_presses() == 1;
+    // 只有“这次复位本来就有按键证据”时才补等迟到事件。OTA/软复位/异常复位以及充电、
+    // 闹钟启动都不能把用户后来按下的第一次键偷偷消费掉；那一次键应留给锁面。
+    // Wait for a late event only when this reset already carries key evidence. OTA/software/
+    // fault, charger and alarm boots must not consume the user's first press; leave it for the
+    // lock face.
+    const bool await_late_key = key_boot_reset && !boot_press &&
+        (pmu_says_key_boot || pmu_wake_unknown);
+    for (unsigned wait = 0;
+         (one_press_boot || single_pin_boot) && await_late_key && !boot_press && wait < 50;
+         ++wait) {
         boot_press = read_pico_pmu_take_key_wakeup_single();
         if (!boot_press) vTaskDelay(pdMS_TO_TICKS(20));
     }
-    const bool boot_with_one_press = one_press_boot && boot_press;
-    // 只有真正的电源键冷启动/深睡启动才算“已经按过解锁键”。OTA、esp_restart
-    // 和异常复位即使还留着恢复检查点，也必须先显示锁面等待下一次按键。
-    // Only a real key-triggered cold/deep boot counts as the unlock press. OTA,
-    // esp_restart and fault resets retain a checkpoint but must wait on the lock face.
-    const pmu_snapshot_t *boot_pmu = read_pico_pmu_get();
-    const bool boot_key_unlock = resuming && lock_pin_enabled() && hw.pmu_ready &&
-        app_settings_wake_presses() == 1 &&
-        (reset == ESP_RST_POWERON || reset == ESP_RST_DEEPSLEEP) &&
-        boot_pmu != NULL && boot_pmu->wake_reason == 2;
+    // “看到过按键”不能脱离复位原因：OTA/esp_restart 期间 PMU 也可能残留或收到短按，
+    // 但那次复位本身不是用户从关机/深睡中按键启动，不能因此把恢复检查点当作已解锁。
+    // A key event without a physical power/deep-sleep reset is not unlock evidence: OTA and
+    // esp_restart can retain or receive a short press while the app is already rebooting.
+    const bool physical_key_boot = key_boot_reset &&
+        (pmu_says_key_boot || (boot_press && pmu_wake_unknown));
+    const uint8_t wake_presses = app_settings_wake_presses();
+    const bool boot_with_one_press = one_press_boot && physical_key_boot;
+    const bool double_press_boot = physical_key_boot && resuming && wake_presses == 2 &&
+        read_pico_pmu_take_key_wakeup();
+    const bool boot_key_unlock = resuming && hw.pmu_ready && physical_key_boot &&
+        (wake_presses == 1 || (wake_presses == 2 && double_press_boot));
     if (boot_with_one_press) {
         ESP_LOGI(TAG, "resume lock cache=%d; one-press boot", restored_lock);
         pico_boot_ready();

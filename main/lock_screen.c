@@ -125,7 +125,7 @@ static void blank_canvas(uint8_t *fb){
 }
 
 void lock_screen_authenticate(EpdiyHighlevelState *hl,cst836u_handle_t touch,sc7a20h_handle_t acc,
-                              bool boot,bool boot_key_unlock){
+                              bool boot,bool boot_key_unlock,bool boot_face_settled){
     if(!lock_pin_enabled())return;
     uint8_t *fb=epd_hl_get_framebuffer(hl);
     (void)acc;
@@ -152,8 +152,9 @@ void lock_screen_authenticate(EpdiyHighlevelState *hl,cst836u_handle_t touch,sc7
     bool waiting=!boot_key_unlock;
     // OTA/冷启动的启动图不是锁面；先完整推一次锁面再进入按键等待。
     // A cold/OTA splash is not the lock face: settle the face once before waiting.
-    bool need_paint=boot&&waiting;
+    bool need_paint=boot&&waiting&&!boot_face_settled;
     unsigned failures=0;int64_t retry_at=0;
+    bool wait_for_release=false;
     for(;;){
         // 只有需要重画时才刷锁屏面：取消/超时后要重画，亮屏唤醒时面板本来就还是锁屏图。
         // Repaint the lock face only when needed: after cancel/timeout it must come back, but a wake
@@ -161,7 +162,11 @@ void lock_screen_authenticate(EpdiyHighlevelState *hl,cst836u_handle_t touch,sc7
         if (!waiting) need_paint = true;
         if(waiting){
             if(need_paint){ restore_art(fb,original);present(hl,ui_pinpad_full()); need_paint=false; }
-            if(!boot)app_lock_wait_key_idle(800);
+            // 首次锁屏已经由 enter_lock_and_sleep() 等过一次按键释放；这里只在电源键取消
+            // 返回锁面后补等松键，避免连续两个 800ms 窗口吞掉首击。
+            // The lock entry already waited once; only a key-cancelled prompt needs another
+            // release wait here, so two consecutive 800ms windows cannot eat the first press.
+            if(wait_for_release){app_lock_wait_key_idle(800);wait_for_release=false;}
             epd_poweroff();
             const int woke = (int)app_light_sleep_wait_timed(NULL,10u*60u*1000u);
             if(woke!=APP_WAKE_TIMEOUT){
@@ -172,13 +177,23 @@ void lock_screen_authenticate(EpdiyHighlevelState *hl,cst836u_handle_t touch,sc7
                 need_paint=true;
             }
             if(woke==APP_WAKE_TIMEOUT){
-                ui_pinpad_end(&pad);free(original);
+                ui_pinpad_end(&pad);
                 // 深睡前把锁屏画面整屏定稿一次：面板会一直是最后一帧，所以既不要白屏，也别带残影。
                 // Settle the lock art once before deep sleep: the panel keeps this last frame, so it
                 // should neither go blank nor keep key ghosts.
-                restore_art(fb, NULL);
+                // 透明书封启动不会落锁图缓存；优先使用本循环开始时的内存锁面，
+                // 否则这里会退化成兜底圆锁，成为深睡前最后一帧。
+                // The transparent-cover boot path deliberately does not write the art cache; use the
+                // in-memory face captured at entry instead of falling back to the generic lock.
+                restore_art(fb, original);
+                free(original);
                 (void)update_display_full(hl);
                 s_art_settle = false;
+                // 启动门尚未显示密码就再次深睡时，也要把一次性恢复检查点重新落盘；
+                // 否则十分钟后唤醒会把原本可续读的页面丢掉。
+                // Re-persist the one-shot resume checkpoint before deep sleep even if the PIN
+                // screen was never shown; otherwise a later wake loses the resumable page.
+                if(boot){pico_boot_ready();pico_boot_hold_resume();boot=false;}
                 app_enter_host_sleep(APP_SLEEP_DEEP);
                 // 防御性处理：电源交接意外返回也继续验证。/ Defensive: a returning power handoff still requires verification.
                 // 深睡回来 fb 是锁屏画面：先刷白让玻璃圆键重新采样，再由等待阶段的 restore_art 恢复样式。
@@ -203,11 +218,11 @@ void lock_screen_authenticate(EpdiyHighlevelState *hl,cst836u_handle_t touch,sc7
         if(boot){pico_boot_ready();pico_boot_hold_resume();boot=false;}
         ui_gesture_t gesture={0};bool was_down=false,draining=true;
         cst836u_touch_t latest={0};int64_t active_at=esp_timer_get_time()/1000,last_poll=active_at;
-        bool cancel=false;
+        bool cancel=false,key_cancel=false;
         while(!cancel){
             int64_t now=esp_timer_get_time()/1000;
             if(now-active_at>=30000){cancel=true;break;}
-            if(now-last_poll>=40){last_poll=now;(void)read_pico_pmu_poll();if(read_pico_pmu_take_key_action()!=READ_PICO_PMU_KEY_NONE){cancel=true;break;}}
+            if(now-last_poll>=40){last_poll=now;(void)read_pico_pmu_poll();if(read_pico_pmu_take_key_action()!=READ_PICO_PMU_KEY_NONE){cancel=true;key_cancel=true;break;}}
             if(pad.blocked&&lock_pin_available()&&now>=retry_at){ui_pinpad_reset(&pad,NULL,"请重新输入");ui_pinpad_paint(fb,&pad,ui_pinpad_entry_area());present(hl,ui_pinpad_entry_area());}
             cst836u_touch_t sample={0};esp_err_t error=cst836u_read(touch,&sample);
             bool down=error==ESP_OK&&sample.touched;
@@ -248,5 +263,6 @@ void lock_screen_authenticate(EpdiyHighlevelState *hl,cst836u_handle_t touch,sc7
         (void)update_display_full(hl);
         need_paint=true;
         waiting=true;
+        wait_for_release=key_cancel;
     }
 }

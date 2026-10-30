@@ -27,6 +27,7 @@ enum EpdDrawError {EPD_DRAW_SUCCESS=0,EPD_DRAW_FAULT=1};
 #define APP_LOCK_LIGHT_SLEEP_MS 600000u
 #define APP_LOCK_IGNORE_BOOT_MS 1000
 #define ESP_ERR_NOT_FINISHED 1
+#define ESP_OK 0
 #define ESP_LOGI(...) ((void)0)
 #define ESP_LOGW(...) ((void)0)
 #define pdMS_TO_TICKS(x) (x)
@@ -41,8 +42,8 @@ enum EpdRotation {EPD_ROT_LANDSCAPE,EPD_ROT_PORTRAIT,EPD_ROT_INVERTED_LANDSCAPE,
 static uint8_t pixels[FRAME_BYTES],panel[FRAME_BYTES],style,current_background=0x32;
 static bool frame_ready, s_lock_feedback_visible, feedback_seen, final_ok=true;
 static unsigned full_presents, entry_clears;
-static unsigned draws[4],fallback,presents,auths,font_begin,font_end,pause,resume,clear_resume;
-static bool pin,draw_ok=true,transfer_ok=true,timeout,reader,boot_cache,cache_ok;
+static unsigned draws[4],fallback,presents,auths,font_begin,font_end,pause,resume,clear_resume,ready,held,sleep_waits;
+static bool pin,draw_ok=true,transfer_ok=true,timeout,reader,boot_cache,cache_ok,boot_key;
 static bool boot_resume,boot_in_reader,draw_seen;
 static uint8_t reader_landscape;
 static enum EpdRotation rotation_state,last_draw_rotation;
@@ -66,7 +67,8 @@ static bool lock_screen_save(const uint8_t *fb){assert(fb==pixels&&presents);ret
 static int pico_boot_mark_frame_cached(void){return 0;}
 static bool book_lock_collage_draw(uint8_t *fb){return draw(2,fb);}
 static bool book_lock_collage_prepare(uint8_t *fb){return draw(2,fb);}
-static enum EpdDrawError update_display_full(EpdiyHighlevelState *h){(void)h;++full_presents;assert(feedback_seen&&!s_lock_feedback_visible&&panel[0]==255&&panel[1]==0);if(!final_ok){panel[0]=0x77;return EPD_DRAW_FAULT;}memcpy(panel,pixels,FRAME_BYTES);++presents;return EPD_DRAW_SUCCESS;}
+static enum EpdDrawError update_display_full(EpdiyHighlevelState *h){(void)h;++full_presents;assert(!s_lock_feedback_visible);if(feedback_seen)assert(panel[0]==255&&panel[1]==0);if(!final_ok){panel[0]=0x77;return EPD_DRAW_FAULT;}memcpy(panel,pixels,FRAME_BYTES);++presents;return EPD_DRAW_SUCCESS;}
+static void guard_draw_result(EpdiyHighlevelState *h,enum EpdDrawError result){(void)h;(void)result;}
 static void book_lock_collage_cache_commit(const uint8_t *fb){assert(style==2&&draw_ok&&presents==1&&fb==pixels&&!memcmp(panel,pixels,FRAME_BYTES));}
 static void ui_lock_fallback_draw(uint8_t *fb){assert(panel[0]==(feedback_seen?255:0x32));++fallback;memset(fb,0xfe,FRAME_BYTES);frame_ready=true;}
 static uint8_t *epd_hl_get_framebuffer(EpdiyHighlevelState *h){memset(h->back_fb,current_background,FRAME_BYTES);return pixels;}
@@ -82,10 +84,10 @@ static void read_pico_transfer_resume_after_sleep(void){++resume;}
 static void pico_boot_clear_resume(void){++clear_resume;}
 static bool pico_boot_has_resume(void){return boot_resume;}
 static bool pico_boot_resume_in_reader(void){return boot_in_reader;}
-static void pico_boot_ready(void){}
-static void pico_boot_hold_resume(void){}
+static void pico_boot_ready(void){++ready;}
+static void pico_boot_hold_resume(void){++held;}
 static void app_lock_wait_key_idle(int ms){assert(ms==800);}
-static app_wake_source_t app_light_sleep_wait_timed(void *acc,unsigned ms){assert((acc==NULL||acc==(void*)1)&&(ms==0||ms==600000));if(ms==0)return APP_WAKE_KEY;return timeout?APP_WAKE_TIMEOUT:APP_WAKE_KEY;}
+static app_wake_source_t app_light_sleep_wait_timed(void *acc,unsigned ms){assert((acc==NULL||acc==(void*)1)&&(ms==0||ms==600000));++sleep_waits;if(ms==0)return APP_WAKE_KEY;return timeout?APP_WAKE_TIMEOUT:APP_WAKE_KEY;}
 static void app_enter_host_sleep(int mode){assert(mode==APP_SLEEP_DEEP);longjmp(deep,1);}
 static void read_pico_pmu_drain_events(void){}
 static uint32_t read_pico_pmu_lock_key_serial(void){return 0;}
@@ -95,8 +97,9 @@ static bool lock_pin_grace_active(void){return false;}
 static void auto_connect_on_wake(void){}
 static int64_t esp_timer_get_time(void){return 2000000;}
 static bool lock_screen_restore(uint8_t *fb){if(!cache_ok||cached_style!=style)return false;memset(fb,0x10+style,FRAME_BYTES);return true;}
-static void lock_screen_authenticate(void *h,void *tp,void *acc,bool boot,bool boot_key_unlock){(void)h;assert(tp==(void*)2&&acc==(void*)1);assert(pin);assert(boot==boot_cache&&!boot_key_unlock);assert(pixels[0]==(draw_ok?0x10+style:0xfe)||(style==4&&pixels[0]==255));++auths;}
-static int read_pico_sd_get_info(read_pico_sd_info_t *i){i->mounted=true;return 0;}
+static void lock_screen_authenticate(void *h,void *tp,void *acc,bool boot,bool boot_key_unlock,bool boot_face_settled){(void)h;(void)boot_face_settled;assert(tp==(void*)2&&acc==(void*)1);assert(pin);assert(boot==boot_cache&&boot_key_unlock==boot_key);assert(pixels[0]==(draw_ok?0x10+style:0xfe)||(style==4&&pixels[0]==255));++auths;}
+typedef int esp_err_t;
+static esp_err_t read_pico_sd_get_info(read_pico_sd_info_t *i){i->mounted=true;return ESP_OK;}
 static void vTaskDelay(int ms){(void)ms;}
 static int epd_width(void){return 684;}
 static int epd_height(void){return 1216;}
@@ -114,7 +117,7 @@ for name in ('lock_wallpaper_path', 'boot_lock_landscape', 'boot_lock_rotation',
              'draw_wallpaper', 'enter_lock_and_sleep', 'app_lock_boot_gate'):
     unit += function(name, ROOT/'main/sleep.c') + '\n'
 unit += r'''
-static void reset(void){current_background=0x32;memset(draws,0,sizeof(draws));fallback=presents=auths=font_begin=font_end=pause=resume=clear_resume=0;memset(pixels,0x32,FRAME_BYTES);memset(panel,0x32,FRAME_BYTES);frame_ready=s_lock_feedback_visible=feedback_seen=draw_seen=false;full_presents=entry_clears=0;final_ok=true;draw_ok=transfer_ok=true;timeout=reader=boot_cache=cache_ok=boot_resume=boot_in_reader=false;reader_landscape=0;rotation_state=EPD_ROT_INVERTED_PORTRAIT;last_draw_rotation=rotation_state;}
+static void reset(void){current_background=0x32;memset(draws,0,sizeof(draws));fallback=presents=auths=font_begin=font_end=pause=resume=clear_resume=ready=held=sleep_waits=0;memset(pixels,0x32,FRAME_BYTES);memset(panel,0x32,FRAME_BYTES);frame_ready=s_lock_feedback_visible=feedback_seen=draw_seen=false;full_presents=entry_clears=0;final_ok=true;draw_ok=transfer_ok=true;timeout=reader=boot_cache=cache_ok=boot_resume=boot_in_reader=boot_key=false;reader_landscape=0;rotation_state=EPD_ROT_INVERTED_PORTRAIT;last_draw_rotation=rotation_state;}
 int main(void){
  EpdiyHighlevelState hl={0};int64_t ignore=0;
  // 两种来源的阅读背景只影响票根内容，不决定样式。/ Reader provenance affects ticket content, never the style.
@@ -157,10 +160,16 @@ int main(void){
  for(unsigned s=0;s<4;++s)for(unsigned previous=0;previous<4;++previous){
   reset();style=s;pin=boot_cache=cache_ok=true;cached_style=previous;
   app_lock_boot_gate(&hl,(void*)2,(void*)1,false);
-  assert(auths==1&&font_begin==1&&font_end==1&&!presents&&!fallback&&style==s);
+  assert(auths==1&&font_begin==1&&font_end==1&&presents==1&&full_presents==1&&!fallback&&style==s);
   assert(draws[s]==(previous!=s)&&draws[(s+1)%3]==0&&draws[(s+2)%3]==0);
  }
  for(unsigned s=0;s<4;++s){reset();style=s;pin=boot_cache=true;draw_ok=false;app_lock_boot_gate(&hl,(void*)2,(void*)1,false);assert(auths==1&&draws[s]==1&&fallback==1&&style==s);}
+ // 开机键已带来解锁证据：锁面只在内存里重建，不能先整屏闪一次再弹密码。
+ // A boot key already carries unlock evidence: rebuild the face in memory without flashing it
+ // before the PIN screen.
+ reset();style=3;pin=boot_cache=true;cache_ok=false;boot_resume=true;boot_key=true;
+ app_lock_boot_gate(&hl,(void*)2,(void*)1,true);
+ assert(auths==1&&draws[3]==1&&!full_presents&&!presents);
  // 深睡恢复进横屏书：缓存校验/重画前先切到横屏，验证结束后交还竖屏；样式4保持竖屏。
  // Deep-sleep resume into a landscape book: switch to landscape before cache validation/redraw,
  // then hand portrait back after authentication; style 4 stays portrait throughout.
@@ -173,6 +182,18 @@ int main(void){
  reset();style=4;pin=boot_cache=true;cache_ok=false;boot_resume=boot_in_reader=true;reader_landscape=1;
  app_lock_boot_gate(&hl,(void*)2,(void*)1,false);
  assert(!draw_seen&&rotation_state==EPD_ROT_INVERTED_PORTRAIT&&auths==1&&style==4);
+ // 无密码双击启动未完成双击时留在锁面等待，完成后才续读并重新持有检查点。
+ // A no-PIN double-press boot without completed evidence waits on the lock face, then resumes
+ // and re-holds the checkpoint.
+ reset();style=3;pin=false;boot_resume=true;boot_cache=cache_ok=true;cached_style=3;
+ app_lock_boot_gate(&hl,(void*)2,(void*)1,false);
+ assert(!auths&&font_begin==1&&font_end==1&&ready==1&&held==1&&presents==1);
+ // 已经完成双击证据时直接续读，不能被旧启动门再困进一次无限浅睡。
+ // With completed double-press evidence, resume directly instead of entering the old unbounded
+ // lock wait once more.
+ reset();style=3;pin=false;boot_resume=true;boot_cache=cache_ok=true;cached_style=3;
+ app_lock_boot_gate(&hl,(void*)2,(void*)1,true);
+ assert(!auths&&!font_begin&&ready==1&&held==1&&!sleep_waits);
  reset();pin=false;app_lock_boot_gate(&hl,(void*)2,(void*)1,false);assert(!auths&&!font_begin);
  puts("PASS: real single-pass final collage retains white/badge history, avoids duplicate entry clear, recovers final faults and consumes feedback before cache/PIN; auto/manual lock entry chooses ticket/wallpaper/collage with/without PIN and reader background; upload deferral; deep timeout; cold gate cache/fault fallback keeps selected style");
 }

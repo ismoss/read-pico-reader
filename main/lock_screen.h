@@ -15,4 +15,4 @@ bool lock_screen_save(const uint8_t *frame);
 /// triggered by the power key. Errors/cancel cannot return to the app loop.
 void lock_screen_authenticate(
     EpdiyHighlevelState *hl, cst836u_handle_t touch, sc7a20h_handle_t acc,
-    bool boot, bool boot_key_unlock);
+    bool boot, bool boot_key_unlock, bool boot_face_settled);

@@ -17,15 +17,37 @@ unit=r'''
 #include <string.h>
 #include <stdio.h>
 #define NVS_KEY_WAKE_PRESSES "wake_press"
+#define NVS_KEY_WAKE_MIGRATED "wake_migr"
+#define NVS_NS "settings"
+#define NVS_READWRITE 1
 #define ESP_OK 0
+#define ESP_ERR_NVS_NOT_FOUND -2
 #define ESP_LOGI(...) ((void)0)
-static uint8_t stored;static unsigned writes,gate,ready,held;
-static bool pin,boot_press;
-static void nvs_put_u8(const char *key,uint8_t value){assert(!strcmp(key,NVS_KEY_WAKE_PRESSES));stored=value;++writes;}
+typedef int esp_err_t;
+typedef int nvs_handle_t;
+static esp_err_t nvs_put_wake_presses(uint8_t presses);
+static uint8_t stored,staged_stored;static unsigned writes,migration_writes,gate,ready,held;
+static bool pin,boot_press,fail_wake_write,fail_migration_write,fail_wake_read,fail_commit;
+static bool staged_value,staged_marker;
+static esp_err_t nvs_open(const char *ns,int mode,nvs_handle_t *h){
+ assert(!strcmp(ns,NVS_NS)&&mode==NVS_READWRITE&&h);*h=1;return ESP_OK;
+}
+static esp_err_t nvs_set_u8(nvs_handle_t h,const char *key,uint8_t value){
+ assert(h==1);
+ if(!strcmp(key,NVS_KEY_WAKE_PRESSES)){++writes;if(fail_wake_write)return -1;staged_stored=value;staged_value=true;return ESP_OK;}
+ assert(!strcmp(key,NVS_KEY_WAKE_MIGRATED));++migration_writes;if(fail_migration_write)return -1;
+ staged_marker=true;return ESP_OK;
+}
+static esp_err_t nvs_commit(nvs_handle_t h){
+ assert(h==1);if(fail_commit)return -1;if(staged_value)stored=staged_stored;
+ staged_value=staged_marker=false;return ESP_OK;
+}
+static void nvs_close(nvs_handle_t h){assert(h==1);staged_value=staged_marker=false;}
 '''
 unit+=re.search(r'^static uint8_t s_wake_presses = [12];',settings.read_text(),re.M)[0]+'\n'
 for name in ('app_settings_wake_presses','app_settings_set_wake_presses'):
     unit+=function(name,settings)+'\n'
+unit+=function('nvs_put_wake_presses',settings)+'\n'
 unit+=r'''
 #include "ui_nav_layout.h"
 #define KIIKO_BOARD_METALIO47 0
@@ -51,17 +73,25 @@ static int setting_tap(int x,int input_y,int scroll){
  y+=scroll;
 '''+ui[a:b]+'return APP_REDRAW_NONE;}\n'
 unit+=r'''
-static bool load_exists;static uint8_t load_value;
-static int nvs_get_u8(int h,const char *key,uint8_t *value){(void)h;assert(!strcmp(key,NVS_KEY_WAKE_PRESSES));if(!load_exists)return -1;*value=load_value;return ESP_OK;}
-static void reload_wake(bool exists,uint8_t value){load_exists=exists;load_value=value;int h=0;uint8_t raw;
+static bool load_exists,migrated_exists;static uint8_t load_value,migrated_value;
+static int nvs_get_u8(int h,const char *key,uint8_t *value){
+ (void)h;
+ if(!strcmp(key,NVS_KEY_WAKE_PRESSES)){if(fail_wake_read)return -1;if(!load_exists)return ESP_ERR_NVS_NOT_FOUND;*value=load_value;return ESP_OK;}
+ assert(!strcmp(key,NVS_KEY_WAKE_MIGRATED));if(!migrated_exists)return ESP_ERR_NVS_NOT_FOUND;*value=migrated_value;return ESP_OK;
+}
+static void reload_wake(bool exists,uint8_t value,bool migrated,uint8_t migrated_flag,bool fail_migration_value_write,bool fail_read){
+ load_exists=exists;load_value=value;migrated_exists=migrated;migrated_value=migrated_flag;
+ writes=migration_writes=0;fail_wake_write=fail_migration_value_write;fail_migration_write=false;
+ fail_wake_read=fail_read;fail_commit=false;staged_value=staged_marker=false;int h=0;uint8_t raw;
 '''
-a=settings.read_text().index('    raw = 1;\n    if (nvs_get_u8(h, NVS_KEY_WAKE_PRESSES,')
+a=settings.read_text().index('    raw = 1;\n    const esp_err_t wake_read = nvs_get_u8(h, NVS_KEY_WAKE_PRESSES,')
 b=settings.read_text().index('    s_wake_presses = raw;',a)+len('    s_wake_presses = raw;')
 unit+=settings.read_text()[a:b]+'}\n'
 unit+=r'''
 static bool read_pico_pmu_take_boot_short_press(void){bool value=boot_press;boot_press=false;return value;}
-static bool late_press;
+static bool late_press,double_press;
 static bool read_pico_pmu_take_key_wakeup_single(void){bool value=late_press;late_press=false;return value;}
+static bool read_pico_pmu_take_key_wakeup(void){bool value=double_press;double_press=false;return value;}
 static void vTaskDelay(unsigned ticks){(void)ticks;}
 #define pdMS_TO_TICKS(ms) (ms)
 static bool lock_pin_enabled(void){return pin;}
@@ -79,19 +109,41 @@ static void boot_gate(bool resuming,esp_reset_reason_t reset,uint8_t wake_reason
  int hl=0;struct {int touch,sensor;bool pmu_ready;}hw={0};hw.pmu_ready=true;bool restored_lock=false;(void)restored_lock;
  boot_pmu.wake_reason=wake_reason;
 '''
-start=boot.index('    const bool one_press_boot = resuming && !lock_pin_enabled() && hw.pmu_ready &&')
+start=boot.index('    const pmu_snapshot_t *boot_pmu = read_pico_pmu_get();')
 end=boot.index('    rp_boot_mark("lock");',start)
 unit+=boot[start:end]+'}\n'
 unit+=r'''
 int main(void){
  assert(app_settings_wake_presses()==1);
- reload_wake(false,2);assert(app_settings_wake_presses()==1);
- app_settings_set_wake_presses(0);assert(writes==0&&app_settings_wake_presses()==1);
- app_settings_set_wake_presses(2);assert(stored==2&&writes==1);
- app_settings_set_wake_presses(2);assert(writes==1);
- reload_wake(true,2);assert(app_settings_wake_presses()==1);  // 二改迁移：保存的双击读回单击 / the mod migrates a saved double to single
- reload_wake(true,1);assert(app_settings_wake_presses()==1);
- for(unsigned i=0;i<256;i++)if(i!=1&&i!=2){reload_wake(true,i);assert(app_settings_wake_presses()==1);}
+ reload_wake(false,2,false,0,false,false);
+ assert(app_settings_wake_presses()==1&&writes==1&&migration_writes==1&&stored==1);
+ writes=migration_writes=0;
+ app_settings_set_wake_presses(0);assert(writes==1&&migration_writes==1&&app_settings_wake_presses()==1);
+ writes=migration_writes=0;
+ app_settings_set_wake_presses(2);assert(stored==2&&writes==1&&migration_writes==1);
+ writes=migration_writes=0;
+ app_settings_set_wake_presses(2);assert(stored==2&&writes==1&&migration_writes==1);
+ // 标记或最终提交失败时不能把“值 + 标记”只落一半；本次会话仍按新选择运行，重启后保持旧值。
+ // A marker/commit failure must not leave a half pair; the session uses the choice, reboot keeps old.
+ stored=1;writes=migration_writes=0;fail_migration_write=true;
+ app_settings_set_wake_presses(2);
+ assert(app_settings_wake_presses()==2&&stored==1&&writes==1&&migration_writes==1);fail_migration_write=false;
+ stored=1;writes=migration_writes=0;fail_commit=true;
+ app_settings_set_wake_presses(2);
+ assert(app_settings_wake_presses()==2&&stored==1&&writes==1&&migration_writes==1);fail_commit=false;
+ reload_wake(true,2,false,0,false,false);assert(app_settings_wake_presses()==1&&writes==1&&migration_writes==1);
+ reload_wake(true,2,true,1,false,false);assert(app_settings_wake_presses()==2&&!writes&&!migration_writes);
+ reload_wake(true,1,true,1,false,false);assert(app_settings_wake_presses()==1&&!writes&&!migration_writes);
+ for(unsigned i=0;i<256;i++)if(i!=1&&i!=2){reload_wake(true,i,true,1,false,false);assert(app_settings_wake_presses()==1);}
+ // 迁移值写失败时不能落标记；下次开机仍重试，而本次会话仍按单击处理。
+ // A failed migration write must not bless the marker; the next boot retries and this session
+ // still behaves as single-press.
+ reload_wake(true,2,false,0,true,false);
+ assert(app_settings_wake_presses()==1&&writes==1&&!migration_writes);
+ // 读取旧值失败时不能把它当成“没有历史值”而落迁移标记。
+ // A failed old-value read must not be mistaken for an absent legacy value.
+ reload_wake(true,2,false,0,false,true);
+ assert(app_settings_wake_presses()==1&&!writes&&!migration_writes);
  assert(SETTINGS_DISPLAY_ROWS==7);
  const int top=SETTINGS_DISPLAY_Y+5*SETTINGS_ROW_H,scroll=500;
  assert(setting_tap(36,top-scroll,scroll)==APP_REDRAW_PAGE&&s_wake_presses==2&&s_page==SETTINGS_MAIN);
@@ -104,7 +156,7 @@ int main(void){
  assert(setting_tap(300,UI_NAV_TOP,0)==APP_REDRAW_NONE);
  for(unsigned resume=0;resume<2;++resume)for(unsigned password=0;password<2;++password)
  for(unsigned key=0;key<2;++key)for(unsigned count=1;count<=2;++count){
-  s_wake_presses=count;pin=password;boot_press=key;late_press=false;gate=ready=held=gate_boot_key=0;
+   s_wake_presses=count;pin=password;boot_press=key;late_press=double_press=false;gate=ready=held=gate_boot_key=0;
   boot_gate(resume,ESP_RST_POWERON,key?2:1);bool direct=resume&&!password&&key&&count==1;
   bool immediate=resume&&password&&key&&count==1;
   assert(gate==!direct&&ready==direct&&held==direct&&!boot_press&&gate_boot_key==immediate);
@@ -113,14 +165,43 @@ int main(void){
  boot_gate(true,ESP_RST_POWERON,2);assert(!gate&&ready==1&&held==1&&!late_press&&!gate_boot_key);
  s_wake_presses=2;pin=false;boot_press=false;late_press=true;gate=ready=held=gate_boot_key=0;
  boot_gate(true,ESP_RST_POWERON,2);assert(gate&&!ready&&!held&&late_press&&!gate_boot_key);
+ // 双击设置下不能为了“补单击证据”清掉 PMU 已经起步的双击状态。
+ // A double-press boot must not clear the PMU's in-progress double-click while looking for single-press evidence.
+ s_wake_presses=2;pin=true;boot_press=false;late_press=true;gate=ready=held=gate_boot_key=0;
+ boot_gate(true,ESP_RST_POWERON,2);assert(gate&&late_press&&!gate_boot_key);
  // 没有按键证据的 OTA/软复位启动必须等锁面；真正的冷/深睡按键启动才携带
  // direct-unlock 证据。
  // An OTA/software-reset boot has no key evidence and must wait; a real
  // cold/deep key boot carries the direct-unlock evidence.
- s_wake_presses=1;pin=true;boot_press=false;gate=ready=held=gate_boot_key=0;
+ s_wake_presses=1;pin=true;boot_press=false;late_press=double_press=false;gate=ready=held=gate_boot_key=0;
  boot_gate(true,ESP_RST_SW,2);assert(gate&&!gate_boot_key);
  boot_gate(true,ESP_RST_POWERON,5);assert(gate&&!gate_boot_key);
  boot_gate(true,ESP_RST_DEEPSLEEP,2);assert(gate&&gate_boot_key);
+ // 复位原因不理想时，握手后补等到的短按也不能冒充物理开机证据。
+ // A late short press cannot impersonate physical boot evidence on a software reset.
+ s_wake_presses=1;pin=true;boot_press=false;late_press=true;gate=ready=held=gate_boot_key=0;
+ boot_gate(true,ESP_RST_SW,0);assert(gate&&!gate_boot_key&&late_press);
+ s_wake_presses=1;pin=false;boot_press=false;late_press=true;gate=ready=held=gate_boot_key=0;
+ boot_gate(true,ESP_RST_SW,0);assert(gate&&!gate_boot_key&&!ready&&!held&&late_press);
+ // 物理复位上的迟到按键仍是合法证据；真实完成的双击也能直达。
+ // A late key on a physical reset remains valid, and a completed double press is sufficient.
+ s_wake_presses=1;pin=true;boot_press=false;late_press=true;gate=ready=held=gate_boot_key=0;
+ boot_gate(true,ESP_RST_POWERON,0);assert(gate&&gate_boot_key&&!late_press);
+ // 充电/闹钟等已知非按键启动即使有迟到短按也不能直达。
+ // A known non-key charger/alarm boot must not unlock from a late short press.
+ s_wake_presses=1;pin=true;boot_press=false;late_press=true;gate=ready=held=gate_boot_key=0;
+ boot_gate(true,ESP_RST_POWERON,5);assert(gate&&!gate_boot_key&&late_press);
+ // 已知非按键启动不能提前消费用户随后按下的短按锁存。
+ // A known non-key boot must not consume the following user short-press latch.
+ s_wake_presses=1;pin=true;boot_press=true;late_press=false;gate=ready=held=gate_boot_key=0;
+ boot_gate(true,ESP_RST_POWERON,5);assert(gate&&!gate_boot_key&&boot_press);
+ s_wake_presses=1;pin=true;boot_press=true;late_press=false;gate=ready=held=gate_boot_key=0;
+ boot_gate(true,ESP_RST_SW,2);assert(gate&&!gate_boot_key&&boot_press);
+ for(unsigned password=0;password<2;++password){
+  s_wake_presses=2;pin=password;boot_press=false;late_press=false;double_press=true;
+  gate=ready=held=gate_boot_key=0;boot_gate(true,ESP_RST_POWERON,2);
+  assert(gate&&gate_boot_key&&!double_press);
+ }
  puts("PASS: single-press default/missing/invalid NVS, explicit double choice retained, root switch below auto sleep, scrolled row/nav boundaries, wake/PIN/late press guards");
 }
 '''

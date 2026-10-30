@@ -74,7 +74,7 @@ static int fat_rename(const char *a,const char *b){
  struct stat st;if(fat_semantics && !stat(b,&st)){errno=EEXIST;return -1;}return rename(a,b);
 }
 #define rename fat_rename
-static unsigned stage,idx,waits,verified,ready,held,pushes,fulls,wiped,stops,entries,settles;
+static unsigned stage,idx,waits,wait_fulls,release_waits,verified,ready,held,pushes,fulls,wiped,stops,entries,settles;
 // 锁屏面定稿标记（切片只带函数，文件级静态要宿主自己声明）。
 static bool s_art_settle;
 static bool enabled_storage=true,valid_storage=true,low_memory,boot_scenario,timeout_scenario,display_failure;
@@ -101,8 +101,8 @@ static void epd_poweroff(void){}
 static void ui_lock_fallback_draw(uint8_t *fb){memset(fb,255,FRAME_BYTES);fb[FRAME_BYTES/2]=0;}
 static size_t heap_caps_get_free_size(int caps){(void)caps;return low_memory?1024*1024:8*1024*1024;}
 static void *heap_caps_malloc(size_t n,int caps){(void)caps;return malloc(n);}
-static void app_lock_wait_key_idle(int ms){(void)ms;}
-static int app_light_sleep_wait_timed(void *acc,unsigned ms){assert(!acc);assert(ms==600000);++waits;return timeout_scenario?APP_WAKE_TIMEOUT:APP_WAKE_KEY;}
+static void app_lock_wait_key_idle(int ms){assert(ms==800);++release_waits;}
+static int app_light_sleep_wait_timed(void *acc,unsigned ms){assert(!acc);assert(ms==600000);wait_fulls=fulls;++waits;return timeout_scenario?APP_WAKE_TIMEOUT:APP_WAKE_KEY;}
 static void app_enter_host_sleep(int mode){assert(mode==APP_SLEEP_DEEP);longjmp(deep,1);}
 static int64_t esp_timer_get_time(void){return now*1000;}
 static int read_pico_pmu_poll(void){return 0;}
@@ -133,7 +133,7 @@ static void display_request_full_refresh(void){++fulls;}
  for n in ('checksum','wallpaper_key','lock_screen_restore','lock_screen_save','restore_art','present','present_input','blank_canvas','lock_screen_authenticate'):
   unit+=function(n,ROOT/'main/lock_screen.c')+'\n'
  unit+=r'''
-static void start(void){idx=sample_count=waits=verified=ready=held=pushes=fulls=entries=settles=0;now=0;power_pending=0;memset(framebuffer,0x37,sizeof(framebuffer));add(0,0,0,0);lock_screen_save(framebuffer);}
+static void start(void){idx=sample_count=waits=wait_fulls=release_waits=verified=ready=held=pushes=fulls=entries=settles=0;now=0;power_pending=0;memset(framebuffer,0x37,sizeof(framebuffer));add(0,0,0,0);lock_screen_save(framebuffer);}
 int main(void){
  EpdiyHighlevelState hl={0};
  // FAT覆盖与提交失败必须保持有效旧图。/ FAT replacement and failed commits must preserve valid old art.
@@ -148,33 +148,42 @@ int main(void){
  // 未开启和读取失败均不绘制密码、等待触摸或停蓝牙；读取恢复后已设密码正常验证。
  // Disabled/unreadable settings neither paint a PIN nor wait/stop BLE; a recovered enabled PIN requires verification.
  start();enabled_storage=false;
- lock_screen_authenticate(&hl,(void*)1,(void*)2,true,true);assert(!verified&&!entries&&!pushes&&!waits&&!ready&&!held);
+ lock_screen_authenticate(&hl,(void*)1,(void*)2,true,true,false);assert(!verified&&!entries&&!pushes&&!waits&&!ready&&!held);
  start();enabled_storage=true;valid_storage=false;
- lock_screen_authenticate(&hl,(void*)1,(void*)2,true,true);assert(!verified&&!entries&&!pushes&&!waits&&!ready&&!held);
- start();valid_storage=true;correct();lock_screen_authenticate(&hl,(void*)1,(void*)2,true,true);assert(verified==1&&entries==1);
+ lock_screen_authenticate(&hl,(void*)1,(void*)2,true,true,false);assert(!verified&&!entries&&!pushes&&!waits&&!ready&&!held);
+ start();valid_storage=true;correct();lock_screen_authenticate(&hl,(void*)1,(void*)2,true,true,false);assert(verified==1&&entries==1);
  // Wrong PIN, cancel, pickup, physical touch buttons, multitouch and read errors, then valid PIN.
  start();for(int i=0;i<4;++i)tap(342,1021);tap(144,1132);add(0,0,0,0);
  tap(342,1350);add(158,544,1,0);add(158,544,2,0);add(158,544,0,0);
  add(158,544,1,0);add(158,544,0,-1);add(0,0,0,0);correct();
- lock_screen_authenticate(&hl,(void*)1,(void*)2,false,false);assert(verified==2&&waits==2&&!ready&&!held&&wiped>2&&entries==2&&!settles);
+ lock_screen_authenticate(&hl,(void*)1,(void*)2,false,false,false);assert(verified==2&&waits==2&&release_waits==0&&!ready&&!held&&wiped>2&&entries==2&&!settles);
  // Cold boot verifies immediately on the key that powered it on, without eating a second press.
- start();correct();lock_screen_authenticate(&hl,(void*)1,(void*)2,true,true);assert(verified==1&&waits==0&&ready==1&&held==1&&entries==1&&!settles);
+ start();correct();lock_screen_authenticate(&hl,(void*)1,(void*)2,true,true,false);assert(verified==1&&waits==0&&ready==1&&held==1&&entries==1&&!settles);
  // OTA/reset boot: no key evidence, so the face is settled and the gate waits
  // before the first PIN frame; it must not open the passcode by itself.
- start();correct();lock_screen_authenticate(&hl,(void*)1,(void*)2,true,false);assert(verified==1&&waits==1&&ready==1&&held==1&&entries==1&&fulls>0);
+ start();correct();lock_screen_authenticate(&hl,(void*)1,(void*)2,true,false,false);assert(verified==1&&waits==1&&wait_fulls==1&&ready==1&&held==1&&entries==1&&fulls>0);
+ // 启动门已经整屏定稿的锁面不再在等待前重复全刷。/ A settled boot face is not refreshed again before waiting.
+ start();correct();lock_screen_authenticate(&hl,(void*)1,(void*)2,true,false,true);assert(verified==1&&waits==1&&wait_fulls==0&&ready==1&&held==1&&entries==1);
  // PMU short/long actions only return to the locked art, then demand authentication again.
- for(int action=2;action<=3;++action){start();add(0,0,0,-action);for(int i=0;i<10;++i)add(0,0,0,0);correct();lock_screen_authenticate(&hl,(void*)1,(void*)2,true,true);assert(verified==1&&waits==1);}
+ for(int action=2;action<=3;++action){start();add(0,0,0,-action);for(int i=0;i<10;++i)add(0,0,0,0);correct();lock_screen_authenticate(&hl,(void*)1,(void*)2,true,true,false);assert(verified==1&&waits==1&&release_waits==1);}
  // Low-memory/cache fallback and display errors still demand the correct credential.
- start();low_memory=display_failure=true;correct();lock_screen_authenticate(&hl,(void*)1,(void*)2,true,true);assert(verified==1&&fulls>0);low_memory=display_failure=false;
- start();low_memory=true;correct();lock_screen_authenticate(&hl,(void*)1,(void*)2,false,false);assert(verified==1&&waits==1&&entries==1&&!settles);low_memory=false;
+ start();low_memory=display_failure=true;correct();lock_screen_authenticate(&hl,(void*)1,(void*)2,true,true,false);assert(verified==1&&fulls>0);low_memory=display_failure=false;
+ start();low_memory=true;correct();lock_screen_authenticate(&hl,(void*)1,(void*)2,false,false,false);assert(verified==1&&waits==1&&entries==1&&!settles);low_memory=false;
  // 单次密码入场失败重建同一画面；不能绕过验证。
  // A failed single entry rebuilds the protected PIN screen; verification remains mandatory.
- start();display_failure=true;correct();lock_screen_authenticate(&hl,(void*)1,(void*)2,false,false);assert(verified==1&&entries==1&&!settles&&fulls>0);display_failure=false;
+ start();display_failure=true;correct();lock_screen_authenticate(&hl,(void*)1,(void*)2,false,false,false);assert(verified==1&&entries==1&&!settles&&fulls>0);display_failure=false;
  // Cancel never releases the caller: deep sleep terminates the protected loop instead.
- start();tap(144,1132);timeout_scenario=true;if(!setjmp(deep)){lock_screen_authenticate(&hl,(void*)1,(void*)2,true,true);assert(0);}assert(!verified&&waits==1);timeout_scenario=false;
+ start();tap(144,1132);timeout_scenario=true;if(!setjmp(deep)){lock_screen_authenticate(&hl,(void*)1,(void*)2,true,true,false);assert(0);}assert(!verified&&waits==1&&ready==1&&held==1);timeout_scenario=false;
+ // 启动门尚未显示密码就超时也必须重新持有恢复检查点。/ A boot timeout before the PIN screen still re-holds resume.
+ start();correct();timeout_scenario=true;if(!setjmp(deep)){lock_screen_authenticate(&hl,(void*)1,(void*)2,true,false,false);assert(0);}assert(!verified&&waits==1&&ready==1&&held==1);timeout_scenario=false;
+ // 透明书封启动不写锁图缓存；超时深睡前必须用入口处的内存锁面定稿，不能落回兜底圆锁。
+ // Transparent-cover boot does not cache art; timeout must settle from the in-memory face, not fallback.
+ start();memset(framebuffer,0x42,sizeof(framebuffer));framebuffer[FRAME_BYTES/2]=0x24;assert(remove(LOCK_ART_PATH)==0);
+ timeout_scenario=true;if(!setjmp(deep)){lock_screen_authenticate(&hl,(void*)1,(void*)2,false,false,false);assert(0);}
+ assert(!verified&&waits==1&&framebuffer[0]==0x42&&framebuffer[FRAME_BYTES/2]==0x24);timeout_scenario=false;
  // 按用户选择，持续不可读状态直接返回，不显示虚假的四位密码。
  // User-selected unreadable storage returns immediately without a spurious four-digit prompt.
- start();correct();valid_storage=false;lock_screen_authenticate(&hl,(void*)1,(void*)2,true,true);assert(!verified&&!entries&&!waits&&!pushes);valid_storage=true;
+ start();correct();valid_storage=false;lock_screen_authenticate(&hl,(void*)1,(void*)2,true,true,false);assert(!verified&&!entries&&!waits&&!pushes);valid_storage=true;
  uint8_t *f=malloc(FRAME_BYTES);assert(lock_screen_restore(f));
  // 旧拼贴缓存不能跨样式进入票根或壁纸。/ Collage art must not cross into ticket or wallpaper mode.
  for(unsigned saved=0;saved<3;++saved){
