@@ -253,6 +253,15 @@ void app_main(void) {
         if (!boot_press) vTaskDelay(pdMS_TO_TICKS(20));
     }
     const bool boot_with_one_press = one_press_boot && boot_press;
+    // 只有真正的电源键冷启动/深睡启动才算“已经按过解锁键”。OTA、esp_restart
+    // 和异常复位即使还留着恢复检查点，也必须先显示锁面等待下一次按键。
+    // Only a real key-triggered cold/deep boot counts as the unlock press. OTA,
+    // esp_restart and fault resets retain a checkpoint but must wait on the lock face.
+    const pmu_snapshot_t *boot_pmu = read_pico_pmu_get();
+    const bool boot_key_unlock = resuming && lock_pin_enabled() && hw.pmu_ready &&
+        app_settings_wake_presses() == 1 &&
+        (reset == ESP_RST_POWERON || reset == ESP_RST_DEEPSLEEP) &&
+        boot_pmu != NULL && boot_pmu->wake_reason == 2;
     if (boot_with_one_press) {
         ESP_LOGI(TAG, "resume lock cache=%d; one-press boot", restored_lock);
         pico_boot_ready();
@@ -261,7 +270,7 @@ void app_main(void) {
         if(resuming && !lock_pin_enabled())
             ESP_LOGI(TAG,"resume lock cache=%d; power presses=%u",restored_lock,
                 (unsigned)app_settings_wake_presses());
-        app_lock_boot_gate(&hl, hw.touch, hw.sensor);
+        app_lock_boot_gate(&hl, hw.touch, hw.sensor, boot_key_unlock);
     }
     (void)app_lock_resume_frame(NULL);
     rp_boot_mark("lock");

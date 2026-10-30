@@ -697,7 +697,7 @@ void enter_lock_and_sleep(
         time_t now = time(NULL);
         if (now < 1704067200 && pmu && pmu->time_synced) now = pmu->unix_sec;
         app_settings_record_pin_lock((uint32_t)now);
-        if (!lock_pin_grace_active()) lock_screen_authenticate(hl, touch, acc, false);
+        if (!lock_pin_grace_active()) lock_screen_authenticate(hl, touch, acc, false, false);
         else wake = app_light_sleep_wait_timed(NULL, APP_LOCK_LIGHT_SLEEP_MS);
     }
     else wake = app_light_sleep_wait_timed(NULL, APP_LOCK_LIGHT_SLEEP_MS);
@@ -845,7 +845,8 @@ bool lock_pin_grace_active(void) {
            (uint32_t)now - locked_at < (uint32_t)app_settings_pin_grace_minutes() * 60u;
 }
 
-void app_lock_boot_gate(EpdiyHighlevelState *hl, cst836u_handle_t touch, sc7a20h_handle_t acc) {
+void app_lock_boot_gate(EpdiyHighlevelState *hl, cst836u_handle_t touch, sc7a20h_handle_t acc,
+                        bool boot_key_unlock) {
     s_lock_hint_hl=s_boot_lock_active&&!s_boot_lock_known?NULL:hl;s_lock_hint.serial=0;
     s_boot_lock_draw=true;lock_resume_service();
     // 开机锁面沿用锁屏时的方向；验证/放行结束后交还竖屏，页面自己按设置重进横屏。
@@ -885,7 +886,7 @@ void app_lock_boot_gate(EpdiyHighlevelState *hl, cst836u_handle_t touch, sc7a20h
         if (!drawn) ui_lock_fallback_draw(fb);
     }
     s_boot_lock_hl=NULL;s_boot_lock_active=false;
-    lock_screen_authenticate(hl, touch, acc, true);
+    lock_screen_authenticate(hl, touch, acc, true, boot_key_unlock);
     s_lock_hint_hl=NULL;
     app_font_end_lock(&saved);
     // 二改：开机验证通过也是一种解锁——同样自动连网（此前只接了浅睡唤醒路径，深睡开机漏了）。

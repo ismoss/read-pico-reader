@@ -43,8 +43,12 @@ void enter_lock_and_sleep(
 /// Show white and a lock badge before manual-lock saves/font changes; not for idle sleep, direct shutdown or active OTA/uploads.
 void app_lock_feedback(EpdiyHighlevelState *hl);
 
-/// 在消费恢复/开书前进行冷启动与深睡密码验证。/ Gate cold/deep starts before consuming resume or opening books.
-void app_lock_boot_gate(EpdiyHighlevelState *hl, cst836u_handle_t touch, sc7a20h_handle_t acc);
+/// 在消费恢复/开书前进行冷启动与深睡密码验证；只有已确认的电源键启动可直接验证。
+/// Gate cold/deep starts before consuming resume or opening books; only a confirmed
+/// power-key boot may unlock immediately.
+void app_lock_boot_gate(
+    EpdiyHighlevelState *hl, cst836u_handle_t touch, sc7a20h_handle_t acc,
+    bool boot_key_unlock);
 
 /// 等电源键松开，避免进睡瞬间被同一下按住立刻唤醒。
 /// Wait for the power key to release so the same press does not wake immediately.

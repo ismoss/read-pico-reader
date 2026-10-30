@@ -95,7 +95,7 @@ static bool lock_pin_grace_active(void){return false;}
 static void auto_connect_on_wake(void){}
 static int64_t esp_timer_get_time(void){return 2000000;}
 static bool lock_screen_restore(uint8_t *fb){if(!cache_ok||cached_style!=style)return false;memset(fb,0x10+style,FRAME_BYTES);return true;}
-static void lock_screen_authenticate(void *h,void *tp,void *acc,bool boot){(void)h;assert(tp==(void*)2&&acc==(void*)1);assert(pin);assert(boot==boot_cache);assert(pixels[0]==(draw_ok?0x10+style:0xfe)||(style==4&&pixels[0]==255));++auths;}
+static void lock_screen_authenticate(void *h,void *tp,void *acc,bool boot,bool boot_key_unlock){(void)h;assert(tp==(void*)2&&acc==(void*)1);assert(pin);assert(boot==boot_cache&&!boot_key_unlock);assert(pixels[0]==(draw_ok?0x10+style:0xfe)||(style==4&&pixels[0]==255));++auths;}
 static int read_pico_sd_get_info(read_pico_sd_info_t *i){i->mounted=true;return 0;}
 static void vTaskDelay(int ms){(void)ms;}
 static int epd_width(void){return 684;}
@@ -156,24 +156,24 @@ int main(void){
  // 密码冷启动：同样式缓存才命中，跨样式/损坏时重画当前选择。/ Cold PIN gate redraws the current choice for stale/corrupt cache.
  for(unsigned s=0;s<4;++s)for(unsigned previous=0;previous<4;++previous){
   reset();style=s;pin=boot_cache=cache_ok=true;cached_style=previous;
-  app_lock_boot_gate(&hl,(void*)2,(void*)1);
+  app_lock_boot_gate(&hl,(void*)2,(void*)1,false);
   assert(auths==1&&font_begin==1&&font_end==1&&!presents&&!fallback&&style==s);
   assert(draws[s]==(previous!=s)&&draws[(s+1)%3]==0&&draws[(s+2)%3]==0);
  }
- for(unsigned s=0;s<4;++s){reset();style=s;pin=boot_cache=true;draw_ok=false;app_lock_boot_gate(&hl,(void*)2,(void*)1);assert(auths==1&&draws[s]==1&&fallback==1&&style==s);}
+ for(unsigned s=0;s<4;++s){reset();style=s;pin=boot_cache=true;draw_ok=false;app_lock_boot_gate(&hl,(void*)2,(void*)1,false);assert(auths==1&&draws[s]==1&&fallback==1&&style==s);}
  // 深睡恢复进横屏书：缓存校验/重画前先切到横屏，验证结束后交还竖屏；样式4保持竖屏。
  // Deep-sleep resume into a landscape book: switch to landscape before cache validation/redraw,
  // then hand portrait back after authentication; style 4 stays portrait throughout.
  for(unsigned s=0;s<4;++s){
   reset();style=s;pin=boot_cache=true;cache_ok=false;boot_resume=boot_in_reader=true;reader_landscape=1;
-  app_lock_boot_gate(&hl,(void*)2,(void*)1);
+  app_lock_boot_gate(&hl,(void*)2,(void*)1,false);
   assert(draw_seen&&last_draw_rotation==EPD_ROT_INVERTED_LANDSCAPE&&rotation_state==EPD_ROT_INVERTED_PORTRAIT);
   assert(auths==1&&style==s);
  }
  reset();style=4;pin=boot_cache=true;cache_ok=false;boot_resume=boot_in_reader=true;reader_landscape=1;
- app_lock_boot_gate(&hl,(void*)2,(void*)1);
+ app_lock_boot_gate(&hl,(void*)2,(void*)1,false);
  assert(!draw_seen&&rotation_state==EPD_ROT_INVERTED_PORTRAIT&&auths==1&&style==4);
- reset();pin=false;app_lock_boot_gate(&hl,(void*)2,(void*)1);assert(!auths&&!font_begin);
+ reset();pin=false;app_lock_boot_gate(&hl,(void*)2,(void*)1,false);assert(!auths&&!font_begin);
  puts("PASS: real single-pass final collage retains white/badge history, avoids duplicate entry clear, recovers final faults and consumes feedback before cache/PIN; auto/manual lock entry chooses ticket/wallpaper/collage with/without PIN and reader background; upload deferral; deep timeout; cold gate cache/fault fallback keeps selected style");
 }
 '''

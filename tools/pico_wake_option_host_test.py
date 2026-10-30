@@ -65,11 +65,19 @@ static bool read_pico_pmu_take_key_wakeup_single(void){bool value=late_press;lat
 static void vTaskDelay(unsigned ticks){(void)ticks;}
 #define pdMS_TO_TICKS(ms) (ms)
 static bool lock_pin_enabled(void){return pin;}
+typedef struct {uint8_t wake_reason;} pmu_snapshot_t;
+static pmu_snapshot_t boot_pmu;
+static const pmu_snapshot_t *read_pico_pmu_get(void){return &boot_pmu;}
+enum {ESP_RST_POWERON=1,ESP_RST_DEEPSLEEP=2,ESP_RST_SW=3};
+typedef int esp_reset_reason_t;
 static void pico_boot_ready(void){++ready;}
 static void pico_boot_hold_resume(void){++held;}
 static bool app_lock_resume_frame(void *hl){(void)hl;return false;}
-static void app_lock_boot_gate(void *a,int b,int c){(void)a;(void)b;(void)c;++gate;}
-static void boot_gate(bool resuming){int hl=0;struct {int touch,sensor;bool pmu_ready;}hw={0};hw.pmu_ready=true;bool restored_lock=false;(void)restored_lock;
+static bool gate_boot_key;
+static void app_lock_boot_gate(void *a,int b,int c,bool boot_key_unlock){(void)a;(void)b;(void)c;gate_boot_key=boot_key_unlock;++gate;}
+static void boot_gate(bool resuming,esp_reset_reason_t reset,uint8_t wake_reason){
+ int hl=0;struct {int touch,sensor;bool pmu_ready;}hw={0};hw.pmu_ready=true;bool restored_lock=false;(void)restored_lock;
+ boot_pmu.wake_reason=wake_reason;
 '''
 start=boot.index('    const bool one_press_boot = resuming && !lock_pin_enabled() && hw.pmu_ready &&')
 end=boot.index('    rp_boot_mark("lock");',start)
@@ -96,14 +104,23 @@ int main(void){
  assert(setting_tap(300,UI_NAV_TOP,0)==APP_REDRAW_NONE);
  for(unsigned resume=0;resume<2;++resume)for(unsigned password=0;password<2;++password)
  for(unsigned key=0;key<2;++key)for(unsigned count=1;count<=2;++count){
-  s_wake_presses=count;pin=password;boot_press=key;late_press=false;gate=ready=held=0;
-  boot_gate(resume);bool direct=resume&&!password&&key&&count==1;
-  assert(gate==!direct&&ready==direct&&held==direct&&!boot_press);
+  s_wake_presses=count;pin=password;boot_press=key;late_press=false;gate=ready=held=gate_boot_key=0;
+  boot_gate(resume,ESP_RST_POWERON,key?2:1);bool direct=resume&&!password&&key&&count==1;
+  bool immediate=resume&&password&&key&&count==1;
+  assert(gate==!direct&&ready==direct&&held==direct&&!boot_press&&gate_boot_key==immediate);
  }
- s_wake_presses=1;pin=false;boot_press=false;late_press=true;gate=ready=held=0;
- boot_gate(true);assert(!gate&&ready==1&&held==1&&!late_press);
- s_wake_presses=2;pin=false;boot_press=false;late_press=true;gate=ready=held=0;
- boot_gate(true);assert(gate&&!ready&&!held&&late_press);
+ s_wake_presses=1;pin=false;boot_press=false;late_press=true;gate=ready=held=gate_boot_key=0;
+ boot_gate(true,ESP_RST_POWERON,2);assert(!gate&&ready==1&&held==1&&!late_press&&!gate_boot_key);
+ s_wake_presses=2;pin=false;boot_press=false;late_press=true;gate=ready=held=gate_boot_key=0;
+ boot_gate(true,ESP_RST_POWERON,2);assert(gate&&!ready&&!held&&late_press&&!gate_boot_key);
+ // 没有按键证据的 OTA/软复位启动必须等锁面；真正的冷/深睡按键启动才携带
+ // direct-unlock 证据。
+ // An OTA/software-reset boot has no key evidence and must wait; a real
+ // cold/deep key boot carries the direct-unlock evidence.
+ s_wake_presses=1;pin=true;boot_press=false;gate=ready=held=gate_boot_key=0;
+ boot_gate(true,ESP_RST_SW,2);assert(gate&&!gate_boot_key);
+ boot_gate(true,ESP_RST_POWERON,5);assert(gate&&!gate_boot_key);
+ boot_gate(true,ESP_RST_DEEPSLEEP,2);assert(gate&&gate_boot_key);
  puts("PASS: single-press default/missing/invalid NVS, explicit double choice retained, root switch below auto sleep, scrolled row/nav boundaries, wake/PIN/late press guards");
 }
 '''
