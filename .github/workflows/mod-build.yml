@@ -22,13 +22,12 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release version (X.Y.Z-rcNNN-modM, e.g. 0.3.3-rc100-mod27)'
+        description: 'Release version (X.Y.Z-rcNNN-modM)'
         required: true
-        default: '0.3.3-rc100-mod27'
       notes:
         description: 'Release notes shown on the device (short)'
         required: false
-        default: '二改 mod27：自动连接默认关闭、DNS 跟随路由器、监看密钥授权及稳定性修复'
+        default: 'mossread 二改更新'
   push:
     branches: [mod/glass-dock-lockoff]
 
@@ -174,10 +173,10 @@ jobs:
       - name: Build with board sdkconfig.defaults
         shell: bash
         env:
-          MOD_VERSION: ${{ github.event.inputs.version || '0.3.3-rc100-mod27' }}
+          MOD_VERSION: ${{ github.event.inputs.version }}
         run: |
           . $IDF_PATH/export.sh
-          export PICO_PROJECT_VER="$MOD_VERSION"
+          if [ -n "$MOD_VERSION" ]; then export PICO_PROJECT_VER="$MOD_VERSION"; fi
           python3 tools/prepare_tls_bundle.py "$IDF_PATH"
           idf.py set-target esp32s3
           idf.py build
